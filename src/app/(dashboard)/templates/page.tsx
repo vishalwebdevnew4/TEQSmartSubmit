@@ -48,7 +48,7 @@ export default function TemplatesPage() {
             <div className="text-xs text-slate-400">
               <p>Preview:</p>
               <p className="mt-1 line-clamp-2 text-slate-300">
-                name - input[name="fullname"], email - input#email, message - textarea[name="message"]
+                name - input[name=&quot;fullname&quot;], email - input#email, message - textarea[name=&quot;message&quot;]
               </p>
             </div>
           </div>

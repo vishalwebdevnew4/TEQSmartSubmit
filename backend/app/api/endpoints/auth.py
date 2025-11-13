@@ -15,8 +15,10 @@ from app.core.security import create_access_token, verify_password
 from app.crud import admin as admin_crud
 from app.schemas.admin import AdminCreate, AdminRead
 from app.schemas.token import LoginRequest, TokenWithUser
+from app.core.logging import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 def validate_registration_token(header_token: Optional[str]) -> None:
@@ -51,8 +53,14 @@ async def register_admin(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
     try:
         admin = await admin_crud.create_admin(session, payload)
+    except ValueError as exc:
+        logger.warning("Admin registration rejected: %s", exc)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except IntegrityError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to create admin user") from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Unexpected error during admin registration")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error") from exc
     return admin
 
 

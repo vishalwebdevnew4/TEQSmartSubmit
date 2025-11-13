@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
@@ -16,7 +16,7 @@ const initialForm: FormState = {
   confirmPassword: "",
 };
 
-export default function RegisterPage() {
+function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { registerAdmin, isAuthenticated } = useAuth();
@@ -158,3 +158,16 @@ export default function RegisterPage() {
   );
 }
 
+export default function RegisterPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-950 text-slate-100 px-4 py-16">
+          <div className="mx-auto max-w-lg text-center text-sm text-slate-400">Loading…</div>
+        </div>
+      }
+    >
+      <RegisterContent />
+    </Suspense>
+  );
+}

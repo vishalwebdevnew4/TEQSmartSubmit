@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,10 +108,11 @@ async def delete_domain(
     domain_id: int,
     session: AsyncSession = Depends(get_db_session),
     _admin: Admin = Depends(get_current_admin),
-) -> None:
+) -> Response:
     """Delete a domain."""
     domain = await domain_crud.get_domain(session, domain_id)
     if not domain:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
     await domain_crud.delete_domain(session, domain)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 

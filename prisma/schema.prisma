@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id           Int             @id @default(autoincrement())
+  username     String          @unique
+  passwordHash String
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  submissions  SubmissionLog[]
+}
+
+model Domain {
+  id          Int             @id @default(autoincrement())
+  url         String          @unique
+  category    String?
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  templates   Template[]
+  submissions SubmissionLog[]
+}
+
+model Template {
+  id            Int             @id @default(autoincrement())
+  name          String          @unique
+  description   String?
+  fieldMappings Json
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  domainId      Int?
+  domain        Domain?         @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  submissions   SubmissionLog[]
+}
+
+model SubmissionLog {
+  id         Int       @id @default(autoincrement())
+  url        String
+  status     String
+  message    String?
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+  domainId   Int?
+  templateId Int?
+  domain     Domain?   @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  template   Template? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  adminId    Int?
+  admin      Admin?    @relation(fields: [adminId], references: [id], onDelete: SetNull)
+}
+
+
