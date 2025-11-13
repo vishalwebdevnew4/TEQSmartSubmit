@@ -34,7 +34,18 @@ type AuthContextValue = AuthState & {
   registerAdmin: (payload: { username: string; password: string }, adminToken: string) => Promise<RegisterResult>;
 };
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1").replace(/\/$/, "");
+function resolveApiBaseUrl() {
+  const raw = (process.env.NEXT_PUBLIC_API_BASE_URL || "/api").trim() || "/api";
+  if (typeof window !== "undefined") {
+    try {
+      const url = new URL(raw, window.location.origin);
+      return url.toString().replace(/\/$/, "");
+    } catch {
+      return raw.replace(/\/$/, "");
+    }
+  }
+  return raw.replace(/\/$/, "");
+}
 const STORAGE_KEY = "teqsmartsubmit_auth";
 const INITIAL_STATE: AuthState = { isAuthenticated: false, token: null, user: null };
 
@@ -83,12 +94,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state, hydrated]);
 
+  const [apiBaseUrl, setApiBaseUrl] = useState<string>(() => resolveApiBaseUrl());
+
+  useEffect(() => {
+    setApiBaseUrl(resolveApiBaseUrl());
+  }, []);
+
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
     if (!username || !password) {
       return { success: false, message: "Username and password are required." };
     }
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      const baseUrl = resolveApiBaseUrl();
+      const response = await fetch(`${baseUrl}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -128,7 +146,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           headers.Authorization = `Bearer ${state.token}`;
         }
 
-        const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        const baseUrl = resolveApiBaseUrl();
+        const response = await fetch(`${baseUrl}/auth/register`, {
           method: "POST",
           headers,
           body: JSON.stringify(payload),
@@ -154,12 +173,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       isHydrated: hydrated,
-      apiBaseUrl: API_BASE_URL,
+      apiBaseUrl,
       login,
       logout,
       registerAdmin,
     }),
-    [state, hydrated, login, logout, registerAdmin],
+    [state, hydrated, apiBaseUrl, login, logout, registerAdmin],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
