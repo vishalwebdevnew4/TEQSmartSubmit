@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,4 +27,4 @@ class Template(Base):
     domain_id: Mapped[Optional[int]] = mapped_column(ForeignKey("domains.id", ondelete="SET NULL"), nullable=True)
 
     domain: Mapped[Optional["Domain"]] = relationship("Domain", back_populates="templates")
-    submission_logs: Mapped[list["SubmissionLog"]] = relationship("SubmissionLog", back_populates="template")
+    submission_logs: Mapped[List["SubmissionLog"]] = relationship("SubmissionLog", back_populates="template")

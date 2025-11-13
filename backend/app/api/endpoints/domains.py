@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,15 +16,15 @@ from app.schemas.domain import DomainCreate, DomainRead, DomainUpdate
 router = APIRouter()
 
 
-@router.get("/", response_model=list[DomainRead], summary="List registered domains")
+@router.get("/", response_model=List[DomainRead], summary="List registered domains")
 async def list_domains(
     *,
     session: AsyncSession = Depends(get_db_session),
     _admin: Admin = Depends(get_current_admin),
-    is_active: bool | None = Query(default=None, description="Filter by active status"),
+    is_active: Optional[bool] = Query(default=None, description="Filter by active status"),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
-) -> list[DomainRead]:
+) -> List[DomainRead]:
     """Return domains with optional filters."""
     records = await domain_crud.list_domains(session, skip=skip, limit=limit, is_active=is_active)
     return list(records)

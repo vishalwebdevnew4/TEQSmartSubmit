@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -23,8 +23,8 @@ class Domain(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    submissions: Mapped[list["SubmissionLog"]] = relationship(
+    submissions: Mapped[List["SubmissionLog"]] = relationship(
         "SubmissionLog", back_populates="domain", cascade="all, delete-orphan"
     )
-    templates: Mapped[list["Template"]] = relationship("Template", back_populates="domain")
+    templates: Mapped[List["Template"]] = relationship("Template", back_populates="domain")
 
