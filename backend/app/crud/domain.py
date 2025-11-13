@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -27,12 +27,12 @@ async def list_domains(
     return result.scalars().unique().all()
 
 
-async def get_domain(session: AsyncSession, domain_id: int) -> Domain | None:
+async def get_domain(session: AsyncSession, domain_id: int) -> Optional[Domain]:
     """Fetch a domain by primary key."""
     return await session.get(Domain, domain_id)
 
 
-async def get_domain_by_url(session: AsyncSession, url: str) -> Domain | None:
+async def get_domain_by_url(session: AsyncSession, url: str) -> Optional[Domain]:
     """Fetch a domain by URL."""
     stmt = select(Domain).where(Domain.url == url)
     result = await session.execute(stmt)

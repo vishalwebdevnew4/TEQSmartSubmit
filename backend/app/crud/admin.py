@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +13,7 @@ from app.db.models.admin import Admin
 from app.schemas.admin import AdminCreate
 
 
-async def get_admin_by_username(session: AsyncSession, username: str) -> Admin | None:
+async def get_admin_by_username(session: AsyncSession, username: str) -> Optional[Admin]:
     """Retrieve admin by username."""
     stmt = select(Admin).where(Admin.username == username)
     result = await session.execute(stmt)
