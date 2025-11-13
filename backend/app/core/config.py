@@ -1,7 +1,9 @@
 """Application configuration settings."""
 
+from __future__ import annotations
+
 from functools import lru_cache
-from typing import Any
+from typing import Any, List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,7 +23,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/teqsmartsubmit"
 
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: List[str] = ["http://localhost:3000"]
     page_load_timeout: float = 30.0
     submission_delay_seconds: float = 5.0
     retry_limit: int = 2
@@ -29,8 +31,8 @@ class Settings(BaseSettings):
     playwright_headless: bool = True
     playwright_context_timeout: int = 30000
 
-    redis_url: str | None = None
-    admin_registration_token: str | None = None
+    redis_url: Optional[str] = None
+    admin_registration_token: Optional[str] = None
 
     def model_post_init(self, __context: Any) -> None:
         """Normalize certain settings after model initialization."""

@@ -1,6 +1,9 @@
 """Token-related schemas."""
 
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -23,8 +26,8 @@ class TokenWithUser(Token):
 class TokenPayload(BaseModel):
     """Decoded token payload."""
 
-    sub: str | None = None
-    exp: datetime | None = None
+    sub: Optional[str] = None
+    exp: Optional[datetime] = None
 
 
 class LoginRequest(BaseModel):

@@ -1,6 +1,9 @@
 """Admin user schemas."""
 
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,7 +26,7 @@ class AdminRead(AdminBase):
     id: int
     is_active: bool
     created_at: datetime
-    last_login_at: datetime | None = None
+    last_login_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

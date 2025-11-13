@@ -1,7 +1,9 @@
 """Security helpers for password hashing, verification, and JWT creation."""
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Dict, Optional
 
 from jose import jwt
 from passlib.context import CryptContext
@@ -25,7 +27,7 @@ def create_access_token(
     secret_key: str,
     expires_minutes: int,
     algorithm: str,
-    additional_claims: dict[str, Any] | None = None,
+    additional_claims: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generate a signed JWT for the provided subject."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)

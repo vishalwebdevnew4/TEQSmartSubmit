@@ -1,6 +1,9 @@
 """Authentication and admin management endpoints."""
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +19,7 @@ from app.schemas.token import LoginRequest, TokenWithUser
 router = APIRouter()
 
 
-def validate_registration_token(header_token: str | None) -> None:
+def validate_registration_token(header_token: Optional[str]) -> None:
     """Ensure provided token matches configured admin registration token."""
     settings = get_settings()
     configured = settings.admin_registration_token
@@ -39,7 +42,7 @@ async def register_admin(
     *,
     payload: AdminCreate,
     session: AsyncSession = Depends(get_db_session),
-    admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+    admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ) -> AdminRead:
     """Register a new admin user, guarded by the registration token header."""
     validate_registration_token(admin_token)

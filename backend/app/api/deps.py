@@ -1,6 +1,8 @@
 """Common dependency utilities for API routes."""
 
-from collections.abc import AsyncGenerator
+from __future__ import annotations
+
+from typing import AsyncGenerator, Optional
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -15,7 +17,7 @@ from app.schemas.token import TokenPayload
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
-async def get_api_key(x_api_key: str | None = Header(default=None)) -> str:
+async def get_api_key(x_api_key: Optional[str] = Header(default=None)) -> str:
     """Simple key-based access control. Disabled when secret is default/empty."""
     settings = get_settings()
     if not settings.secret_key or settings.secret_key in {"change-me", "super-secret-key"}:
