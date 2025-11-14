@@ -1,0 +1,60 @@
+Subject: TEQSmartSubmit Server Setup - System Dependencies Installation Required
+
+Dear Network Team,
+
+I hope this message finds you well. I'm writing to request assistance with completing the system setup for the TEQSmartSubmit project on our server.
+
+SERVER DETAILS:
+- Hostname: teqsmartsubmit.xcelanceweb.com
+- IP Address: 192.168.0.78
+- SSH Access: teqsmartsftpuser@teqsmartsubmit.xcelanceweb.com (Port: 3129)
+- Operating System: Ubuntu 22.04.4 LTS
+
+CURRENT STATUS:
+✅ Python 3.10.12 is CONFIRMED installed and working on the remote server
+   Location: /usr/bin/python3
+   Verified: pip3 is available and functional
+✅ All required Python packages have been installed:
+   - Playwright (browser automation) v1.56.0
+   - Chromium browser (downloaded ~280MB)
+   - SpeechRecognition, pydub, ffmpeg-python
+   - pandas, reportlab, redis (automation libraries)
+
+❌ SYSTEM DEPENDENCIES REQUIRED:
+Playwright requires system-level libraries to run browsers. The installation requires sudo/root access, which we don't currently have with the provided SSH credentials.
+
+REQUIRED ACTION:
+Please run ONE of the following commands on the server with sudo/root access:
+
+Option 1 (Recommended):
+    sudo python3 -m playwright install-deps chromium
+
+Option 2 (Direct package installation):
+    sudo apt-get update
+    sudo apt-get install -y libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 libxshmfence1 libxss1 libxtst6
+
+ESTIMATED TIME: Less than 5 minutes
+
+ALTERNATIVE:
+If you prefer, we can complete the installation ourselves if the teqsmartsftpuser account can be granted temporary sudo access for package installation only.
+
+VERIFICATION:
+After installation, you can verify with:
+    python3 -m playwright --version
+    python3 -c "from playwright.sync_api import sync_playwright; print('OK')"
+
+NETWORK REQUIREMENTS:
+No additional firewall rules are needed. The application runs locally and only requires:
+- Outbound HTTPS for CAPTCHA solving APIs (optional)
+- Port 3000 for Next.js application (if running on server)
+- Local PostgreSQL connection (port 5432)
+- Local Redis connection (port 6379, optional)
+
+Please let me know if you have any questions or need additional information. I've attached detailed documentation files in the project directory for reference.
+
+Thank you for your assistance!
+
+Best regards,
+[Your Name]
+[Your Contact Information]
+

@@ -1,0 +1,109 @@
+#!/usr/bin/expect -f
+# Expect script to connect via SSH and run Python setup
+
+set timeout 300
+set host "teqsmartsubmit.xcelanceweb.com"
+set port "3129"
+set user "teqsmartsftpuser"
+set password "XFho65rfr@uj()7y8"
+
+# Connect to server
+spawn ssh -o StrictHostKeyChecking=no -p $port $user@$host
+
+# Handle password prompt
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "Password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+        # Connected successfully
+    }
+    timeout {
+        puts "Connection timeout"
+        exit 1
+    }
+}
+
+# Navigate to project directory (adjust path as needed)
+send "cd /var/www/html/TEQSmartSubmit || cd ~/TEQSmartSubmit || pwd\r"
+expect "$ "
+
+# Run Python setup commands
+puts "Starting Python setup..."
+
+# Install Playwright
+send "pip3 install --user playwright || sudo pip3 install playwright\r"
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+    }
+    timeout {
+        puts "Installation timeout"
+    }
+}
+
+# Install Playwright browsers
+send "python3 -m playwright install chromium\r"
+expect "$ "
+
+# Install Playwright system dependencies
+send "python3 -m playwright install-deps chromium\r"
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+    }
+    timeout {
+        puts "Installation timeout"
+    }
+}
+
+# Install automation dependencies
+send "pip3 install --user pandas reportlab redis || sudo pip3 install pandas reportlab redis\r"
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+    }
+    timeout {
+        puts "Installation timeout"
+    }
+}
+
+# Install CAPTCHA solver dependencies
+send "pip3 install --user SpeechRecognition pydub ffmpeg-python || sudo pip3 install SpeechRecognition pydub ffmpeg-python\r"
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "$ " {
+    }
+    timeout {
+        puts "Installation timeout"
+    }
+}
+
+# Verify installation
+send "python3 -m playwright --version\r"
+expect "$ "
+
+send "pip3 list | grep -i playwright\r"
+expect "$ "
+
+puts "Python setup complete!"
+send "exit\r"
+expect eof
+

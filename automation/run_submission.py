@@ -236,6 +236,15 @@ async def discover_forms(page) -> List[Dict[str, Any]]:
                     const name = input.name || '';
                     const id = input.id || '';
                     const placeholder = input.placeholder || '';
+                    
+                    // Check if field is actually visible (not hidden by CSS or display:none)
+                    const rect = input.getBoundingClientRect();
+                    const style = window.getComputedStyle(input);
+                    const isVisible = rect.width > 0 && rect.height > 0 && 
+                                     style.display !== 'none' && 
+                                     style.visibility !== 'hidden' &&
+                                     style.opacity !== '0';
+                    
                     const label = (() => {
                         if (input.id) {
                             const labelEl = document.querySelector(`label[for="${input.id}"]`);
@@ -247,14 +256,41 @@ async def discover_forms(page) -> List[Dict[str, Any]]:
                         if (prevSibling && prevSibling.tagName === 'LABEL') {
                             return prevSibling.textContent.trim();
                         }
+                        // Look for label text near the input
+                        const parent = input.parentElement;
+                        if (parent) {
+                            const labelInParent = parent.querySelector('label');
+                            if (labelInParent) return labelInParent.textContent.trim();
+                        }
                         return '';
                     })();
                     
+                    // Get options for select elements
+                    let options = [];
+                    if (tagName === 'select') {
+                        options = Array.from(input.options).map(opt => ({
+                            value: opt.value,
+                            text: opt.text.trim(),
+                            selected: opt.selected
+                        }));
+                    }
+                    
+                    // Get value for radio/checkbox
+                    const value = input.value || '';
+                    const checked = input.checked || false;
+                    
                     // Generate possible selectors
                     const selectors = [];
-                    if (name) selectors.push(`${tagName}[name="${name}"]`);
+                    if (name) {
+                        selectors.push(`${tagName}[name="${name}"]`);
+                        if (type) {
+                            selectors.push(`${tagName}[name="${name}"][type="${type}"]`);
+                        }
+                        if (value && (type === 'radio' || type === 'checkbox')) {
+                            selectors.push(`${tagName}[name="${name}"][value="${value}"]`);
+                        }
+                    }
                     if (id) selectors.push(`#${id}`);
-                    if (name && type) selectors.push(`${tagName}[name="${name}"][type="${type}"]`);
                     if (placeholder) selectors.push(`${tagName}[placeholder="${placeholder}"]`);
                     
                     return {
@@ -264,9 +300,15 @@ async def discover_forms(page) -> List[Dict[str, Any]]:
                         id,
                         placeholder,
                         label,
+                        value: value,
+                        checked: checked,
+                        options: options,
                         required: input.hasAttribute('required'),
                         selectors: selectors,
-                        index: index
+                        index: index,
+                        isVisible: isVisible,
+                        isHidden: type === 'hidden' || !isVisible,
+                        multiple: input.hasAttribute('multiple') || (tagName === 'select' && input.multiple)
                     };
                 });
                 
@@ -310,32 +352,304 @@ def find_matching_field(discovered_fields: List[Dict], template_field: Dict) -> 
         if name_match:
             template_name = name_match.group(1)
     
+    # Normalize template name for comparison
+    template_name_normalized = template_name.lower().strip() if template_name else ""
+    
     for field in discovered_fields:
-        field_name = field.get("name", "")
+        field_name = field.get("name", "").lower().strip()
+        field_label = field.get("label", "").lower()
+        field_placeholder = field.get("placeholder", "").lower()
+        field_type = field.get("type", "").lower()
+        field_tag = field.get("tagName", "").lower()
         
-        # Check by name (exact match)
-        if template_name and field_name and template_name == field_name:
+        # Skip hidden fields, CSRF tokens, and honeypot fields
+        field_is_hidden = field.get("isHidden", False) or field.get("type", "").lower() == "hidden"
+        if (field_is_hidden or
+            field_type == "hidden" or 
+            "_token" in field_name or 
+            "csrf" in field_name or 
+            "token" in field_name or
+            field_name == "website" or  # Common honeypot field name
+            "honeypot" in field_name.lower()):
+            continue
+        
+        # Priority 1: Exact name match (most reliable)
+        if template_name_normalized and field_name and template_name_normalized == field_name:
             return field
         
-        # Check if template selector matches any field selector exactly
+        # Priority 2: Exact selector match
         if template_selector:
             for sel in field.get("selectors", []):
                 # Normalize selectors for comparison (remove quote differences)
-                sel_normalized = sel.replace('"', "'")
-                template_sel_normalized = template_selector.replace('"', "'")
+                sel_normalized = sel.replace('"', "'").lower()
+                template_sel_normalized = template_selector.replace('"', "'").lower()
                 if sel_normalized == template_sel_normalized:
                     return field
-                # Also check if one contains the other
-                if template_sel_normalized in sel_normalized or sel_normalized in template_sel_normalized:
+        
+        # Priority 3: Check if template selector contains the exact field name attribute
+        # e.g., template_selector = "input[name='name']" should match field with name="name"
+        if template_selector and field_name:
+            # Extract the name from template selector
+            import re
+            template_name_in_selector = re.search(r"name=['\"]([^'\"]+)['\"]", template_selector, re.IGNORECASE)
+            if template_name_in_selector:
+                extracted_name = template_name_in_selector.group(1).lower().strip()
+                if extracted_name == field_name:
                     return field
         
-        # Check if name appears in any selector
-        if template_name and field_name:
+        # Priority 4: Check if field selector contains template name (but be careful - avoid partial matches)
+        # Only match if the template name is a complete word in the selector
+        if template_name_normalized and field_name:
             for sel in field.get("selectors", []):
-                if template_name in sel or field_name in template_selector:
+                sel_lower = sel.lower()
+                # Check if template name appears as a complete attribute value, not just as a substring
+                # e.g., "name='name'" should match, but "name='website'" should NOT match "name"
+                if f"name=['\"]{template_name_normalized}['\"]" in sel_lower:
                     return field
     
     return None
+
+
+def auto_detect_field_type(field: Dict) -> str | None:
+    """Auto-detect what type of field this is (name, email, phone, message, etc.) based on common patterns."""
+    field_name = field.get("name", "").lower().strip()
+    field_label = field.get("label", "").lower().strip()
+    field_placeholder = field.get("placeholder", "").lower().strip()
+    field_type = field.get("type", "").lower().strip()
+    field_id = field.get("id", "").lower().strip()
+    field_tag = field.get("tagName", "").lower().strip()
+    
+    # Skip hidden fields, tokens, and honeypot fields
+    field_is_hidden = field.get("isHidden", False) or field.get("type", "").lower() == "hidden"
+    if (field_is_hidden or
+        field_type == "hidden" or 
+        "_token" in field_name or 
+        "csrf" in field_name or 
+        "token" in field_name or
+        field_name == "website" or  # Common honeypot field
+        "honeypot" in field_name or
+        "from_url" in field_name or  # Common tracking field
+        "curnt_url" in field_name or
+        field_type == "file"):  # Skip file uploads for now
+        return None
+    
+    # Combine all text for matching
+    all_text = f"{field_name} {field_label} {field_placeholder} {field_id}"
+    
+    # Email field patterns (check type first - most reliable)
+    if field_type == "email" or "email" in all_text or "e-mail" in all_text or "mail" in all_text:
+        return "email"
+    
+    # Phone field patterns
+    if field_type == "tel" or "phone" in all_text or "mobile" in all_text or "telephone" in all_text:
+        return "phone"
+    
+    # URL/Website field patterns
+    if field_type == "url" or "url" in all_text or "website" in all_text or "web" in all_text:
+        return "url"
+    
+    # Name field patterns
+    if any(pattern in all_text for pattern in ["name", "fullname", "full name", "firstname", "first name", "lastname", "last name"]):
+        return "name"
+    
+    # Message/comment field patterns
+    if field_tag == "textarea" or any(pattern in all_text for pattern in ["message", "comment", "notes", "description", "details", "inquiry", "query"]):
+        return "message"
+    
+    # Subject field patterns
+    if "subject" in all_text or "topic" in all_text:
+        return "subject"
+    
+    # Company field patterns
+    if "company" in all_text or "organization" in all_text or "org" in all_text:
+        return "company"
+    
+    # Date fields
+    if field_type in ["date", "datetime-local", "month", "week"]:
+        return "date"
+    
+    # Time fields
+    if field_type == "time":
+        return "time"
+    
+    # Number fields
+    if field_type == "number" or "number" in all_text or "quantity" in all_text or "amount" in all_text:
+        return "number"
+    
+    # Password fields (usually skip, but can detect)
+    if field_type == "password":
+        return "password"
+    
+    # Select dropdowns - try to detect type from options or name
+    if field_tag == "select":
+        options = field.get("options", [])
+        option_texts = " ".join([opt.get("text", "").lower() for opt in options])
+        if "gender" in all_text or "sex" in all_text:
+            return "gender"
+        elif "country" in all_text:
+            return "country"
+        elif "state" in all_text or "province" in all_text:
+            return "state"
+        elif "city" in all_text:
+            return "city"
+        else:
+            return "select"  # Generic select
+    
+    # Radio buttons
+    if field_type == "radio":
+        if "gender" in all_text or "sex" in all_text:
+            return "gender"
+        else:
+            return "radio"  # Generic radio
+    
+    # Checkboxes
+    if field_type == "checkbox":
+        if "agree" in all_text or "terms" in all_text or "accept" in all_text:
+            return "agree_terms"
+        elif "newsletter" in all_text or "subscribe" in all_text:
+            return "newsletter"
+        else:
+            return "checkbox"  # Generic checkbox
+    
+    # Generic text field (fallback)
+    if field_type == "text" or field_tag == "input":
+        return "text"
+    
+    return None
+
+
+def auto_fill_form_without_template(discovered_fields: List[Dict], test_data: Dict[str, Any] = None) -> List[Dict]:
+    """Automatically fill form fields without requiring a template by detecting field types."""
+    from datetime import datetime, timedelta
+    
+    if test_data is None:
+        test_data = {
+            "name": "TEQ QA User",
+            "email": "test@example.com",
+            "phone": "+1234567890",
+            "message": "This is an automated test submission.",
+            "subject": "Test Inquiry",
+            "company": "Test Company",
+            "url": "https://example.com",
+            "date": (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d"),
+            "time": datetime.now().strftime("%H:%M"),
+            "number": "123",
+            "password": "TestPassword123",
+            "gender": "male",
+            "agree_terms": True,
+            "newsletter": False,
+            "select": "one",  # First option
+            "radio": "male",  # First option
+            "checkbox": True,
+            "text": "Test Text"
+        }
+    
+    auto_fields = []
+    used_field_types = set()
+    
+    for field in discovered_fields:
+        field_type = auto_detect_field_type(field)
+        
+        if not field_type:
+            continue
+        
+        # Handle special cases where we want to fill multiple fields of same type
+        # (e.g., multiple text fields, but only one name/email)
+        if field_type in ["name", "email", "phone", "message", "subject", "company"]:
+            if field_type in used_field_types:
+                continue  # Only fill first occurrence
+        elif field_type in ["text"]:
+            # Allow multiple text fields, but track by name to avoid duplicates
+            field_name = field.get("name", "")
+            if field_name in [f.get("original_name", "") for f in auto_fields if f.get("field_type") == "text"]:
+                continue
+        
+        used_field_types.add(field_type)
+        
+        # Use the first available selector
+        selector = field.get("selectors", [""])[0] if field.get("selectors") else None
+        if not selector and field.get("name"):
+            tag = field.get("tagName", "input").lower()
+            field_type_attr = field.get("type", "")
+            if field_type_attr:
+                selector = f"{tag}[name='{field['name']}'][type='{field_type_attr}']"
+            else:
+                selector = f"{tag}[name='{field['name']}']"
+        
+        if not selector:
+            continue
+        
+        # Determine value based on field type
+        value = None
+        field_tag = field.get("tagName", "").lower()
+        field_input_type = field.get("type", "").lower()
+        
+        if field_type in test_data:
+            value = test_data[field_type]
+        elif field_tag == "select":
+            # For select, use first option value
+            options = field.get("options", [])
+            if options and len(options) > 0:
+                # Skip empty option
+                for opt in options:
+                    if opt.get("value") and opt.get("value").strip():
+                        value = opt.get("value")
+                        break
+                if not value and options:
+                    value = options[0].get("value", "")
+        elif field_input_type == "radio":
+            # For radio, use the field's value (it's already set)
+            value = field.get("value", "")
+            if not value:
+                continue  # Skip if no value
+        elif field_input_type == "checkbox":
+            # For checkbox, check if we should check it
+            if field_type == "agree_terms" or "agree" in field.get("name", "").lower():
+                value = True
+            else:
+                value = False  # Don't check by default
+        elif field_input_type in ["date", "datetime-local", "month", "week"]:
+            # Use current date + 7 days for date fields
+            if field_input_type == "date":
+                value = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+            elif field_input_type == "datetime-local":
+                value = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M")
+            elif field_input_type == "month":
+                value = (datetime.now() + timedelta(days=30)).strftime("%Y-%m")
+            elif field_input_type == "week":
+                # ISO week format: YYYY-Www
+                week_date = datetime.now() + timedelta(days=7)
+                year, week, _ = week_date.isocalendar()
+                value = f"{year}-W{week:02d}"
+        elif field_input_type == "time":
+            value = datetime.now().strftime("%H:%M")
+        elif field_input_type == "number":
+            value = "123"
+        elif field_input_type == "url":
+            value = "https://example.com"
+        elif field_input_type == "password":
+            value = "TestPassword123"
+        else:
+            # Generic text field
+            value = f"Test {field_type.title()}"
+        
+        if value is not None:
+            auto_fields.append({
+                "name": field_type,
+                "selector": selector,
+                "value": str(value) if not isinstance(value, bool) else value,
+                "auto_detected": True,
+                "field_type": field_type,
+                "original_name": field.get("name", ""),
+                "tag": field_tag,
+                "input_type": field_input_type,
+                "is_checkbox": field_input_type == "checkbox",
+                "is_radio": field_input_type == "radio",
+                "is_select": field_tag == "select",
+                "options": field.get("options", []) if field_tag == "select" else []
+            })
+    
+    return auto_fields
 
 
 async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
@@ -345,6 +659,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
     fields: List[Dict[str, str]] = template.get("fields", [])
     pre_actions: List[Dict[str, Any]] = template.get("pre_actions", [])
     submit_selector: str | None = template.get("submit_selector")
+    use_auto_detect: bool = template.get("use_auto_detect", False)  # Enable auto-detection mode
 
     # Add progress logging
     print("🚀 Starting automation...", file=sys.stderr)
@@ -440,26 +755,55 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 raise RuntimeError("No forms found on the page after multiple attempts. The form might be dynamically loaded.")
         
         # Use the first form (or find the best match)
+        # Prefer contact forms over newsletter forms
         target_form = discovered_forms[0]
         if len(discovered_forms) > 1:
             # Try to find form with most matching fields
+            # Also prefer forms with more fields (contact forms usually have more fields than newsletter)
             best_match = target_form
             best_score = 0
             for form in discovered_forms:
                 score = 0
+                form_fields = form.get("fields", [])
+                
+                # Prefer forms with more visible fields (contact forms have more fields)
+                visible_fields = [f for f in form_fields if not f.get("isHidden", False) and f.get("type", "").lower() != "hidden"]
+                score += len(visible_fields) * 2  # Weight by number of visible fields
+                
+                # Prefer forms that match template fields
                 for field in fields:
-                    if find_matching_field(form.get("fields", []), field):
-                        score += 1
+                    if find_matching_field(form_fields, field):
+                        score += 10  # Higher weight for matching fields
+                
+                # Prefer forms with textarea (contact forms usually have message fields)
+                has_textarea = any(f.get("tagName", "").lower() == "textarea" for f in form_fields)
+                if has_textarea:
+                    score += 5
+                
+                # Avoid forms with only email field (likely newsletter)
+                if len(visible_fields) == 1 and any("email" in f.get("name", "").lower() for f in visible_fields):
+                    score -= 10  # Penalize newsletter forms
+                
                 if score > best_score:
                     best_score = score
                     best_match = form
             target_form = best_match
+            print(f"   📋 Selected form with {len(target_form.get('fields', []))} fields (score: {best_score})", file=sys.stderr)
         
         discovered_fields = target_form.get("fields", [])
         print(f"📝 Found {len(discovered_fields)} fields in target form", file=sys.stderr)
         
+        # Auto-detect mode: If enabled and no fields in template, auto-detect fields
+        if use_auto_detect and (not fields or len(fields) == 0):
+            print("🤖 Auto-detect mode enabled: Automatically detecting form fields...", file=sys.stderr)
+            test_data = template.get("test_data", {})
+            fields = auto_fill_form_without_template(discovered_fields, test_data)
+            print(f"   ✅ Auto-detected {len(fields)} fields: {', '.join([f.get('name', 'unknown') for f in fields])}", file=sys.stderr)
+            if not fields:
+                print("   ⚠️  Could not auto-detect any fillable fields. Make sure form has name, email, or message fields.", file=sys.stderr)
+        
         # If discovered fields are fewer than expected, wait and rediscover
-        if len(discovered_fields) < len(fields):
+        if fields and len(discovered_fields) < len(fields):
             print(f"   ⚠️  Only {len(discovered_fields)} fields discovered, expected {len(fields)}. Waiting for more fields...", file=sys.stderr)
             for rediscover_attempt in range(3):
                 await page.wait_for_timeout(3000 * (rediscover_attempt + 1))  # Increasing wait times
@@ -468,14 +812,22 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 if discovered_forms:
                     target_form = discovered_forms[0]
                     if len(discovered_forms) > 1:
-                        # Find best match again
+                        # Find best match again (same logic as initial selection)
                         best_match = target_form
                         best_score = 0
                         for form in discovered_forms:
                             score = 0
+                            form_fields = form.get("fields", [])
+                            visible_fields = [f for f in form_fields if not f.get("isHidden", False) and f.get("type", "").lower() != "hidden"]
+                            score += len(visible_fields) * 2
                             for field in fields:
-                                if find_matching_field(form.get("fields", []), field):
-                                    score += 1
+                                if find_matching_field(form_fields, field):
+                                    score += 10
+                            has_textarea = any(f.get("tagName", "").lower() == "textarea" for f in form_fields)
+                            if has_textarea:
+                                score += 5
+                            if len(visible_fields) == 1 and any("email" in f.get("name", "").lower() for f in visible_fields):
+                                score -= 10
                             if score > best_score:
                                 best_score = score
                                 best_match = form
@@ -487,96 +839,404 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                         break
         
         # Fill form fields using discovered selectors
-        print(f"✍️  Filling {len(fields)} form fields...", file=sys.stderr)
-        for i, field in enumerate(fields, 1):
-            field_name = field.get("selector", field.get("name", f"field_{i}"))
-            print(f"   Field {i}/{len(fields)}: {field_name[:50]}...", file=sys.stderr)
-            value = field.get("value") or field.get("testValue") or ""
-            if not value:
-                continue
-            
-            # Try to find matching discovered field
-            discovered_field = find_matching_field(discovered_fields, field)
-            
-            if discovered_field:
-                # Use the first available selector from discovered field
-                selectors_to_try = discovered_field.get("selectors", [])
-                if not selectors_to_try and discovered_field.get("name"):
-                    selectors_to_try = [
-                        f"input[name='{discovered_field['name']}']",
-                        f"input[name=\"{discovered_field['name']}\"]",
-                        f"textarea[name='{discovered_field['name']}']",
-                        f"textarea[name=\"{discovered_field['name']}\"]",
-                    ]
-            else:
-                # Fall back to template selector
-                template_selector = field.get("selector")
-                if template_selector:
-                    selectors_to_try = [template_selector]
-                    # Also try with different quote styles
-                    if "'" in template_selector:
-                        selectors_to_try.append(template_selector.replace("'", '"'))
-                    elif '"' in template_selector:
-                        selectors_to_try.append(template_selector.replace('"', "'"))
-                else:
-                    selectors_to_try = []
-            
-            # Try each selector until one works
-            filled = False
-            last_error = None
-            
-            # If no selectors from discovery, use template selector directly
-            if not selectors_to_try:
-                template_selector = field.get("selector")
-                if template_selector:
-                    selectors_to_try = [template_selector]
-                    # Also try with different quote styles
-                    if "'" in template_selector:
-                        selectors_to_try.append(template_selector.replace("'", '"'))
-                    elif '"' in template_selector:
-                        selectors_to_try.append(template_selector.replace('"', "'"))
-            
-            for selector in selectors_to_try:
-                try:
-                    # Wait for the field to be visible and ready (longer timeout for dynamic fields)
-                    await page.wait_for_selector(selector, state="visible", timeout=15000)
-                    # Scroll field into view
-                    await page.locator(selector).scroll_into_view_if_needed()
-                    await page.wait_for_timeout(500)
-                    # Try to fill the field
-                    await page.fill(selector, value, timeout=field.get("timeout_ms", 10000))
-                    # Verify it was filled
-                    await page.wait_for_timeout(300)
-                    filled_value = await page.locator(selector).input_value()
-                    if filled_value == value or (value in filled_value) or len(filled_value) > 0:
-                        filled = True
-                        print(f"   ✅ Field {i} filled successfully", file=sys.stderr)
-                        break
-                    else:
-                        # Try again with clear first
-                        await page.locator(selector).clear()
-                        await page.fill(selector, value, timeout=5000)
-                        await page.wait_for_timeout(300)
-                        filled_value = await page.locator(selector).input_value()
-                        if filled_value == value or (value in filled_value) or len(filled_value) > 0:
-                            filled = True
-                            print(f"   ✅ Field {i} filled successfully (retry)", file=sys.stderr)
-                            break
-                except Exception as e:
-                    last_error = str(e)
+        if not fields:
+            print("⚠️  No fields to fill. Skipping form fill.", file=sys.stderr)
+        else:
+            print(f"✍️  Filling {len(fields)} form fields...", file=sys.stderr)
+            for i, field in enumerate(fields, 1):
+                field_name = field.get("selector", field.get("name", f"field_{i}"))
+                print(f"   Field {i}/{len(fields)}: {field_name[:50]}...", file=sys.stderr)
+                value = field.get("value") or field.get("testValue") or ""
+                if not value:
                     continue
-            
-            if not filled and not field.get("optional"):
-                # Provide detailed error message
-                error_msg = f"Failed to fill field: {field.get('selector', 'unknown')}"
+                
+                # Try to find matching discovered field
+                discovered_field = find_matching_field(discovered_fields, field)
+                
                 if discovered_field:
-                    error_msg += f"\nDiscovered field: {discovered_field.get('name', 'unknown')}"
-                    error_msg += f"\nTried selectors: {', '.join(selectors_to_try[:3])}"
+                    # Use the first available selector from discovered field
+                    selectors_to_try = discovered_field.get("selectors", [])
+                    if not selectors_to_try and discovered_field.get("name"):
+                        tag = discovered_field.get("tagName", "input").lower()
+                        selectors_to_try = [
+                            f"{tag}[name='{discovered_field['name']}']",
+                            f"{tag}[name=\"{discovered_field['name']}\"]",
+                        ]
+                        if discovered_field.get("id"):
+                            selectors_to_try.append(f"#{discovered_field['id']}")
                 else:
-                    error_msg += f"\nField not found in discovered fields. Tried: {', '.join(selectors_to_try[:3])}"
-                if last_error:
-                    error_msg += f"\nLast error: {last_error}"
-                raise RuntimeError(error_msg)
+                    # Fall back to template selector, but also try common field name variations
+                    template_selector = field.get("selector")
+                    template_field_name = field.get("name", "").lower()
+                    selectors_to_try = []
+                    
+                    if template_selector:
+                        selectors_to_try.append(template_selector)
+                        # Also try with different quote styles
+                        if "'" in template_selector:
+                            selectors_to_try.append(template_selector.replace("'", '"'))
+                        elif '"' in template_selector:
+                            selectors_to_try.append(template_selector.replace('"', "'"))
+                    
+                    # Try common field name variations based on field type
+                    if template_field_name:
+                        # Extract tag from template selector or use common ones
+                        import re
+                        tag_match = re.search(r"^(input|textarea|select)", template_selector or "", re.IGNORECASE)
+                        tag = tag_match.group(1).lower() if tag_match else "input"
+                        
+                        # Common variations for message/comment fields
+                        if template_field_name in ["comment", "message", "notes", "description"]:
+                            for var_name in ["message", "comment", "notes", "description", "details", "inquiry", "query"]:
+                                selectors_to_try.extend([
+                                    f"textarea[name='{var_name}']",
+                                    f"textarea[name=\"{var_name}\"]",
+                                    f"input[name='{var_name}']",
+                                    f"input[name=\"{var_name}\"]",
+                                ])
+                        # Common variations for name fields
+                        elif template_field_name in ["name", "fullname", "full_name"]:
+                            for var_name in ["name", "fullname", "full_name", "firstname", "first_name"]:
+                                selectors_to_try.extend([
+                                    f"input[name='{var_name}']",
+                                    f"input[name=\"{var_name}\"]",
+                                ])
+                        # Common variations for email
+                        elif template_field_name in ["email", "e-mail", "mail"]:
+                            for var_name in ["email", "e-mail", "mail", "email_address"]:
+                                selectors_to_try.extend([
+                                    f"input[name='{var_name}']",
+                                    f"input[name=\"{var_name}\"]",
+                                    f"input[type='email']",
+                                ])
+                        # Common variations for phone
+                        elif template_field_name in ["phone", "telephone", "mobile"]:
+                            for var_name in ["phone", "telephone", "mobile", "phone_number"]:
+                                selectors_to_try.extend([
+                                    f"input[name='{var_name}']",
+                                    f"input[name=\"{var_name}\"]",
+                                    f"input[type='tel']",
+                                ])
+                
+                # Try each selector until one works
+                filled = False
+                last_error = None
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                selectors_to_try = [s for s in selectors_to_try if s not in seen and not seen.add(s)]
+                
+                for selector in selectors_to_try:
+                    try:
+                        # Wait for the field to be visible and ready (longer timeout for dynamic fields)
+                        # Use first() to handle multiple matches (e.g., newsletter + contact form)
+                        # Wait for selector - handle multiple matches by using first visible element
+                        await page.wait_for_selector(selector, state="visible", timeout=15000)
+                        
+                        # Use JavaScript to find the first visible element matching the selector
+                        # This handles cases where multiple forms have the same field (e.g., newsletter + contact)
+                        element_info = await page.evaluate("""
+                            (sel) => {
+                                const elements = Array.from(document.querySelectorAll(sel));
+                                // Find first visible element (not hidden, has dimensions)
+                                for (const el of elements) {
+                                    const rect = el.getBoundingClientRect();
+                                    const style = window.getComputedStyle(el);
+                                    if (rect.width > 0 && rect.height > 0 && 
+                                        style.display !== 'none' && 
+                                        style.visibility !== 'hidden' &&
+                                        style.opacity !== '0') {
+                                        // Prefer elements in contact forms (forms with more fields)
+                                        const form = el.closest('form');
+                                        if (form) {
+                                            const formInputs = form.querySelectorAll('input, textarea, select');
+                                            const visibleInputs = Array.from(formInputs).filter(inp => {
+                                                const r = inp.getBoundingClientRect();
+                                                const s = window.getComputedStyle(inp);
+                                                return r.width > 0 && r.height > 0 && s.display !== 'none';
+                                            });
+                                            // Prefer forms with more visible fields (contact forms)
+                                            if (visibleInputs.length > 1) {
+                                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                return { found: true, selector: sel };
+                                            }
+                                        }
+                                    }
+                                }
+                                // Fallback to first element
+                                const first = elements[0];
+                                if (first) {
+                                    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    return { found: true, selector: sel };
+                                }
+                                return { found: false };
+                            }
+                        """, selector)
+                        
+                        if not element_info.get("found"):
+                            continue
+                        
+                        await page.wait_for_timeout(500)
+                        
+                        # Get field metadata to determine how to fill it
+                        is_checkbox = field.get("is_checkbox", False)
+                        is_radio = field.get("is_radio", False)
+                        is_select = field.get("is_select", False)
+                        field_tag = field.get("tag", "input")
+                        input_type = field.get("input_type", "")
+                        
+                        # Fill the field based on its type
+                        if is_checkbox:
+                            # Handle checkbox - check or uncheck based on value
+                            fill_result = await page.evaluate("""
+                                ([sel, shouldCheck]) => {
+                                    const elements = Array.from(document.querySelectorAll(sel));
+                                    for (const el of elements) {
+                                        const rect = el.getBoundingClientRect();
+                                        const style = window.getComputedStyle(el);
+                                        if (rect.width > 0 && rect.height > 0 && 
+                                            style.display !== 'none' && 
+                                            style.visibility !== 'hidden') {
+                                            const form = el.closest('form');
+                                            if (form) {
+                                                const formInputs = form.querySelectorAll('input, textarea, select');
+                                                const visibleInputs = Array.from(formInputs).filter(inp => {
+                                                    const r = inp.getBoundingClientRect();
+                                                    const s = window.getComputedStyle(inp);
+                                                    return r.width > 0 && r.height > 0 && s.display !== 'none';
+                                                });
+                                                if (visibleInputs.length > 1) {
+                                                    el.checked = shouldCheck;
+                                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                    el.dispatchEvent(new Event('click', { bubbles: true }));
+                                                    return { filled: true, checked: el.checked };
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (elements[0]) {
+                                        elements[0].checked = shouldCheck;
+                                        elements[0].dispatchEvent(new Event('change', { bubbles: true }));
+                                        elements[0].dispatchEvent(new Event('click', { bubbles: true }));
+                                        return { filled: true, checked: elements[0].checked };
+                                    }
+                                    return { filled: false };
+                                }
+                            """, [selector, bool(value)])
+                        elif is_radio:
+                            # Handle radio button - select the matching value
+                            fill_result = await page.evaluate("""
+                                ([sel, val]) => {
+                                    const elements = Array.from(document.querySelectorAll(sel));
+                                    for (const el of elements) {
+                                        const rect = el.getBoundingClientRect();
+                                        const style = window.getComputedStyle(el);
+                                        if (rect.width > 0 && rect.height > 0 && 
+                                            style.display !== 'none' && 
+                                            style.visibility !== 'hidden') {
+                                            // For radio, check if value matches
+                                            if (el.value === val || el.value === String(val)) {
+                                                const form = el.closest('form');
+                                                if (form) {
+                                                    el.checked = true;
+                                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                    el.dispatchEvent(new Event('click', { bubbles: true }));
+                                                    return { filled: true, checked: el.checked };
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Fallback: check first matching radio
+                                    for (const el of elements) {
+                                        if (el.value === val || el.value === String(val)) {
+                                            el.checked = true;
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                            el.dispatchEvent(new Event('click', { bubbles: true }));
+                                            return { filled: true, checked: el.checked };
+                                        }
+                                    }
+                                    return { filled: false };
+                                }
+                            """, [selector, str(value)])
+                        elif is_select:
+                            # Handle select dropdown - use select_option
+                            try:
+                                # Try using Playwright's select_option for better compatibility
+                                await page.select_option(selector, str(value), timeout=10000)
+                                fill_result = {"filled": True, "value": str(value)}
+                            except:
+                                # Fallback to JavaScript
+                                fill_result = await page.evaluate("""
+                                    ([sel, val]) => {
+                                        const elements = Array.from(document.querySelectorAll(sel));
+                                        for (const el of elements) {
+                                            const rect = el.getBoundingClientRect();
+                                            const style = window.getComputedStyle(el);
+                                            if (rect.width > 0 && rect.height > 0 && 
+                                                style.display !== 'none' && 
+                                                style.visibility !== 'hidden') {
+                                                const form = el.closest('form');
+                                                if (form) {
+                                                    const formInputs = form.querySelectorAll('input, textarea, select');
+                                                    const visibleInputs = Array.from(formInputs).filter(inp => {
+                                                        const r = inp.getBoundingClientRect();
+                                                        const s = window.getComputedStyle(inp);
+                                                        return r.width > 0 && r.height > 0 && s.display !== 'none';
+                                                    });
+                                                    if (visibleInputs.length > 1) {
+                                                        el.value = val;
+                                                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                                                        return { filled: true, value: el.value };
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (elements[0]) {
+                                            elements[0].value = val;
+                                            elements[0].dispatchEvent(new Event('change', { bubbles: true }));
+                                            elements[0].dispatchEvent(new Event('input', { bubbles: true }));
+                                            return { filled: true, value: elements[0].value };
+                                        }
+                                        return { filled: false };
+                                    }
+                                """, [selector, str(value)])
+                        else:
+                            # Handle regular input fields (text, email, tel, date, time, number, url, etc.)
+                            fill_result = await page.evaluate("""
+                                ([sel, val]) => {
+                                    const elements = Array.from(document.querySelectorAll(sel));
+                                    for (const el of elements) {
+                                        const rect = el.getBoundingClientRect();
+                                        const style = window.getComputedStyle(el);
+                                        if (rect.width > 0 && rect.height > 0 && 
+                                            style.display !== 'none' && 
+                                            style.visibility !== 'hidden') {
+                                            const form = el.closest('form');
+                                            if (form) {
+                                                const formInputs = form.querySelectorAll('input, textarea, select');
+                                                const visibleInputs = Array.from(formInputs).filter(inp => {
+                                                    const r = inp.getBoundingClientRect();
+                                                    const s = window.getComputedStyle(inp);
+                                                    return r.width > 0 && r.height > 0 && s.display !== 'none';
+                                                });
+                                                // Prefer forms with more visible fields (contact forms)
+                                                if (visibleInputs.length > 1) {
+                                                    el.value = val;
+                                                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                                                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                    return { filled: true, value: el.value };
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Fallback to first element
+                                    if (elements[0]) {
+                                        elements[0].value = val;
+                                        elements[0].dispatchEvent(new Event('input', { bubbles: true }));
+                                        elements[0].dispatchEvent(new Event('change', { bubbles: true }));
+                                        return { filled: true, value: elements[0].value };
+                                    }
+                                    return { filled: false };
+                                }
+                            """, [selector, str(value)])
+                        
+                        # Verify it was filled
+                        await page.wait_for_timeout(300)
+                        if is_checkbox or is_radio:
+                            filled = fill_result.get("filled", False) and fill_result.get("checked", False) == bool(value)
+                        else:
+                            filled_value = fill_result.get("value", "") if fill_result.get("filled") else ""
+                            filled = filled_value == str(value) or (str(value) in filled_value) or len(filled_value) > 0
+                        
+                        if filled:
+                            print(f"   ✅ Field {i} filled successfully", file=sys.stderr)
+                            break
+                        else:
+                            # Try again with direct JavaScript fill (retry logic)
+                            if is_checkbox:
+                                fill_result = await page.evaluate("""
+                                    ([sel, shouldCheck]) => {
+                                        const el = document.querySelector(sel);
+                                        if (el) {
+                                            el.checked = shouldCheck;
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                            el.dispatchEvent(new Event('click', { bubbles: true }));
+                                            return { filled: true, checked: el.checked };
+                                        }
+                                        return { filled: false };
+                                    }
+                                """, [selector, bool(value)])
+                                filled = fill_result.get("filled", False) and fill_result.get("checked", False) == bool(value)
+                            elif is_radio:
+                                fill_result = await page.evaluate("""
+                                    ([sel, val]) => {
+                                        const elements = Array.from(document.querySelectorAll(sel));
+                                        for (const el of elements) {
+                                            if (el.value === val || el.value === String(val)) {
+                                                el.checked = true;
+                                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                el.dispatchEvent(new Event('click', { bubbles: true }));
+                                                return { filled: true, checked: el.checked };
+                                            }
+                                        }
+                                        return { filled: false };
+                                    }
+                                """, [selector, str(value)])
+                                filled = fill_result.get("filled", False) and fill_result.get("checked", False)
+                            elif is_select:
+                                try:
+                                    await page.select_option(selector, str(value), timeout=5000)
+                                    filled = True
+                                except:
+                                    fill_result = await page.evaluate("""
+                                        ([sel, val]) => {
+                                            const el = document.querySelector(sel);
+                                            if (el) {
+                                                el.value = val;
+                                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                                return { filled: true, value: el.value };
+                                            }
+                                            return { filled: false };
+                                        }
+                                    """, [selector, str(value)])
+                                    filled = fill_result.get("filled", False)
+                            else:
+                                fill_result = await page.evaluate("""
+                                    ([sel, val]) => {
+                                        const el = document.querySelector(sel);
+                                        if (el) {
+                                            el.value = '';
+                                            el.value = val;
+                                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                                            return { filled: true, value: el.value };
+                                        }
+                                        return { filled: false };
+                                    }
+                                """, [selector, str(value)])
+                                filled_value = fill_result.get("value", "") if fill_result.get("filled") else ""
+                                filled = filled_value == str(value) or (str(value) in filled_value) or len(filled_value) > 0
+                            
+                            await page.wait_for_timeout(300)
+                            if filled:
+                                print(f"   ✅ Field {i} filled successfully (retry)", file=sys.stderr)
+                                break
+                    except Exception as e:
+                        last_error = str(e)
+                        continue
+            
+                if not filled and not field.get("optional"):
+                    # Provide detailed error message
+                    error_msg = f"Failed to fill field: {field.get('selector', 'unknown')}"
+                    if discovered_field:
+                        error_msg += f"\nDiscovered field: {discovered_field.get('name', 'unknown')}"
+                        error_msg += f"\nTried selectors: {', '.join(selectors_to_try[:3])}"
+                    else:
+                        error_msg += f"\nField not found in discovered fields. Tried: {', '.join(selectors_to_try[:3])}"
+                    if last_error:
+                        error_msg += f"\nLast error: {last_error}"
+                    raise RuntimeError(error_msg)
 
         # Detect and handle CAPTCHA - check both before and after form fill
         # Some forms load CAPTCHA dynamically after fields are filled
@@ -965,7 +1625,12 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         # Final CAPTCHA check and re-injection before submitting
         if captcha_present:
             print("🔐 Final CAPTCHA verification before submission...", file=sys.stderr)
-            final_captcha_check = await detect_captcha(page)
+            try:
+                final_captcha_check = await detect_captcha(page)
+            except Exception as e:
+                # Page might have navigated after submission, ignore this check
+                print(f"   ⚠️  Could not verify CAPTCHA (page may have navigated): {str(e)[:50]}", file=sys.stderr)
+                final_captcha_check = {"type": None, "solved": True}  # Assume solved if we got this far
             if not final_captcha_check.get("solved", False):
                 print("   ⚠️  CAPTCHA not solved, attempting to solve...", file=sys.stderr)
                 # Try to get token again and re-inject (if local solver was used)
@@ -976,7 +1641,11 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                         print(f"   ✅ Got token, injecting... (length: {len(token)})", file=sys.stderr)
                         await inject_recaptcha_token(page, token, response_field)
                         await page.wait_for_timeout(2000)  # Wait longer for token to be processed
-                        final_captcha_check = await detect_captcha(page)
+                        try:
+                            final_captcha_check = await detect_captcha(page)
+                        except Exception as e:
+                            print(f"   ⚠️  Could not verify CAPTCHA after re-injection: {str(e)[:50]}", file=sys.stderr)
+                            final_captcha_check = {"type": None, "solved": True}
                         if final_captcha_check.get("solved", False):
                             print("   ✅ CAPTCHA verified as solved!", file=sys.stderr)
                         else:

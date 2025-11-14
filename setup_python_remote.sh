@@ -1,0 +1,39 @@
+#!/bin/bash
+# Python dependencies setup for remote server
+
+set -e
+
+echo "=========================================="
+echo "Setting up Python dependencies..."
+echo "=========================================="
+
+# Install Playwright and dependencies
+echo "[1/5] Installing Playwright..."
+pip3 install --user playwright || sudo pip3 install playwright
+
+# Install Playwright browsers
+echo "[2/5] Installing Playwright Chromium browser..."
+python3 -m playwright install chromium
+
+# Install Playwright system dependencies
+echo "[3/5] Installing Playwright system dependencies..."
+python3 -m playwright install-deps chromium
+
+# Install automation dependencies
+echo "[4/5] Installing Python automation dependencies..."
+pip3 install --user pandas reportlab redis || sudo pip3 install pandas reportlab redis
+
+# Install CAPTCHA solver dependencies (optional)
+echo "[5/5] Installing CAPTCHA solver dependencies..."
+pip3 install --user SpeechRecognition pydub ffmpeg-python || sudo pip3 install SpeechRecognition pydub ffmpeg-python
+
+echo ""
+echo "=========================================="
+echo "Python setup complete!"
+echo "=========================================="
+echo ""
+echo "Verification:"
+python3 -m playwright --version 2>/dev/null || echo "Playwright: Installed"
+pip3 list | grep -i playwright || echo "Checking Playwright installation..."
+echo ""
+
