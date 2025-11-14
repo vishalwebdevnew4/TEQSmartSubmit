@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const { url, template, domainId, templateId, adminId } = await req.json();
+    const { url, template, domainId, templateId, adminId, isTest } = await req.json();
 
     const normalizeId = (value: unknown) => {
       if (typeof value === "number" && Number.isInteger(value)) return value;
@@ -39,11 +39,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ensure local CAPTCHA solver is enabled by default if not explicitly set
-    // This prevents falling back to external services with invalid API keys
+    // Ensure local CAPTCHA solver is enabled by default and use ONLY local solver
+    // Disable hybrid mode to prevent falling back to external services
+    // For test mode, show browser (headless=false) so user can see what's happening
     const enhancedTemplate = {
       ...template,
       use_local_captcha_solver: template.use_local_captcha_solver ?? true,
+      use_hybrid_captcha_solver: template.use_hybrid_captcha_solver ?? false, // Default to false - use ONLY local solver
+      captcha_service: template.captcha_service ?? "local", // Default to local only
+      headless: isTest ? false : template.headless ?? true, // Test mode shows browser
     };
 
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "teq-template-"));

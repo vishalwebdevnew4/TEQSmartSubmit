@@ -32,8 +32,9 @@ async def test_exact_form():
     
     # Template matching the exact form structure
     template = {
-        "use_local_captcha_solver": True,
-        "captcha_service": "local",
+        "use_local_captcha_solver": True,  # Try local solver first
+        "use_hybrid_captcha_solver": True,  # Fallback to external if local fails
+        "captcha_service": "auto",  # Auto-select best available service
         "headless": False,  # Visible so you can see what happens
         "pre_actions": [
             {

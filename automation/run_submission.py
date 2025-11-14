@@ -104,11 +104,12 @@ async def detect_captcha(page) -> Dict[str, Any]:
 # Import CAPTCHA solver
 # The automation directory is already in sys.path, so we can import directly
 try:
-    from captcha_solver import get_captcha_solver
+    from captcha_solver import get_captcha_solver, LocalCaptchaSolver
 except ImportError:
     # Fallback if module not found
     def get_captcha_solver(service="auto"):
         return None
+    LocalCaptchaSolver = None  # Type placeholder
 
 
 async def inject_recaptcha_token(page, token: str, response_field: str = "g-recaptcha-response"):
@@ -614,38 +615,51 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
             site_key = captcha_info.get("siteKey", "")
             response_field = captcha_info.get("responseField", "g-recaptcha-response")
             
-            # Determine which solver to use
-            # Default to external service for reliability unless explicitly set to use local
-            use_local = template.get("use_local_captcha_solver", False)  # Changed default from True to False
+            # Use local solver only by default (no hybrid mode)
+            use_local = template.get("use_local_captcha_solver", True)  # Default to True
             if use_local is None:
-                use_local = os.getenv("TEQ_USE_LOCAL_CAPTCHA_SOLVER", "false").lower() not in ("false", "0", "no")
+                use_local = os.getenv("TEQ_USE_LOCAL_CAPTCHA_SOLVER", "true").lower() not in ("false", "0", "no")
             else:
-                # If template explicitly sets it, use that value
                 use_local = bool(use_local)
+            
+            # Check if we should use hybrid mode (try local, fallback to external)
+            # Default to False - use ONLY local solver
+            use_hybrid = template.get("use_hybrid_captcha_solver", False)  # Default to False - local only
+            if use_hybrid is None:
+                use_hybrid = os.getenv("TEQ_USE_HYBRID_CAPTCHA_SOLVER", "false").lower() not in ("false", "0", "no")
+            else:
+                use_hybrid = bool(use_hybrid)
             
             solver = None
             local_solver_used = False
+            local_solver_failed = False
             local_solver_instance = None  # Store local solver instance for later use
             
+            # Step 1: Try local solver first (if enabled)
             if use_local and captcha_type == "recaptcha" and site_key:
-                # Use local solver - fully automated (but with short timeout)
                 try:
                     from captcha_solver import LocalCaptchaSolver
                     
-                    print("🤖 Attempting LOCAL CAPTCHA SOLVER (with 30s timeout)...", file=sys.stderr)
+                    print("🤖 Step 1: Trying LOCAL CAPTCHA SOLVER (fully automated)...", file=sys.stderr)
                     local_solver_instance = LocalCaptchaSolver(page=page)
                     solver = local_solver_instance
                     local_solver_used = True
                     
-                    # Call solver with SHORTER timeout for local solver since it's unreliable
+                    # Try with timeout to prevent hanging
+                    # Increase timeout to 90 seconds to give local solver more time
                     try:
                         token = await asyncio.wait_for(
                             solver.solve_recaptcha_v2(site_key, page.url),
-                            timeout=30  # 30 second max timeout (was 50)
+                            timeout=90  # 90 second timeout for local solver (increased from 60s)
                         )
                     except asyncio.TimeoutError:
-                        print("⏰ Local solver timeout (30s) - falling back to external service", file=sys.stderr)
+                        print("   ⏰ Local solver timeout (90s)", file=sys.stderr)
+                        if use_hybrid:
+                            print("   Will try external service...", file=sys.stderr)
+                        else:
+                            print("   Hybrid mode disabled - will not try external services", file=sys.stderr)
                         token = None
+                        local_solver_failed = True
                     
                     if token:
                         # Inject the solved token into the form
@@ -673,25 +687,55 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                             captcha_solved = True
                         
                         if captcha_solved:
-                            print("✅ CAPTCHA solved by local solver!", file=sys.stderr)
+                            print("✅ CAPTCHA solved automatically by local solver!", file=sys.stderr)
                     else:
-                        raise RuntimeError("Local CAPTCHA solver returned empty token or timed out")
+                        local_solver_failed = True
+                        if not use_hybrid:
+                            raise RuntimeError("Local CAPTCHA solver returned empty token")
+                        else:
+                            print("   ⚠️  Local solver returned empty token, will try external service...", file=sys.stderr)
                         
                 except Exception as e:
+                    import traceback
                     local_error = str(e)
-                    print(f"⚠️  Local solver failed: {local_error[:100]}", file=sys.stderr)
-                    print("🔄 Falling back to external CAPTCHA service (2captcha)...", file=sys.stderr)
-                    local_solver_used = False  # Reset flag to allow fallback
-                    # Don't raise - fall through to external solver
+                    error_trace = traceback.format_exc()
+                    print(f"⚠️  Local solver failed: {local_error}", file=sys.stderr)
+                    print(f"📋 Full error trace:", file=sys.stderr)
+                    print(error_trace, file=sys.stderr)
+                    local_solver_failed = True
+                    if not use_hybrid:
+                        print("❌ Local solver failed and hybrid mode is disabled. Will not try external services.", file=sys.stderr)
+                    else:
+                        print("🔄 Step 2: Falling back to external CAPTCHA service...", file=sys.stderr)
             
-            # If local solver not used or failed, try external services
-            if not captcha_solved and captcha_type == "recaptcha" and site_key:
+            # Step 2: If local solver failed or not used, try external services (if hybrid mode or local disabled)
+            if (not captcha_solved and (local_solver_failed or not use_local or use_hybrid)) and captcha_type == "recaptcha" and site_key:
                 # Get CAPTCHA solver service preference
                 captcha_service = template.get("captcha_service", "auto")
                 captcha_api_key = template.get("captcha_api_key")  # Can override service-specific keys
                 
-                # Get solver instance
-                solver = get_captcha_solver(captcha_service)
+                # If local solver already failed and service is "auto", try to get external service explicitly
+                # to avoid getting LocalCaptchaSolver again
+                if local_solver_failed and captcha_service == "auto":
+                    # Try to find an external service with API keys
+                    if os.getenv("CAPTCHA_2CAPTCHA_API_KEY") or os.getenv("TEQ_CAPTCHA_API_KEY"):
+                        captcha_service = "2captcha"
+                    elif os.getenv("CAPTCHA_ANTICAPTCHA_API_KEY"):
+                        captcha_service = "anticaptcha"
+                    elif os.getenv("CAPTCHA_CAPSOLVER_API_KEY"):
+                        captcha_service = "capsolver"
+                    else:
+                        # No external service available, skip to manual mode
+                        captcha_service = None
+                
+                # Get solver instance (only if we have a valid service)
+                solver = None
+                if captcha_service:
+                    solver = get_captcha_solver(captcha_service)
+                    # If we got LocalCaptchaSolver again but local already failed, skip it
+                    if local_solver_failed and solver and LocalCaptchaSolver and isinstance(solver, LocalCaptchaSolver):
+                        print("   ⚠️  Local solver already failed, skipping external fallback (no API keys)", file=sys.stderr)
+                        solver = None
                 
                 # If local solver, set the page object
                 if solver and hasattr(solver, 'page'):
@@ -699,6 +743,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 
                 if solver:
                     try:
+                        print(f"🤖 Step 2: Trying external CAPTCHA service ({captcha_service})...", file=sys.stderr)
                         # Solve reCAPTCHA using configured solver
                         page_url = page.url
                         try:
@@ -732,58 +777,73 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                                     }
                                 """, [token, response_field])
                                 captcha_solved = True
+                            
+                            if captcha_solved:
+                                print("✅ CAPTCHA solved by external service!", file=sys.stderr)
                         else:
-                            raise RuntimeError("CAPTCHA solver returned empty token")
+                            # External solver returned empty token - don't raise error if hybrid mode, just log
+                            if use_hybrid:
+                                print("⚠️  External solver returned empty token, but continuing (hybrid mode)", file=sys.stderr)
+                            else:
+                                raise RuntimeError("CAPTCHA solver returned empty token")
                             
                     except Exception as e:
-                        raise RuntimeError(
-                            f"Failed to solve CAPTCHA automatically: {str(e)}. "
-                            f"Please check your {captcha_service} API key or solve manually."
-                        )
-            
-            # If still not solved and no solver was used, fall back to manual mode
-            if captcha_type == "recaptcha" and not captcha_solved and not local_solver_used:
-                # No API key or unsupported CAPTCHA type
-                if not solver:
-                    # Check if we're in development mode (non-headless)
-                    if not headless:
-                        # Development mode: wait for manual solving
-                        print("⚠️  DEVELOPMENT MODE: Please solve the CAPTCHA manually in the browser window.", file=sys.stderr)
-                        print("⚠️  Waiting up to 5 minutes for manual CAPTCHA solving...", file=sys.stderr)
-                        captcha_timeout = template.get("captcha_timeout_ms", 300000)  # 5 minutes for manual solving
-                        captcha_solved = await wait_for_captcha_solution(page, captcha_info, captcha_timeout)
-                        
-                        if not captcha_solved:
+                        # If hybrid mode, don't raise error - let it fall through to manual mode
+                        if use_hybrid:
+                            print(f"⚠️  External solver failed: {str(e)[:100]}, will try manual mode if available", file=sys.stderr)
+                        else:
                             raise RuntimeError(
-                                "CAPTCHA not solved within timeout. "
-                                "Please solve it manually in the browser window, or enable local solver with 'use_local_captcha_solver': true"
+                                f"Failed to solve CAPTCHA automatically: {str(e)}. "
+                                f"Please check your {captcha_service} API key or solve manually."
                             )
-                    else:
-                        raise RuntimeError(
-                            "reCAPTCHA detected but no CAPTCHA solver configured. "
-                            "Options:\n"
-                            "1. Enable local solver: Add 'use_local_captcha_solver': true to template\n"
-                            "2. Set CAPTCHA_2CAPTCHA_API_KEY, CAPTCHA_ANTICAPTCHA_API_KEY, or CAPTCHA_CAPSOLVER_API_KEY\n"
-                            "3. Set HEADLESS=false in environment to enable manual solving mode\n"
-                            "4. Add 'headless': false to template for manual solving"
-                        )
-                elif captcha_type == "recaptcha" and not site_key:
-                    raise RuntimeError(
-                        "reCAPTCHA detected but site key could not be extracted. "
-                        "Please check the form structure."
-                    )
                 else:
-                    # Wait for manual solving (for other CAPTCHA types or when in dev mode)
-                    if not headless:
-                        print("⚠️  DEVELOPMENT MODE: Please solve the CAPTCHA manually in the browser window.", file=sys.stderr)
-                    captcha_timeout = template.get("captcha_timeout_ms", 300000 if not headless else 10000)
+                    # No solver available
+                    if use_hybrid:
+                        print("⚠️  No external CAPTCHA solver available (no API keys configured), will try manual mode if available", file=sys.stderr)
+                    else:
+                        print("⚠️  No CAPTCHA solver available. Please configure API keys or enable manual solving.", file=sys.stderr)
+            
+            # If still not solved, fall back to manual mode (if in non-headless mode)
+            if captcha_type == "recaptcha" and not captcha_solved:
+                # Check if we're in development/test mode (non-headless)
+                if not headless:
+                    # Development mode: wait for manual solving
+                    print("⚠️  All automated CAPTCHA solvers failed. Waiting for manual CAPTCHA solving...", file=sys.stderr)
+                    print("⚠️  Please solve the CAPTCHA manually in the browser window.", file=sys.stderr)
+                    print("⚠️  Waiting up to 5 minutes for manual CAPTCHA solving...", file=sys.stderr)
+                    captcha_timeout = template.get("captcha_timeout_ms", 300000)  # 5 minutes for manual solving
                     captcha_solved = await wait_for_captcha_solution(page, captcha_info, captcha_timeout)
                     
-                    if not captcha_solved:
+                    if captcha_solved:
+                        print("✅ CAPTCHA solved manually!", file=sys.stderr)
+                    else:
                         raise RuntimeError(
-                            f"CAPTCHA ({captcha_type}) detected but not solved. "
-                            "The form requires CAPTCHA verification before submission."
+                            "CAPTCHA not solved within timeout. "
+                            "Please solve it manually in the browser window, or configure CAPTCHA solver API keys."
                         )
+                else:
+                    # Headless mode - can't do manual solving
+                    error_msg = "reCAPTCHA detected but all automated solvers failed."
+                    if local_solver_failed:
+                        error_msg += " Local solver failed."
+                    if not solver:
+                        error_msg += " No external solver available (no API keys configured)."
+                    error_msg += " Options: 1) Enable local solver with 'use_local_captcha_solver': true (already enabled), 2) Set CAPTCHA API keys, 3) Use test mode with 'headless': false for manual solving"
+                    raise RuntimeError(error_msg)
+            
+            # Check for missing site key
+            if captcha_type == "recaptcha" and not site_key and not captcha_solved:
+                raise RuntimeError(
+                    "reCAPTCHA detected but site key could not be extracted. "
+                    "Please check the form structure."
+                )
+            
+            # Final check - if CAPTCHA still not solved after all attempts
+            if captcha_type == "recaptcha" and not captcha_solved:
+                raise RuntimeError(
+                    f"CAPTCHA ({captcha_type}) detected but not solved. "
+                    "The form requires CAPTCHA verification before submission."
+                )
 
         # Track form submission
         submission_success = False

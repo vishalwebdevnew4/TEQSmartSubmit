@@ -17,13 +17,16 @@ export default async function DashboardPage() {
       include: {
         templates: {
           orderBy: { createdAt: "asc" },
-          take: 3,
+          take: 10, // Increased to get all templates
         },
       },
     }),
   ]);
 
-  const primaryDomain = domains.find((domain) => domain.templates.length > 0) ?? null;
+  const activeDomainsWithTemplates = domains.filter((domain) => domain.templates.length > 0);
+  const primaryDomain = activeDomainsWithTemplates[0] ?? null;
+  // Pass ALL active domains (not just those with templates) so user can run on all
+  // Domains without templates will be skipped with a clear message
 
   return (
     <div className="space-y-8">
@@ -53,18 +56,17 @@ export default async function DashboardPage() {
           <p className="mt-1 text-xs text-slate-500">Runs needing attention</p>
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-400">Test template</p>
-          <p className="mt-3 text-2xl font-semibold text-white">
-            {primaryDomain ? primaryDomain.templates[0]?.name ?? "—" : "No template"}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            {primaryDomain?.url ?? "Assign a template to enable automation"}
-          </p>
+          <p className="text-xs uppercase tracking-wide text-slate-400">Ready domains</p>
+          <p className="mt-3 text-2xl font-semibold text-white">{activeDomainsWithTemplates.length}</p>
+          <p className="mt-1 text-xs text-slate-500">Domains with templates configured</p>
         </div>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[2fr_1fr]">
-        <AutomationControls domain={primaryDomain} />
+        <AutomationControls 
+          domain={primaryDomain as any} 
+          allDomains={domains as any} 
+        />
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
           <h3 className="text-lg font-semibold text-white">Activity Feed</h3>
