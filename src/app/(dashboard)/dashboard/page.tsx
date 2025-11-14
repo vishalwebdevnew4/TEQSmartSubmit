@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { AutomationControls } from "./AutomationControls";
 
 export default async function DashboardPage() {
-  const [stats, recentActivity, domains] = await Promise.all([
+  const [stats, recentActivity, domains, universalTemplates] = await Promise.all([
     prisma.domain.count(),
     prisma.submissionLog.findMany({
       orderBy: { createdAt: "desc" },
@@ -21,11 +21,43 @@ export default async function DashboardPage() {
         },
       },
     }),
+    // Also get universal templates (templates without domainId)
+    prisma.template.findMany({
+      where: { domainId: null },
+      orderBy: { createdAt: "desc" },
+    }),
   ]);
 
-  const activeDomainsWithTemplates = domains.filter((domain) => domain.templates.length > 0);
+  // Add universal templates to domains that don't have templates
+  const domainsWithTemplates = domains.map((domain) => {
+    if (domain.templates.length === 0 && universalTemplates.length > 0) {
+      // Add universal templates to domains without templates
+      return {
+        ...domain,
+        templates: universalTemplates.map((t) => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          fieldMappings: t.fieldMappings,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+          domainId: null,
+          domain: null, // Universal templates don't belong to a domain
+        })),
+      };
+    }
+    return domain;
+  });
+
+  const activeDomainsWithTemplates = domainsWithTemplates.filter(
+    (domain) => domain.templates.length > 0
+  );
   const primaryDomain = activeDomainsWithTemplates[0] ?? null;
-  // Pass ALL active domains (not just those with templates) so user can run on all
+  
+  // Debug: Log template counts
+  console.log(`[Dashboard] Total domains: ${domains.length}, Universal templates: ${universalTemplates.length}, Domains with templates: ${activeDomainsWithTemplates.length}`);
+  
+  // Pass ALL domains (with universal templates added where needed) so user can run on all
   // Domains without templates will be skipped with a clear message
 
   return (
@@ -65,7 +97,7 @@ export default async function DashboardPage() {
       <section className="grid gap-4 xl:grid-cols-[2fr_1fr]">
         <AutomationControls 
           domain={primaryDomain as any} 
-          allDomains={domains as any} 
+          allDomains={domainsWithTemplates as any}
         />
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">

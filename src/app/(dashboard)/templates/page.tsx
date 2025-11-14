@@ -212,8 +212,10 @@ export default function TemplatesPage() {
                     <p className="text-xs text-slate-500">
                       Last updated {new Date(template.updatedAt).toLocaleDateString()}
                     </p>
-                    {template.domain && (
+                    {template.domain ? (
                       <p className="text-xs text-slate-500 mt-1">Domain: {template.domain.url}</p>
+                    ) : (
+                      <p className="text-xs text-indigo-400 mt-1">🌐 Universal Template (works with all domains)</p>
                     )}
               </div>
                   <div className="flex gap-2">
@@ -287,13 +289,18 @@ export default function TemplatesPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Domain (optional)</label>
+                <label className="block text-sm font-medium text-slate-300 mb-1">
+                  Domain (optional)
+                  <span className="ml-2 text-xs text-slate-500 font-normal">
+                    Leave empty to create a universal template that works with all domains
+                  </span>
+                </label>
                 <select
                   value={formData.domainId}
                   onChange={(e) => setFormData({ ...formData, domainId: e.target.value })}
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
                 >
-                  <option value="">None</option>
+                  <option value="">🌐 Universal (all domains)</option>
                   {domains.map((domain) => (
                     <option key={domain.id} value={domain.id}>
                       {domain.url}
