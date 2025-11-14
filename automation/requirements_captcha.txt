@@ -1,0 +1,22 @@
+# Optional dependencies for local CAPTCHA solving
+# Install with: pip install -r automation/requirements_captcha.txt
+
+# Audio recognition (for audio CAPTCHA solving)
+SpeechRecognition>=3.10.0
+pydub>=0.25.1
+
+# Audio processing
+ffmpeg-python>=0.2.0  # Requires ffmpeg system package
+
+# Image processing (for image CAPTCHA solving - optional)
+# Pillow>=10.0.0
+# opencv-python>=4.8.0
+# pytesseract>=0.3.10  # Requires tesseract-ocr system package
+
+# Machine learning (for advanced solving - optional)
+# tensorflow>=2.13.0
+# torch>=2.0.0
+
+# Note: For basic audio solving, only SpeechRecognition and pydub are required
+# Install ffmpeg system package: sudo apt-get install ffmpeg (Linux) or brew install ffmpeg (Mac)
+
