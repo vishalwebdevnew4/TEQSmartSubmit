@@ -184,7 +184,7 @@ export default function DomainsPage() {
           ids: selectedIds,
           isActive: true,
         }),
-      });
+  });
 
       if (response.ok) {
         const result = await response.json();

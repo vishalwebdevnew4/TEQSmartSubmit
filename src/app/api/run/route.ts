@@ -207,15 +207,15 @@ export async function POST(req: NextRequest) {
     try {
       parsed = JSON.parse(stdoutTrimmed || "{}");
       if (parsed && typeof parsed === "object") {
-        await prisma.submissionLog.update({
-          where: { id: submission.id },
-          data: {
-            status: parsed.status === "success" ? "success" : parsed.status ?? "success",
-            message: parsed.message ?? null,
-            finishedAt: new Date(),
-          },
-        });
-        return NextResponse.json({ ...parsed, submissionId: submission.id });
+      await prisma.submissionLog.update({
+        where: { id: submission.id },
+        data: {
+          status: parsed.status === "success" ? "success" : parsed.status ?? "success",
+          message: parsed.message ?? null,
+          finishedAt: new Date(),
+        },
+      });
+      return NextResponse.json({ ...parsed, submissionId: submission.id });
       }
     } catch (parseError) {
       // Not JSON, treat as success with message output

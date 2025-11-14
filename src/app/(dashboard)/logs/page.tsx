@@ -213,12 +213,12 @@ export default function LogsPage() {
           </div>
         ) : (
           logs.map((log) => (
-            <div
-              key={log.id}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm shadow-sm hover:border-slate-700"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
+          <div
+            key={log.id}
+            className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm shadow-sm hover:border-slate-700"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
                   <p className="font-medium text-slate-200">{log.domain?.url || log.url}</p>
                   {log.template && (
                     <p className="text-xs text-slate-400 mt-1">Template: {log.template.name}</p>
@@ -317,7 +317,7 @@ export default function LogsPage() {
                 {log.finishedAt && log.createdAt && (
                   <span>
                     Duration: {Math.round((new Date(log.finishedAt).getTime() - new Date(log.createdAt).getTime()) / 1000)}s
-                  </span>
+              </span>
                 )}
               </div>
             </div>

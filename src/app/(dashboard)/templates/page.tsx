@@ -206,23 +206,23 @@ export default function TemplatesPage() {
 
             return (
               <div key={template.id} className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">{template.name}</h3>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white">{template.name}</h3>
                     <p className="text-xs text-slate-500">
                       Last updated {new Date(template.updatedAt).toLocaleDateString()}
                     </p>
                     {template.domain && (
                       <p className="text-xs text-slate-500 mt-1">Domain: {template.domain.url}</p>
                     )}
-                  </div>
+              </div>
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleEdit(template)}
                       className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800"
                     >
-                      Edit
-                    </button>
+                Edit
+              </button>
                     <button
                       onClick={() => handleDelete(template.id)}
                       className="rounded-lg border border-rose-500/50 px-3 py-1 text-xs font-medium text-rose-200 hover:bg-rose-500/10"
@@ -230,26 +230,26 @@ export default function TemplatesPage() {
                       Delete
                     </button>
                   </div>
-                </div>
+            </div>
                 {template.description && (
                   <p className="text-sm text-slate-300">{template.description}</p>
                 )}
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                  <p className="text-xs text-slate-400">Mapped fields</p>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+              <p className="text-xs text-slate-400">Mapped fields</p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
                     {fields.length > 0 ? (
                       fields.map((field) => (
-                        <span key={field} className="rounded-full bg-indigo-500/20 px-3 py-1 text-indigo-300">
-                          {field}
-                        </span>
+                  <span key={field} className="rounded-full bg-indigo-500/20 px-3 py-1 text-indigo-300">
+                    {field}
+                  </span>
                       ))
                     ) : (
                       <span className="text-slate-500">No fields mapped</span>
                     )}
-                  </div>
-                </div>
-                <div className="text-xs text-slate-400">
-                  <p>Preview:</p>
+              </div>
+            </div>
+            <div className="text-xs text-slate-400">
+              <p>Preview:</p>
                   <p className="mt-1 line-clamp-2 text-slate-300 font-mono text-xs">{preview}</p>
                 </div>
               </div>
@@ -317,8 +317,8 @@ export default function TemplatesPage() {
                 />
                 <p className="mt-1 text-xs text-slate-500">
                   Example: {`{"name": "input[name='name']", "email": "input#email", "message": "textarea"}`}
-                </p>
-              </div>
+              </p>
+            </div>
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
@@ -340,7 +340,7 @@ export default function TemplatesPage() {
               </div>
             </form>
           </div>
-        </div>
+      </div>
       )}
     </div>
   );
