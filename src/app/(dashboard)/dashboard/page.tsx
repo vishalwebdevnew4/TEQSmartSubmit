@@ -1,36 +1,62 @@
 import { prisma } from "@/lib/prisma";
 import { AutomationControls } from "./AutomationControls";
+import { headers } from "next/headers";
 
 // Force dynamic rendering to prevent database connection issues during build
 export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
 export const revalidate = 0;
+export const runtime = 'nodejs';
 
 export default async function DashboardPage() {
-  const [stats, recentActivity, domains, universalTemplates] = await Promise.all([
-    prisma.domain.count(),
-    prisma.submissionLog.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 6,
-      include: {
-        domain: { select: { url: true } },
-      },
-    }),
-    prisma.domain.findMany({
-      where: { isActive: true },
-      orderBy: { createdAt: "desc" },
-      include: {
-        templates: {
-          orderBy: { createdAt: "asc" },
-          take: 10, // Increased to get all templates
+  // Use headers() to force dynamic rendering - this prevents static generation
+  // This is the most reliable way to force dynamic rendering in Next.js 15
+  const headersList = await headers();
+  
+  // Wrap database queries in try-catch to handle connection errors gracefully
+  let stats = 0;
+  let recentActivity: any[] = [];
+  let domains: any[] = [];
+  let universalTemplates: any[] = [];
+  
+  try {
+    [stats, recentActivity, domains, universalTemplates] = await Promise.all([
+      prisma.domain.count().catch(() => 0),
+      prisma.submissionLog.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 6,
+        include: {
+          domain: { select: { url: true } },
         },
-      },
-    }),
-    // Also get universal templates (templates without domainId)
-    prisma.template.findMany({
-      where: { domainId: null },
-      orderBy: { createdAt: "desc" },
-    }),
-  ]);
+      }).catch(() => []),
+      prisma.domain.findMany({
+        where: { isActive: true },
+        orderBy: { createdAt: "desc" },
+        include: {
+          templates: {
+            orderBy: { createdAt: "asc" },
+            take: 10,
+          },
+        },
+      }).catch(() => []),
+      prisma.template.findMany({
+        where: { domainId: null },
+        orderBy: { createdAt: "desc" },
+      }).catch(() => []),
+    ]);
+  } catch (error) {
+    // If database connection fails during build, return empty page
+    console.error("Database connection error:", error);
+    return (
+      <div className="space-y-8">
+        <header className="flex flex-col gap-2">
+          <h2 className="text-2xl font-semibold text-white">Overview</h2>
+          <p className="text-sm text-slate-400">Loading dashboard...</p>
+        </header>
+        <div className="text-center text-slate-400">Dashboard will load at runtime.</div>
+      </div>
+    );
+  }
 
   // Add universal templates to domains that don't have templates
   const domainsWithTemplates = domains.map((domain) => {
