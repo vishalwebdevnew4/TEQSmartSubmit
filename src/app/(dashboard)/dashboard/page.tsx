@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { AutomationControls } from "./AutomationControls";
 
+// Force dynamic rendering to prevent database connection issues during build
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function DashboardPage() {
   const [stats, recentActivity, domains, universalTemplates] = await Promise.all([
     prisma.domain.count(),

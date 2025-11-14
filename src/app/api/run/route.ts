@@ -42,12 +42,23 @@ export async function POST(req: NextRequest) {
     // Ensure local CAPTCHA solver is enabled by default and use ONLY local solver
     // Disable hybrid mode to prevent falling back to external services
     // For test mode, show browser (headless=false) so user can see what's happening
+    // Enable auto-detect if no fields are provided
+    const hasFields = template.fields && Array.isArray(template.fields) && template.fields.length > 0;
     const enhancedTemplate = {
       ...template,
       use_local_captcha_solver: template.use_local_captcha_solver ?? true,
       use_hybrid_captcha_solver: template.use_hybrid_captcha_solver ?? false, // Default to false - use ONLY local solver
       captcha_service: template.captcha_service ?? "local", // Default to local only
       headless: isTest ? false : template.headless ?? true, // Test mode shows browser
+      use_auto_detect: template.use_auto_detect ?? (!hasFields), // Auto-detect if no fields provided
+      test_data: template.test_data ?? {
+        name: "TEQ QA User",
+        email: "test@example.com",
+        phone: "+1234567890",
+        message: "This is an automated test submission.",
+        subject: "Test Inquiry",
+        company: "Test Company"
+      }
     };
 
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "teq-template-"));
