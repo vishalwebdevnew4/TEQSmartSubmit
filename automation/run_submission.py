@@ -504,7 +504,11 @@ def auto_detect_field_type(field: Dict) -> str | None:
     
     # Checkboxes
     if field_type == "checkbox":
-        if "agree" in all_text or "terms" in all_text or "accept" in all_text:
+        # Consent/terms checkboxes - check these automatically
+        consent_keywords = ["agree", "terms", "accept", "consent", "gdpr", "privacy", "policy", 
+                          "conditions", "terms and conditions", "i agree", "i accept", 
+                          "accept terms", "agree to", "consent to", "acknowledge", "confirm"]
+        if any(keyword in all_text for keyword in consent_keywords):
             return "agree_terms"
         elif "newsletter" in all_text or "subscribe" in all_text:
             return "newsletter"
@@ -604,10 +608,19 @@ def auto_fill_form_without_template(discovered_fields: List[Dict], test_data: Di
                 continue  # Skip if no value
         elif field_input_type == "checkbox":
             # For checkbox, check if we should check it
-            if field_type == "agree_terms" or "agree" in field.get("name", "").lower():
-                value = True
+            if field_type == "agree_terms":
+                value = True  # Always check consent/terms checkboxes
+            elif field_type == "newsletter":
+                value = False  # Don't subscribe to newsletter by default
             else:
-                value = False  # Don't check by default
+                # Check if it looks like a consent checkbox by name/id
+                field_name = field.get("name", "").lower()
+                field_id = field.get("id", "").lower()
+                consent_keywords = ["agree", "terms", "accept", "consent", "gdpr", "privacy", "policy"]
+                if any(keyword in field_name or keyword in field_id for keyword in consent_keywords):
+                    value = True  # Check consent checkboxes
+                else:
+                    value = True  # Check other checkboxes by default (to be safe)
         elif field_input_type in ["date", "datetime-local", "month", "week"]:
             # Use current date + 7 days for date fields
             if field_input_type == "date":
@@ -656,10 +669,16 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
     from playwright.async_api import async_playwright  # imported lazily for performance
 
     template: Dict[str, Any] = json.loads(template_path.read_text())
+    
+    # Handle both snake_case and camelCase property names for compatibility
     fields: List[Dict[str, str]] = template.get("fields", [])
-    pre_actions: List[Dict[str, Any]] = template.get("pre_actions", [])
-    submit_selector: str | None = template.get("submit_selector")
-    use_auto_detect: bool = template.get("use_auto_detect", False)  # Enable auto-detection mode
+    pre_actions: List[Dict[str, Any]] = template.get("pre_actions", []) or template.get("preActions", [])
+    submit_selector: str | None = template.get("submit_selector") or template.get("submitSelector")
+    use_auto_detect: bool = template.get("use_auto_detect", False) or template.get("useAutoDetect", False)  # Enable auto-detection mode
+    
+    # Ensure submit_selector has a default if not provided
+    if not submit_selector:
+        submit_selector = "button[type='submit'], input[type='submit'], button:has-text('Submit'), button:has-text('Send'), button:has-text('Send message')"
 
     # Add progress logging
     print("🚀 Starting automation...", file=sys.stderr)
@@ -668,10 +687,36 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
 
     async with async_playwright() as p:
         # Check if we should run in headless mode
-        # Set HEADLESS=false or TEQ_PLAYWRIGHT_HEADLESS=false to see the browser
-        headless = os.getenv("HEADLESS", "true").lower() not in ("false", "0", "no")
+        # Priority: 1) Template setting, 2) Environment variable, 3) Auto-detect display availability
+        headless = None
+        
+        # First, check template setting
         if template.get("headless") is not None:
             headless = template.get("headless", True)
+        # Then check environment variable
+        elif os.getenv("HEADLESS") is not None:
+            headless = os.getenv("HEADLESS", "true").lower() not in ("false", "0", "no")
+        elif os.getenv("TEQ_PLAYWRIGHT_HEADLESS") is not None:
+            headless = os.getenv("TEQ_PLAYWRIGHT_HEADLESS", "true").lower() not in ("false", "0", "no")
+        else:
+            # Auto-detect: Check if we have a display available
+            # On remote servers without X11/display, we need headless mode
+            has_display = os.getenv("DISPLAY") is not None and os.getenv("DISPLAY") != ""
+            # Also check if we're in a containerized environment that might not have display
+            is_container = os.path.exists("/.dockerenv") or os.getenv("container") is not None
+            
+            if has_display and not is_container:
+                # We have a display, can run non-headless for better CAPTCHA solving
+                headless = False
+                print("🖥️  Display detected - running with visible browser for better CAPTCHA solving", file=sys.stderr)
+            else:
+                # No display or in container - use headless mode
+                headless = True
+                print("🖥️  No display detected - running in headless mode", file=sys.stderr)
+        
+        # Final fallback
+        if headless is None:
+            headless = True
         
         browser = await p.chromium.launch(headless=headless, timeout=180000)  # 3 minutes timeout
         # Create context with longer timeout to prevent premature closure
@@ -686,10 +731,9 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         page = await context.new_page()
         page.set_default_timeout(180000)  # 3 minutes page timeout
         
-        # Reset zoom to 100% (fix 50% zoom issue)
+        # Set viewport and ensure proper zoom (100%)
         await page.set_viewport_size({'width': 1920, 'height': 1080})
-        await page.evaluate("document.body.style.zoom = '1'")
-        await page.evaluate("window.devicePixelRatio = 1")
+        # Zoom will be reset after page load to ensure it works
 
         # Use "load" instead of "networkidle" for faster loading
         wait_until = template.get("wait_until", "load")
@@ -697,7 +741,130 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         await page.goto(url, wait_until=wait_until, timeout=60000)
         print("✅ Page loaded", file=sys.stderr)
 
-        # Run pre-actions (like cookie consent)
+        # Fix zoom and positioning issues - ensure 100% zoom and centered
+        print("🔧 Fixing zoom and positioning...", file=sys.stderr)
+        await page.evaluate("""
+            () => {
+                // Reset zoom to 100%
+                document.body.style.zoom = '1';
+                document.documentElement.style.zoom = '1';
+                
+                // Reset transform
+                document.body.style.transform = 'scale(1)';
+                document.documentElement.style.transform = 'scale(1)';
+                
+                // Ensure page is at top-left
+                window.scrollTo(0, 0);
+                
+                // Reset device pixel ratio
+                if (window.devicePixelRatio) {
+                    Object.defineProperty(window, 'devicePixelRatio', {
+                        get: function() { return 1; }
+                    });
+                }
+            }
+        """)
+        await page.set_viewport_size({'width': 1920, 'height': 1080})
+        await asyncio.sleep(0.5)  # Brief pause for zoom to apply
+        
+        # Automatically detect and close overlay banners, cookie consent, modals, etc.
+        print("🔍 Checking for overlay banners, cookie consent, and modals...", file=sys.stderr)
+        overlays_closed = await page.evaluate("""
+                () => {
+                    let closedCount = 0;
+                    const keywords = ['cookie', 'consent', 'accept', 'agree', 'close', 'dismiss', 'got it', 
+                                    'i agree', 'allow', 'ok', 'continue', 'x', '×'];
+                    
+                    // Find and close overlays
+                    const selectors = [
+                        // Cookie consent
+                        '[id*="cookie"]', '[class*="cookie"]', '[id*="consent"]', '[class*="consent"]',
+                        '[id*="gdpr"]', '[class*="gdpr"]', '[id*="privacy"]', '[class*="privacy"]',
+                        // Common overlay classes
+                        '.overlay', '.modal', '.popup', '.banner', '.notification',
+                        '[role="dialog"]', '[role="alertdialog"]',
+                        // Common IDs
+                        '#cookie-banner', '#consent-banner', '#cookie-notice', '#consent-notice',
+                        '#cookie-consent', '#gdpr-consent', '#privacy-notice'
+                    ];
+                    
+                    for (const selector of selectors) {
+                        try {
+                            const elements = document.querySelectorAll(selector);
+                            for (const el of elements) {
+                                const text = (el.textContent || el.innerText || '').toLowerCase();
+                                const isVisible = el.offsetParent !== null && 
+                                                 window.getComputedStyle(el).display !== 'none' &&
+                                                 window.getComputedStyle(el).visibility !== 'hidden';
+                                
+                                if (isVisible && keywords.some(kw => text.includes(kw))) {
+                                    // Try to find close button inside
+                                    const closeBtn = el.querySelector('button[aria-label*="close" i], ' +
+                                                                    'button[aria-label*="dismiss" i], ' +
+                                                                    'button[class*="close"], ' +
+                                                                    'button[class*="dismiss"], ' +
+                                                                    '.close, .dismiss, [class*="close-button"], ' +
+                                                                    '[class*="dismiss-button"]');
+                                    
+                                    if (closeBtn) {
+                                        closeBtn.click();
+                                        closedCount++;
+                                        continue;
+                                    }
+                                    
+                                    // Try to find accept/agree button
+                                    const acceptBtn = Array.from(el.querySelectorAll('button, a')).find(btn => {
+                                        const btnText = (btn.textContent || btn.innerText || '').toLowerCase();
+                                        return keywords.some(kw => btnText.includes(kw) && 
+                                                           (btnText.includes('accept') || btnText.includes('agree') || 
+                                                            btnText.includes('ok') || btnText.includes('continue')));
+                                    });
+                                    
+                                    if (acceptBtn) {
+                                        acceptBtn.click();
+                                        closedCount++;
+                                        continue;
+                                    }
+                                    
+                                    // If no button found, try to hide the element
+                                    el.style.display = 'none';
+                                    el.style.visibility = 'hidden';
+                                    closedCount++;
+                                }
+                            }
+                        } catch (e) {
+                            // Continue with next selector
+                        }
+                    }
+                    
+                    // Also try to close any visible modals/overlays by clicking outside or pressing Escape
+                    const modals = document.querySelectorAll('[role="dialog"], .modal, .overlay, .popup');
+                    for (const modal of modals) {
+                        const style = window.getComputedStyle(modal);
+                        if (style.display !== 'none' && style.visibility !== 'hidden') {
+                            // Try Escape key simulation
+                            const escEvent = new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true });
+                            modal.dispatchEvent(escEvent);
+                            
+                            // Try clicking backdrop/overlay
+                            const backdrop = modal.closest('.modal-backdrop, .overlay-backdrop, [class*="backdrop"]');
+                            if (backdrop) {
+                                backdrop.click();
+                            }
+                        }
+                    }
+                    
+                    return closedCount;
+                }
+        """)
+        
+        if overlays_closed > 0:
+            print(f"   ✅ Closed {overlays_closed} overlay(s)/banner(s)", file=sys.stderr)
+            await page.wait_for_timeout(1000)  # Wait for overlay to disappear
+        else:
+            print("   ℹ️  No overlays found or already closed", file=sys.stderr)
+        
+        # Run pre-actions (like cookie consent) - user-defined
         if pre_actions:
             print(f"🔧 Running {len(pre_actions)} pre-actions...", file=sys.stderr)
         for i, action in enumerate(pre_actions, 1):
@@ -752,7 +919,36 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 pass
             
             if not discovered_forms:
-                raise RuntimeError("No forms found on the page after multiple attempts. The form might be dynamically loaded.")
+                # Try one more time with even longer wait
+                print("   ⏳ Last attempt: waiting 10 seconds for dynamic forms...", file=sys.stderr)
+                await page.wait_for_timeout(10000)
+                discovered_forms = await discover_forms(page)
+                if not discovered_forms:
+                    # Don't fail - try to continue anyway and look for any input fields
+                    print("   ⚠️  No forms found, but will try to find and fill fields directly...", file=sys.stderr)
+                    # Create a dummy form structure with discovered fields
+                    all_fields = await page.evaluate("""
+                        () => {
+                            const fields = [];
+                            document.querySelectorAll('input, textarea, select').forEach(el => {
+                                if (el.type !== 'hidden' && el.type !== 'submit' && el.type !== 'button') {
+                                    fields.push({
+                                        name: el.name || el.id || '',
+                                        type: el.type || el.tagName.toLowerCase(),
+                                        tagName: el.tagName.toLowerCase(),
+                                        selector: el.name ? `[name="${el.name}"]` : (el.id ? `#${el.id}` : ''),
+                                        isHidden: el.type === 'hidden' || el.offsetParent === null
+                                    });
+                                }
+                            });
+                            return fields;
+                        }
+                    """)
+                    if all_fields:
+                        discovered_forms = [{"fields": all_fields, "action": "", "method": "post"}]
+                        print(f"   ✅ Found {len(all_fields)} fields directly (no form wrapper)", file=sys.stderr)
+                    else:
+                        raise RuntimeError("No forms or fields found on the page after multiple attempts.")
         
         # Use the first form (or find the best match)
         # Prefer contact forms over newsletter forms
@@ -1238,6 +1434,82 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                         error_msg += f"\nLast error: {last_error}"
                     raise RuntimeError(error_msg)
 
+        # Check for and close any overlays that appeared after form filling (before CAPTCHA)
+        print("🔍 Checking for overlays that might block CAPTCHA...", file=sys.stderr)
+        await page.evaluate("""
+            () => {
+                // Close any overlays that might have appeared
+                const overlays = document.querySelectorAll('.overlay, .modal, .popup, [role="dialog"]');
+                for (const overlay of overlays) {
+                    const style = window.getComputedStyle(overlay);
+                    if (style.display !== 'none' && style.visibility !== 'hidden') {
+                        // Try to find and click close button
+                        const closeBtn = overlay.querySelector('button[class*="close"], .close, [aria-label*="close" i]');
+                        if (closeBtn) {
+                            closeBtn.click();
+                        } else {
+                            // Hide it
+                            overlay.style.display = 'none';
+                        }
+                    }
+                }
+            }
+        """)
+        await page.wait_for_timeout(500)
+        
+        # Automatically check all consent/terms checkboxes
+        print("✅ Checking consent/terms checkboxes automatically...", file=sys.stderr)
+        consent_checkboxes_checked = await page.evaluate("""
+            () => {
+                const consentKeywords = ['agree', 'terms', 'accept', 'consent', 'gdpr', 'privacy', 'policy', 
+                                       'conditions', 'acknowledge', 'confirm', 'i agree', 'i accept'];
+                const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+                let checkedCount = 0;
+                
+                for (const checkbox of checkboxes) {
+                    // Skip if already checked
+                    if (checkbox.checked) {
+                        continue;
+                    }
+                    
+                    // Skip hidden checkboxes
+                    const rect = checkbox.getBoundingClientRect();
+                    const style = window.getComputedStyle(checkbox);
+                    if (rect.width === 0 || rect.height === 0 || 
+                        style.display === 'none' || style.visibility === 'hidden') {
+                        continue;
+                    }
+                    
+                    // Check if it's a consent checkbox by looking at nearby text
+                    const label = checkbox.closest('label') || 
+                                 document.querySelector(`label[for="${checkbox.id}"]`) ||
+                                 checkbox.parentElement;
+                    const labelText = (label ? label.textContent || label.innerText : '').toLowerCase();
+                    const name = (checkbox.name || '').toLowerCase();
+                    const id = (checkbox.id || '').toLowerCase();
+                    const allText = labelText + ' ' + name + ' ' + id;
+                    
+                    // Check if it matches consent keywords
+                    const isConsent = consentKeywords.some(keyword => allText.includes(keyword));
+                    
+                    if (isConsent) {
+                        checkbox.checked = true;
+                        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                        checkbox.dispatchEvent(new Event('click', { bubbles: true }));
+                        checkedCount++;
+                    }
+                }
+                
+                return checkedCount;
+            }
+        """)
+        
+        if consent_checkboxes_checked > 0:
+            print(f"   ✅ Checked {consent_checkboxes_checked} consent checkbox(es)", file=sys.stderr)
+            await page.wait_for_timeout(500)  # Brief pause after checking
+        else:
+            print("   ℹ️  No unchecked consent checkboxes found", file=sys.stderr)
+        
         # Detect and handle CAPTCHA - check both before and after form fill
         # Some forms load CAPTCHA dynamically after fields are filled
         print("🔐 Checking for CAPTCHA (initial check)...", file=sys.stderr)
@@ -1276,31 +1548,105 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
             response_field = captcha_info.get("responseField", "g-recaptcha-response")
             
             # Use local solver only by default (no hybrid mode)
-            use_local = template.get("use_local_captcha_solver", True)  # Default to True
+            # Handle both snake_case and camelCase
+            use_local = template.get("use_local_captcha_solver")
+            if use_local is None:
+                use_local = template.get("useLocalCaptchaSolver")
             if use_local is None:
                 use_local = os.getenv("TEQ_USE_LOCAL_CAPTCHA_SOLVER", "true").lower() not in ("false", "0", "no")
             else:
                 use_local = bool(use_local)
+            # Default to True if still not specified
+            if use_local is None:
+                use_local = True
             
             # Check if we should use hybrid mode (try local, fallback to external)
             # Default to False - use ONLY local solver
-            use_hybrid = template.get("use_hybrid_captcha_solver", False)  # Default to False - local only
+            # Handle both snake_case and camelCase
+            use_hybrid = template.get("use_hybrid_captcha_solver")
+            if use_hybrid is None:
+                use_hybrid = template.get("useHybridCaptchaSolver")
             if use_hybrid is None:
                 use_hybrid = os.getenv("TEQ_USE_HYBRID_CAPTCHA_SOLVER", "false").lower() not in ("false", "0", "no")
             else:
                 use_hybrid = bool(use_hybrid)
+            # Default to False if still not specified
+            if use_hybrid is None:
+                use_hybrid = False
             
             solver = None
             local_solver_used = False
             local_solver_failed = False
+            local_solver_error = None  # Store the actual error message
             local_solver_instance = None  # Store local solver instance for later use
             
             # Step 1: Try local solver first (if enabled)
+            print(f"🔍 CAPTCHA solving check: use_local={use_local}, captcha_type={captcha_type}, site_key={'present' if site_key else 'missing'}", file=sys.stderr)
+            
+            # Also try hCaptcha if it's hCaptcha
+            if use_local and captcha_type == "hcaptcha" and site_key:
+                try:
+                    from captcha_solver import LocalCaptchaSolver
+                    
+                    print("🤖 Step 1: Trying LOCAL CAPTCHA SOLVER for hCaptcha (fully automated)...", file=sys.stderr)
+                    print(f"   Site key: {site_key[:20]}...", file=sys.stderr)
+                    print(f"   Page URL: {page.url}", file=sys.stderr)
+                    local_solver_instance = LocalCaptchaSolver(page=page)
+                    solver = local_solver_instance
+                    local_solver_used = True
+                    
+                    try:
+                        token = await asyncio.wait_for(
+                            solver.solve_hcaptcha(site_key, page.url),
+                            timeout=120
+                        )
+                    except asyncio.TimeoutError:
+                        print("   ⏰ Local solver timeout (120s) for hCaptcha", file=sys.stderr)
+                        token = None
+                        local_solver_failed = True
+                        local_solver_error = "Timeout after 120 seconds"
+                    
+                    if token:
+                        # Inject hCaptcha token
+                        await page.evaluate("""
+                            ([token]) => {
+                                const field = document.querySelector('textarea[name="h-captcha-response"]');
+                                if (field) {
+                                    field.value = token;
+                                    field.dispatchEvent(new Event('change', { bubbles: true }));
+                                    field.dispatchEvent(new Event('input', { bubbles: true }));
+                                }
+                            }
+                        """, [token])
+                        await page.wait_for_timeout(2000)
+                        captcha_info = await detect_captcha(page)
+                        captcha_solved = captcha_info.get("solved", False)
+                        
+                        if captcha_solved:
+                            print("✅ hCaptcha solved automatically by local solver!", file=sys.stderr)
+                    else:
+                        local_solver_failed = True
+                        local_solver_error = "Solver returned empty token for hCaptcha"
+                        if not use_hybrid:
+                            raise RuntimeError("Local hCaptcha solver returned empty token")
+                        
+                except Exception as e:
+                    import traceback
+                    local_error = str(e)
+                    error_trace = traceback.format_exc()
+                    print(f"⚠️  Local hCaptcha solver failed: {local_error}", file=sys.stderr)
+                    print(f"📋 Full error trace:", file=sys.stderr)
+                    print(error_trace, file=sys.stderr)
+                    local_solver_failed = True
+                    local_solver_error = local_error[:200]
+            
             if use_local and captcha_type == "recaptcha" and site_key:
                 try:
                     from captcha_solver import LocalCaptchaSolver
                     
                     print("🤖 Step 1: Trying LOCAL CAPTCHA SOLVER (fully automated)...", file=sys.stderr)
+                    print(f"   Site key: {site_key[:20]}...", file=sys.stderr)
+                    print(f"   Page URL: {page.url}", file=sys.stderr)
                     local_solver_instance = LocalCaptchaSolver(page=page)
                     solver = local_solver_instance
                     local_solver_used = True
@@ -1310,16 +1656,17 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                     try:
                         token = await asyncio.wait_for(
                             solver.solve_recaptcha_v2(site_key, page.url),
-                            timeout=90  # 90 second timeout for local solver (increased from 60s)
+                            timeout=120  # 120 second timeout for local solver (increased for complex CAPTCHAs)
                         )
                     except asyncio.TimeoutError:
-                        print("   ⏰ Local solver timeout (90s)", file=sys.stderr)
+                        print("   ⏰ Local solver timeout (120s)", file=sys.stderr)
                         if use_hybrid:
                             print("   Will try external service...", file=sys.stderr)
                         else:
                             print("   Hybrid mode disabled - will not try external services", file=sys.stderr)
                         token = None
                         local_solver_failed = True
+                        local_solver_error = "Timeout after 120 seconds"
                     
                     if token:
                         # Inject the solved token into the form
@@ -1350,6 +1697,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                             print("✅ CAPTCHA solved automatically by local solver!", file=sys.stderr)
                     else:
                         local_solver_failed = True
+                        local_solver_error = "Solver returned empty token"
                         if not use_hybrid:
                             raise RuntimeError("Local CAPTCHA solver returned empty token")
                         else:
@@ -1363,6 +1711,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                     print(f"📋 Full error trace:", file=sys.stderr)
                     print(error_trace, file=sys.stderr)
                     local_solver_failed = True
+                    local_solver_error = local_error[:200]  # Store first 200 chars of error
                     if not use_hybrid:
                         print("❌ Local solver failed and hybrid mode is disabled. Will not try external services.", file=sys.stderr)
                     else:
@@ -1409,7 +1758,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                         try:
                             token = await asyncio.wait_for(
                                 solver.solve_recaptcha_v2(site_key, page_url),
-                                timeout=50  # 50 second max timeout
+                                timeout=120  # 120 second max timeout (increased for complex CAPTCHAs)
                             )
                         except asyncio.TimeoutError:
                             print("⏰ CAPTCHA solver timeout - trying different approach", file=sys.stderr)
@@ -1471,7 +1820,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                     print("⚠️  All automated CAPTCHA solvers failed. Waiting for manual CAPTCHA solving...", file=sys.stderr)
                     print("⚠️  Please solve the CAPTCHA manually in the browser window.", file=sys.stderr)
                     print("⚠️  Waiting up to 5 minutes for manual CAPTCHA solving...", file=sys.stderr)
-                    captcha_timeout = template.get("captcha_timeout_ms", 300000)  # 5 minutes for manual solving
+                    captcha_timeout = template.get("captcha_timeout_ms", 600000)  # 10 minutes for manual solving (increased)
                     captcha_solved = await wait_for_captcha_solution(page, captcha_info, captcha_timeout)
                     
                     if captcha_solved:
@@ -1485,7 +1834,10 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                     # Headless mode - can't do manual solving
                     error_msg = "reCAPTCHA detected but all automated solvers failed."
                     if local_solver_failed:
-                        error_msg += " Local solver failed."
+                        error_msg += " Local solver failed"
+                        if local_solver_error:
+                            error_msg += f" ({local_solver_error})"
+                        error_msg += "."
                     if not solver:
                         error_msg += " No external solver available (no API keys configured)."
                     error_msg += " Options: 1) Enable local solver with 'use_local_captcha_solver': true (already enabled), 2) Set CAPTCHA API keys, 3) Use test mode with 'headless': false for manual solving"
@@ -1772,7 +2124,8 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 except Exception as e:
                     print(f"   ⚠️  Failed to solve CAPTCHA after form fill: {str(e)[:100]}", file=sys.stderr)
                     # Try external solver as fallback
-                    captcha_service = template.get("captcha_service", "auto")
+                    # Handle both snake_case and camelCase
+                    captcha_service = template.get("captcha_service") or template.get("captchaService") or "auto"
                     solver = get_captcha_solver(captcha_service)
                     if solver:
                         try:
@@ -1923,7 +2276,8 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
             response_field = post_submit_captcha_check.get("responseField", "g-recaptcha-response")
             
             if captcha_type == "recaptcha" and site_key:
-                use_local = template.get("use_local_captcha_solver", True)
+                # Handle both snake_case and camelCase
+                use_local = template.get("use_local_captcha_solver") or template.get("useLocalCaptchaSolver") or True
                 if use_local is None:
                     use_local = os.getenv("TEQ_USE_LOCAL_CAPTCHA_SOLVER", "true").lower() not in ("false", "0", "no")
                 else:
@@ -1949,7 +2303,8 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 
                 # If local solver didn't work, try external service
                 if not token:
-                    captcha_service = template.get("captcha_service", "auto")
+                    # Handle both snake_case and camelCase
+                    captcha_service = template.get("captcha_service") or template.get("captchaService") or "auto"
                     solver = get_captcha_solver(captcha_service)
                     if solver:
                         try:
@@ -2011,7 +2366,8 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                         captcha_type = captcha_info_retry.get("type", "")
                         
                         # Use local solver if enabled
-                        use_local = template.get("use_local_captcha_solver", True)
+                        # Handle both snake_case and camelCase
+                        use_local = template.get("use_local_captcha_solver") or template.get("useLocalCaptchaSolver") or True
                         if use_local is None:
                             use_local = os.getenv("TEQ_USE_LOCAL_CAPTCHA_SOLVER", "true").lower() not in ("false", "0", "no")
                         else:
@@ -2338,8 +2694,27 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 "submission_error": submission_error if submission_error else "Unknown error",
             }
 
-        await context.close()
-        await browser.close()
+        # Close browser/tab after submission (always close, even on errors)
+        print("🔒 Closing browser after submission...", file=sys.stderr)
+        try:
+            if page:
+                await page.close()
+                await asyncio.sleep(0.3)  # Brief pause for cleanup
+        except Exception as e:
+            print(f"   ⚠️  Error closing page: {str(e)[:50]}", file=sys.stderr)
+        try:
+            if context:
+                await context.close()
+                await asyncio.sleep(0.3)
+        except Exception as e:
+            print(f"   ⚠️  Error closing context: {str(e)[:50]}", file=sys.stderr)
+        try:
+            if browser:
+                await browser.close()
+        except Exception as e:
+            print(f"   ⚠️  Error closing browser: {str(e)[:50]}", file=sys.stderr)
+        print("   ✅ Browser closed", file=sys.stderr)
+        
         return result
 
 

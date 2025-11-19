@@ -44,12 +44,22 @@ export async function POST(req: NextRequest) {
     // For test mode, show browser (headless=false) so user can see what's happening
     // Enable auto-detect if no fields are provided
     const hasFields = template.fields && Array.isArray(template.fields) && template.fields.length > 0;
+    
+    // Check if we have a display available (for non-headless mode)
+    // On remote servers without display, we need to use headless mode
+    // Check for DISPLAY env var (X11) or if we're in a headless environment
+    const hasDisplay = process.env.DISPLAY !== undefined && process.env.DISPLAY !== '';
+    const forceHeadless = process.env.TEQ_FORCE_HEADLESS === 'true';
+    const shouldUseHeadless = forceHeadless || (!hasDisplay && !isTest);
+    
     const enhancedTemplate = {
       ...template,
       use_local_captcha_solver: template.use_local_captcha_solver ?? true,
       use_hybrid_captcha_solver: template.use_hybrid_captcha_solver ?? false, // Default to false - use ONLY local solver
       captcha_service: template.captcha_service ?? "local", // Default to local only
-      headless: isTest ? false : template.headless ?? true, // Test mode shows browser
+      // Use headless mode if no display available (remote server) or if forced
+      // Otherwise, show browser for better CAPTCHA solving reliability
+      headless: isTest ? false : shouldUseHeadless,
       use_auto_detect: template.use_auto_detect ?? (!hasFields), // Auto-detect if no fields provided
       test_data: template.test_data ?? {
         name: "TEQ QA User",

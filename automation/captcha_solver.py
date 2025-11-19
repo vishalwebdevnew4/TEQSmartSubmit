@@ -648,68 +648,173 @@ class LocalCaptchaSolver(CaptchaSolver):
     
     async def _click_recaptcha_checkbox(self):
         """Click the reCAPTCHA checkbox using multiple strategies."""
+        print("   🔍 Looking for reCAPTCHA checkbox...", file=sys.stderr)
+        
         try:
-            # Strategy 1: Find and click the checkbox in the iframe
-            iframe = await self.page.query_selector('iframe[src*="recaptcha"][src*="anchor"]')
+            # First, wait for reCAPTCHA to be loaded
+            print("   ⏳ Waiting for reCAPTCHA to load...", file=sys.stderr)
+            await asyncio.sleep(2)
+            
+            # Check if reCAPTCHA is already solved
+            token = await self._get_recaptcha_token()
+            if token:
+                print("   ✅ CAPTCHA already solved!", file=sys.stderr)
+                return
+            
+            # Strategy 1: Find and click the checkbox in the iframe (most reliable)
+            print("   📋 Strategy 1: Looking for reCAPTCHA iframe...", file=sys.stderr)
+            iframe_selectors = [
+                'iframe[src*="recaptcha"][src*="anchor"]',
+                'iframe[title*="reCAPTCHA"]',
+                'iframe[title*="recaptcha"]',
+                '.g-recaptcha iframe',
+                'iframe[src*="google.com/recaptcha"]'
+            ]
+            
+            iframe = None
+            for selector in iframe_selectors:
+                try:
+                    iframe = await self.page.query_selector(selector)
+                    if iframe:
+                        print(f"   ✅ Found iframe with selector: {selector}", file=sys.stderr)
+                        break
+                except:
+                    continue
+            
             if iframe:
                 try:
+                    print("   🔄 Accessing iframe content...", file=sys.stderr)
                     frame = await iframe.content_frame()
                     if frame:
+                        print("   ✅ Iframe content accessible", file=sys.stderr)
                         # Wait for checkbox to be ready
-                        await frame.wait_for_selector('#recaptcha-anchor', timeout=5000)
+                        try:
+                            await frame.wait_for_selector('#recaptcha-anchor', timeout=10000)
+                            print("   ✅ Checkbox element found in iframe", file=sys.stderr)
+                        except:
+                            print("   ⚠️  Checkbox selector not found, trying alternative...", file=sys.stderr)
+                        
                         checkbox = await frame.query_selector('#recaptcha-anchor')
+                        if not checkbox:
+                            # Try alternative selectors
+                            checkbox = await frame.query_selector('.recaptcha-checkbox')
+                            if not checkbox:
+                                checkbox = await frame.query_selector('[role="checkbox"]')
+                        
                         if checkbox:
-                            # Scroll into view and click
+                            print("   🖱️  Clicking checkbox...", file=sys.stderr)
+                            # Scroll into view
                             await checkbox.scroll_into_view_if_needed()
                             await asyncio.sleep(0.5)
-                            await checkbox.click()
-                            await asyncio.sleep(2)
+                            
+                            # Try multiple click methods
+                            try:
+                                await checkbox.click(timeout=5000)
+                                print("   ✅ Checkbox clicked successfully!", file=sys.stderr)
+                            except:
+                                # Try JavaScript click
+                                await frame.evaluate("""
+                                    () => {
+                                        const checkbox = document.querySelector('#recaptcha-anchor') || 
+                                                         document.querySelector('.recaptcha-checkbox') ||
+                                                         document.querySelector('[role="checkbox"]');
+                                        if (checkbox) {
+                                            checkbox.click();
+                                        }
+                                    }
+                                """)
+                                print("   ✅ Checkbox clicked via JavaScript!", file=sys.stderr)
+                            
+                            await asyncio.sleep(3)  # Wait for response
                             return
-                except:
-                    pass
+                        else:
+                            print("   ⚠️  Checkbox element not found in iframe", file=sys.stderr)
+                except Exception as e:
+                    print(f"   ⚠️  Error accessing iframe: {str(e)[:100]}", file=sys.stderr)
             
-            # Strategy 2: Click via JavaScript in the iframe
+            # Strategy 2: Click via JavaScript directly on the page
+            print("   📋 Strategy 2: Trying JavaScript click on page...", file=sys.stderr)
+            click_result = await self.page.evaluate("""
+                () => {
+                    // Find the reCAPTCHA container
+                    const recaptchaDiv = document.querySelector('.g-recaptcha');
+                    if (recaptchaDiv) {
+                        const iframe = recaptchaDiv.querySelector('iframe');
+                        if (iframe) {
+                            // Try to access iframe and click
+                            try {
+                                const frame = iframe.contentWindow || iframe.contentDocument;
+                                if (frame && frame.document) {
+                                    const checkbox = frame.document.querySelector('#recaptcha-anchor');
+                                    if (checkbox) {
+                                        checkbox.click();
+                                        return { success: true, method: 'iframe-content' };
+                                    }
+                                }
+                            } catch (e) {
+                                // Cross-origin, can't access
+                            }
+                            
+                            // Click on iframe position
+                            const rect = iframe.getBoundingClientRect();
+                            const x = rect.left + rect.width / 2;
+                            const y = rect.top + rect.height / 2;
+                            
+                            // Create click event at iframe center
+                            const clickEvent = new MouseEvent('click', {
+                                view: window,
+                                bubbles: true,
+                                cancelable: true,
+                                clientX: x,
+                                clientY: y,
+                                button: 0
+                            });
+                            
+                            // Dispatch on iframe
+                            iframe.dispatchEvent(clickEvent);
+                            
+                            // Also try clicking the div container
+                            recaptchaDiv.dispatchEvent(clickEvent);
+                            
+                            return { success: true, method: 'iframe-position', x: x, y: y };
+                        }
+                    }
+                    return { success: false, error: 'No reCAPTCHA found' };
+                }
+            """)
+            
+            if click_result.get("success"):
+                print(f"   ✅ JavaScript click executed: {click_result.get('method')}", file=sys.stderr)
+                await asyncio.sleep(3)
+                return
+            else:
+                print(f"   ⚠️  JavaScript click failed: {click_result.get('error', 'Unknown')}", file=sys.stderr)
+            
+            # Strategy 3: Use Playwright's click on iframe element directly
+            print("   📋 Strategy 3: Trying direct iframe click...", file=sys.stderr)
             iframe = await self.page.query_selector('iframe[src*="recaptcha"]')
             if iframe:
                 try:
-                    frame = await iframe.content_frame()
-                    if frame:
-                        await frame.evaluate("""
-                            () => {
-                                const checkbox = document.querySelector('#recaptcha-anchor');
-                                if (checkbox) {
-                                    checkbox.click();
-                                }
-                            }
-                        """)
-                        await asyncio.sleep(2)
+                    # Get iframe position and click there
+                    box = await iframe.bounding_box()
+                    if box:
+                        x = box['x'] + box['width'] / 2
+                        y = box['y'] + box['height'] / 2
+                        print(f"   🖱️  Clicking at iframe center: ({x}, {y})", file=sys.stderr)
+                        await self.page.mouse.click(x, y)
+                        await asyncio.sleep(3)
+                        print("   ✅ Direct click executed!", file=sys.stderr)
                         return
-                except:
-                    pass
+                except Exception as e:
+                    print(f"   ⚠️  Direct click failed: {str(e)[:100]}", file=sys.stderr)
             
-            # Strategy 3: Click the iframe container
-            await self.page.evaluate("""
-                () => {
-                    const iframe = document.querySelector('iframe[src*="recaptcha"]');
-                    if (iframe) {
-                        const rect = iframe.getBoundingClientRect();
-                        const x = rect.left + rect.width / 2;
-                        const y = rect.top + rect.height / 2;
-                        const clickEvent = new MouseEvent('click', {
-                            view: window,
-                            bubbles: true,
-                            cancelable: true,
-                            clientX: x,
-                            clientY: y
-                        });
-                        iframe.dispatchEvent(clickEvent);
-                    }
-                }
-            """)
-            await asyncio.sleep(2)
+            # If all strategies failed, raise error
+            raise RuntimeError("Could not find or click reCAPTCHA checkbox after trying all strategies")
             
         except Exception as e:
-            raise RuntimeError(f"Failed to click reCAPTCHA checkbox: {str(e)}")
+            error_msg = str(e)
+            print(f"   ❌ Failed to click reCAPTCHA checkbox: {error_msg[:200]}", file=sys.stderr)
+            raise RuntimeError(f"Failed to click reCAPTCHA checkbox: {error_msg}")
     
     async def _check_challenge_present(self) -> bool:
         """Check if a challenge (audio/image) is present."""
@@ -1136,29 +1241,161 @@ class LocalCaptchaSolver(CaptchaSolver):
                 except:
                     pass
             
-            # Try to click play/download button if it exists
+            # Try to click play/download button if it exists - CRITICAL: Must play audio
+            print("   🎵 Looking for audio play/download button...", file=sys.stderr)
+            audio_played = False
             try:
                 play_button_selectors = [
+                    'a.rc-audiochallenge-tdownload',  # Download link (most common)
                     '.rc-audiochallenge-play-button',
-                    'button[title*="play"]',
-                    'button[title*="Play"]',
-                    'button[aria-label*="play"]',
-                    'a.rc-audiochallenge-tdownload',
+                    'button[title*="play" i]',
+                    'button[aria-label*="play" i]',
                     'a[href*="audio"]',
-                    'a[class*="download"]'
+                    'a[class*="download"]',
+                    '[class*="play"][class*="button"]',
+                    '[id*="play"]',
+                    '[id*="audio"]'
                 ]
                 for selector in play_button_selectors:
                     try:
                         play_btn = await frame.query_selector(selector)
-                        if play_btn and await play_btn.is_visible():
-                            print(f"   ▶️  Found play/download button: {selector}, clicking...", file=sys.stderr)
-                            await play_btn.click()
-                            await asyncio.sleep(3)  # Wait for audio to start
-                            break
-                    except:
+                        if play_btn:
+                            is_visible = await play_btn.is_visible()
+                            if is_visible:
+                                print(f"   ▶️  Found play/download button: {selector}, clicking to play audio...", file=sys.stderr)
+                                # Scroll into view first
+                                await play_btn.scroll_into_view_if_needed()
+                                await asyncio.sleep(0.5)
+                                
+                                # Try multiple click methods
+                                try:
+                                    await play_btn.click(timeout=5000)
+                                    print("   ✅ Play button clicked!", file=sys.stderr)
+                                    audio_played = True
+                                except:
+                                    # Try JavaScript click
+                                    await frame.evaluate("""
+                                        (selector) => {
+                                            const btn = document.querySelector(selector);
+                                            if (btn) {
+                                                btn.click();
+                                                // Also try to trigger play if it's an audio element
+                                                const audio = btn.closest('.rc-audiochallenge')?.querySelector('audio');
+                                                if (audio) {
+                                                    audio.play();
+                                                }
+                                            }
+                                        }
+                                    """, selector)
+                                    print("   ✅ Play button clicked via JavaScript!", file=sys.stderr)
+                                    audio_played = True
+                                
+                                await asyncio.sleep(3)  # Wait for audio to start playing
+                                break
+                    except Exception as e:
+                        print(f"   ⚠️  Error with selector {selector}: {str(e)[:50]}", file=sys.stderr)
                         continue
-            except:
-                pass
+            except Exception as e:
+                print(f"   ⚠️  Error finding play button: {str(e)[:50]}", file=sys.stderr)
+            
+            # If no button found, try JavaScript to find and click any play/download element
+            if not audio_played:
+                print("   🔄 Trying JavaScript to find and play audio...", file=sys.stderr)
+                try:
+                    played = await frame.evaluate("""
+                        () => {
+                            // PRIORITY 1: Try to find and play audio element directly FIRST
+                            const audio = document.querySelector('audio');
+                            if (audio) {
+                                // Try to play it
+                                audio.play().catch(() => {});
+                                // Also trigger load
+                                audio.load();
+                                return { played: true, method: 'audio-element-direct' };
+                            }
+                            
+                            // PRIORITY 2: Find download link (most reliable for reCAPTCHA)
+                            const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload, a[href*="audio"]');
+                            if (downloadLink) {
+                                // Click it multiple times to ensure it triggers
+                                downloadLink.click();
+                                // Also try to get the URL and trigger download
+                                const href = downloadLink.getAttribute('href');
+                                if (href) {
+                                    // Trigger download programmatically
+                                    const link = document.createElement('a');
+                                    link.href = href;
+                                    link.click();
+                                }
+                                return { played: true, method: 'download-link' };
+                            }
+                            
+                            // PRIORITY 3: Find play button
+                            const playBtn = document.querySelector('.rc-audiochallenge-play-button, button[title*="play" i], button[aria-label*="play" i]');
+                            if (playBtn) {
+                                playBtn.click();
+                                // Also try to find audio and play it
+                                const audio = playBtn.closest('.rc-audiochallenge')?.querySelector('audio');
+                                if (audio) {
+                                    audio.play().catch(() => {});
+                                }
+                                return { played: true, method: 'play-button' };
+                            }
+                            
+                            // PRIORITY 4: Try clicking anywhere in challenge area
+                            const challenge = document.querySelector('.rc-audiochallenge');
+                            if (challenge) {
+                                challenge.click();
+                                // Also try to find and play audio
+                                const audio = challenge.querySelector('audio');
+                                if (audio) {
+                                    audio.play().catch(() => {});
+                                }
+                                return { played: true, method: 'challenge-area' };
+                            }
+                            
+                            return { played: false };
+                        }
+                    """)
+                    if played.get("played"):
+                        print(f"   ✅ Audio triggered via JavaScript: {played.get('method')}", file=sys.stderr)
+                        audio_played = True
+                        await asyncio.sleep(5)  # Wait longer for audio to actually start playing
+                    else:
+                        print("   ⚠️  Could not find play button via JavaScript", file=sys.stderr)
+                except Exception as e:
+                    print(f"   ⚠️  JavaScript play failed: {str(e)[:50]}", file=sys.stderr)
+            
+            # Final attempt: Force play audio element if it exists
+            if not audio_played:
+                print("   🔄 Final attempt: Trying to force play audio element...", file=sys.stderr)
+                try:
+                    forced = await frame.evaluate("""
+                        () => {
+                            const audio = document.querySelector('audio');
+                            if (audio) {
+                                audio.play().catch(() => {});
+                                // Also try to set src and play
+                                if (!audio.src) {
+                                    // Try to get src from download link
+                                    const link = document.querySelector('a.rc-audiochallenge-tdownload');
+                                    if (link && link.href) {
+                                        audio.src = link.href;
+                                        audio.load();
+                                        audio.play().catch(() => {});
+                                    }
+                                }
+                                return true;
+                            }
+                            return false;
+                        }
+                    """)
+                    if forced:
+                        print("   ✅ Forced audio element to play!", file=sys.stderr)
+                        audio_played = True
+                        await asyncio.sleep(3)
+                except Exception as e:
+                    print(f"   ⚠️  Force play failed: {str(e)[:50]}", file=sys.stderr)
             
             # Get audio source - prioritize download links (reCAPTCHA's preferred method)
             print("   📥 Getting audio source (checking download links first)...", file=sys.stderr)
@@ -1207,12 +1444,37 @@ class LocalCaptchaSolver(CaptchaSolver):
                     }
                 """)
                 if triggered:
-                    print("   ✅ Triggered audio load, waiting for audio...", file=sys.stderr)
+                    print("   ✅ Triggered audio load, waiting for audio to play...", file=sys.stderr)
                     await asyncio.sleep(5)  # Wait longer for audio to load after trigger
                 else:
                     print("   ⚠️  Could not trigger audio load, will try to extract URL anyway", file=sys.stderr)
             except Exception as e:
                 print(f"   ⚠️  Error triggering audio: {str(e)[:50]}", file=sys.stderr)
+            
+            # Verify audio is actually playing
+            if audio_played:
+                print("   🎧 Checking if audio is playing...", file=sys.stderr)
+                try:
+                    is_playing = await frame.evaluate("""
+                        () => {
+                            const audio = document.querySelector('audio');
+                            if (audio) {
+                                return !audio.paused && audio.currentTime > 0;
+                            }
+                            // Check if download link was clicked (audio might be downloading)
+                            const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload');
+                            if (downloadLink) {
+                                return downloadLink.getAttribute('href') !== null;
+                            }
+                            return false;
+                        }
+                    """)
+                    if is_playing:
+                        print("   ✅ Audio is playing!", file=sys.stderr)
+                    else:
+                        print("   ⚠️  Audio might not be playing, but continuing...", file=sys.stderr)
+                except Exception as e:
+                    print(f"   ⚠️  Error checking audio playback: {str(e)[:50]}", file=sys.stderr)
             
             audio_src = None
             for attempt in range(20):  # Increased to 20 attempts with longer waits
@@ -1578,10 +1840,49 @@ class LocalCaptchaSolver(CaptchaSolver):
                     input_field = await frame.query_selector(selector)
                     if input_field:
                         print(f"   ✅ Found input field: {selector}", file=sys.stderr)
-                        await input_field.fill(audio_text)
-                        await asyncio.sleep(0.5)  # Reduced from 1 to 0.5 seconds
-                        text_entered = True
-                        break
+                        # Try multiple methods to ensure text is entered
+                        try:
+                            await input_field.fill(audio_text)
+                        except:
+                            # Try JavaScript as fallback
+                            await frame.evaluate("""
+                                (selector, text) => {
+                                    const field = document.querySelector(selector);
+                                    if (field) {
+                                        field.value = text;
+                                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                                        field.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                }
+                            """, selector, audio_text)
+                        
+                        # Verify text was entered
+                        await asyncio.sleep(0.5)
+                        entered_value = await input_field.input_value()
+                        if entered_value == audio_text or entered_value.strip().upper() == audio_text.strip().upper():
+                            print(f"   ✅ Text entered successfully: '{entered_value}'", file=sys.stderr)
+                            text_entered = True
+                            break
+                        else:
+                            print(f"   ⚠️  Text mismatch - expected '{audio_text}', got '{entered_value}'", file=sys.stderr)
+                            # Try again with JavaScript
+                            await frame.evaluate("""
+                                (selector, text) => {
+                                    const field = document.querySelector(selector);
+                                    if (field) {
+                                        field.value = text;
+                                        field.focus();
+                                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                                        field.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                }
+                            """, selector, audio_text)
+                            await asyncio.sleep(0.5)
+                            entered_value = await input_field.input_value()
+                            if entered_value == audio_text or entered_value.strip().upper() == audio_text.strip().upper():
+                                print(f"   ✅ Text entered on retry: '{entered_value}'", file=sys.stderr)
+                                text_entered = True
+                                break
                 except Exception as e:
                     print(f"   ⚠️  Failed to fill input {selector}: {str(e)[:50]}", file=sys.stderr)
                     continue
@@ -2061,14 +2362,249 @@ class LocalCaptchaSolver(CaptchaSolver):
             print(f"⚠️  Error getting token: {e}", file=sys.stderr)
             return None
     
+    async def _click_hcaptcha_checkbox(self) -> bool:
+        """Click the hCaptcha checkbox to trigger challenge."""
+        try:
+            print("🖱️ Looking for hCaptcha checkbox...", file=sys.stderr)
+            
+            # Wait for hCaptcha to load
+            await asyncio.sleep(2)
+            
+            # Find hCaptcha iframe
+            hcaptcha_iframe = await self.page.query_selector('iframe[src*="hcaptcha.com"]')
+            if not hcaptcha_iframe:
+                print("   ⚠️  hCaptcha iframe not found", file=sys.stderr)
+                return False
+            
+            frame = await hcaptcha_iframe.content_frame()
+            if not frame:
+                print("   ⚠️  Could not access hCaptcha iframe", file=sys.stderr)
+                return False
+            
+            # Wait for checkbox to appear
+            await asyncio.sleep(1)
+            
+            # Find and click the checkbox
+            checkbox_selectors = [
+                '#checkbox',
+                '.checkbox',
+                'div[role="checkbox"]',
+                'div.checkbox',
+                '[id*="checkbox"]'
+            ]
+            
+            for selector in checkbox_selectors:
+                try:
+                    checkbox = await frame.query_selector(selector)
+                    if checkbox:
+                        is_visible = await checkbox.is_visible()
+                        if is_visible:
+                            print(f"   ✅ Found hCaptcha checkbox: {selector}", file=sys.stderr)
+                            await checkbox.click()
+                            print("   ✅ hCaptcha checkbox clicked!", file=sys.stderr)
+                            await asyncio.sleep(2)  # Wait for challenge to appear
+                            return True
+                except Exception as e:
+                    continue
+            
+            # Try JavaScript click as fallback
+            clicked = await frame.evaluate("""
+                () => {
+                    const checkbox = document.querySelector('#checkbox, .checkbox, div[role="checkbox"]');
+                    if (checkbox) {
+                        checkbox.click();
+                        return true;
+                    }
+                    return false;
+                }
+            """)
+            
+            if clicked:
+                print("   ✅ hCaptcha checkbox clicked via JavaScript!", file=sys.stderr)
+                await asyncio.sleep(2)
+                return True
+            
+            print("   ⚠️  Could not find or click hCaptcha checkbox", file=sys.stderr)
+            return False
+            
+        except Exception as e:
+            print(f"   ❌ Error clicking hCaptcha checkbox: {e}", file=sys.stderr)
+            return False
+    
+    async def _get_hcaptcha_token(self) -> Optional[str]:
+        """Get the solved hCaptcha token."""
+        try:
+            # Strategy 1: Get token from the response field
+            token = await self.page.evaluate("""
+                () => {
+                    const responseField = document.querySelector('textarea[name="h-captcha-response"]');
+                    if (responseField && responseField.value && responseField.value.length > 0) {
+                        return responseField.value;
+                    }
+                    return null;
+                }
+            """)
+            
+            if token and len(token) > 0:
+                return token
+            
+            # Strategy 2: Try to get token from hcaptcha callback
+            token = await self.page.evaluate("""
+                () => {
+                    // Try to get token from hcaptcha if available
+                    if (window.hcaptcha && window.hcaptcha.getResponse) {
+                        try {
+                            // Find all widgets
+                            const widgets = document.querySelectorAll('[data-sitekey]');
+                            for (let widget of widgets) {
+                                const widgetId = widget.getAttribute('data-hcaptcha-widget-id') || 
+                                                widget.getAttribute('id');
+                                if (widgetId) {
+                                    const response = window.hcaptcha.getResponse(widgetId);
+                                    if (response && response.length > 0) {
+                                        return response;
+                                    }
+                                }
+                            }
+                            // Try without widget ID
+                            const response = window.hcaptcha.getResponse();
+                            if (response && response.length > 0) {
+                                return response;
+                            }
+                        } catch (e) {
+                            // Ignore errors
+                        }
+                    }
+                    return null;
+                }
+            """)
+            
+            if token and len(token) > 0:
+                return token
+            
+            return None
+            
+        except Exception as e:
+            print(f"⚠️  Error getting hCaptcha token: {e}", file=sys.stderr)
+            return None
+    
+    async def _solve_hcaptcha_challenge(self) -> bool:
+        """Attempt to solve hCaptcha challenge (image or audio)."""
+        try:
+            print("   🖼️  hCaptcha challenge detected, attempting to solve...", file=sys.stderr)
+            
+            # Find challenge iframe
+            challenge_iframe = await self.page.query_selector('iframe[src*="hcaptcha.com"][src*="challenge"]')
+            if not challenge_iframe:
+                print("   ⚠️  Challenge iframe not found", file=sys.stderr)
+                return False
+            
+            frame = await challenge_iframe.content_frame()
+            if not frame:
+                print("   ⚠️  Could not access challenge iframe", file=sys.stderr)
+                return False
+            
+            await asyncio.sleep(2)
+            
+            # Try to find and click audio button (similar to reCAPTCHA)
+            audio_selectors = [
+                'button[aria-label*="audio"]',
+                'button[aria-label*="Audio"]',
+                'button[title*="audio"]',
+                'button[title*="Audio"]',
+                '.audio-button',
+                'button.audio-button'
+            ]
+            
+            for selector in audio_selectors:
+                try:
+                    audio_btn = await frame.query_selector(selector)
+                    if audio_btn:
+                        is_visible = await audio_btn.is_visible()
+                        if is_visible:
+                            print(f"   ✅ Found audio button: {selector}", file=sys.stderr)
+                            await audio_btn.click()
+                            print("   ✅ Audio button clicked!", file=sys.stderr)
+                            await asyncio.sleep(3)
+                            # Try to solve audio challenge (similar to reCAPTCHA)
+                            return await self._solve_audio_challenge()
+                except:
+                    continue
+            
+            # For image challenges, we would need image recognition
+            # For now, return False and let the user know
+            print("   ⚠️  Image challenge detected - image solving not yet implemented", file=sys.stderr)
+            print("   💡 Tip: Try refreshing to get an audio challenge", file=sys.stderr)
+            return False
+            
+        except Exception as e:
+            print(f"   ❌ Error solving hCaptcha challenge: {e}", file=sys.stderr)
+            return False
+    
     async def solve_hcaptcha(self, site_key: str, page_url: str) -> Optional[str]:
         """Solve hCaptcha using local methods."""
         if not self.page:
             raise RuntimeError("LocalCaptchaSolver requires a Playwright page object")
         
-        # Similar implementation to reCAPTCHA but for hCaptcha
-        # This is a placeholder - hCaptcha solving would need similar logic
-        raise NotImplementedError("hCaptcha local solving not yet fully implemented")
+        try:
+            print(f"🎯 Solving hCaptcha...", file=sys.stderr)
+            print(f"   Site Key: {site_key[:30]}..." if site_key else "   (No site key found)", file=sys.stderr)
+            
+            # Step 1: Click the checkbox
+            print("\n🖱️  Clicking hCaptcha checkbox...", file=sys.stderr)
+            clicked = await self._click_hcaptcha_checkbox()
+            
+            if not clicked:
+                print("   ⚠️  Could not click checkbox, trying alternative method...", file=sys.stderr)
+                # Try clicking the iframe directly
+                hcaptcha_iframe = await self.page.query_selector('iframe[src*="hcaptcha.com"]')
+                if hcaptcha_iframe:
+                    await hcaptcha_iframe.click()
+                    await asyncio.sleep(2)
+            
+            # Step 2: Check if challenge appeared
+            await asyncio.sleep(2)
+            challenge_present = await self.page.evaluate("""
+                () => {
+                    const challengeFrame = document.querySelector('iframe[src*="hcaptcha.com"][src*="challenge"]');
+                    return challengeFrame !== null;
+                }
+            """)
+            
+            if challenge_present:
+                print("   ✅ Challenge appeared!", file=sys.stderr)
+                # Try to solve the challenge
+                solved = await self._solve_hcaptcha_challenge()
+                if not solved:
+                    print("   ⚠️  Challenge solving failed, but checking for token...", file=sys.stderr)
+            else:
+                print("   ℹ️  No challenge appeared (might be solved automatically)", file=sys.stderr)
+            
+            # Step 3: Wait and check for token
+            await asyncio.sleep(3)
+            token = await self._get_hcaptcha_token()
+            
+            if token:
+                print(f"\n✅ hCaptcha solved successfully!", file=sys.stderr)
+                print(f"   Token length: {len(token)}", file=sys.stderr)
+                return token
+            else:
+                print("\n⚠️  hCaptcha token not found yet", file=sys.stderr)
+                # Wait a bit more and try again
+                await asyncio.sleep(3)
+                token = await self._get_hcaptcha_token()
+                if token:
+                    print(f"   ✅ Got token on retry! Token length: {len(token)}", file=sys.stderr)
+                    return token
+                
+                print("   ❌ Could not get hCaptcha token", file=sys.stderr)
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error solving hCaptcha: {e}", file=sys.stderr)
+            import traceback
+            print(f"Traceback: {traceback.format_exc()[:300]}", file=sys.stderr)
+            return None
 
 
 def get_captcha_solver(service: str = "auto") -> Optional[CaptchaSolver]:

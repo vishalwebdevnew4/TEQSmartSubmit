@@ -1,0 +1,17 @@
+{
+  "fields": [],
+  "submit_selector": "button[type='submit'], input[type='submit']",
+  "post_submit_wait_ms": 30000,
+  "captcha_timeout_ms": 600000,
+  "captcha": true,
+  "use_auto_detect": true,
+  "use_local_captcha_solver": true,
+  "headless": false,
+  "wait_until": "load",
+  "test_data": {
+    "name": "Test User",
+    "email": "test@example.com",
+    "phone": "1234567890",
+    "message": "This is an automated test submission from TEQSmartSubmit."
+  }
+}

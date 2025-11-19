@@ -1,0 +1,160 @@
+{
+  "timestamp": "2025-11-19T12:16:51.607683",
+  "total": 19,
+  "passed": 0,
+  "failed": 19,
+  "results": {
+    "https://thefabcode.com/contact-us/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "CAPTCHA not solved within timeout. Please solve it manually in the browser window, or configure CAPTCHA solver API keys."
+      },
+      "attempts": 2
+    },
+    "https://www.seodiscovery.com/contact-us.php": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.wait_for_timeout: Target page, context or browser has been closed"
+      },
+      "attempts": 2
+    },
+    "https://blacklisted.agency/contact/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.wait_for_timeout: Target page, context or browser has been closed"
+      },
+      "attempts": 2
+    },
+    "https://www.imarkinfotech.com/contact/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://www.imarkinfotech.com/contact/\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://www.softtrix.com/contact": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: net::ERR_ABORTED; maybe frame was detached?\nCall log:\nnavigating to \"https://www.softtrix.com/contact\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://www.offsure.com/#/contact": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://www.offsure.com/#/contact\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://www.younedia.com/contact-us": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.wait_for_timeout: Target page, context or browser has been closed"
+      },
+      "attempts": 2
+    },
+    "https://netpeak.in/contact-us/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://netpeak.in/contact-us/\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://adroitors.com/contact-us/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://adroitors.com/contact-us/\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://www.smart-minds.co.in/contact.php": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.wait_for_timeout: Target page, context or browser has been closed"
+      },
+      "attempts": 2
+    },
+    "https://360digiexpertz.com/contact-us/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: net::ERR_ABORTED; maybe frame was detached?\nCall log:\nnavigating to \"https://360digiexpertz.com/contact-us/\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://www.onlinechandigarh.com/contact-us.html": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: net::ERR_ABORTED; maybe frame was detached?\nCall log:\nnavigating to \"https://www.onlinechandigarh.com/contact-us.html\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://marketing-digital.in/contact/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: net::ERR_ABORTED; maybe frame was detached?\nCall log:\nnavigating to \"https://marketing-digital.in/contact/\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://www.sagetitans.com/contact-us.html": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://www.sagetitans.com/contact-us.html\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://www.seoily.com/contact-us": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: net::ERR_ABORTED; maybe frame was detached?\nCall log:\nnavigating to \"https://www.seoily.com/contact-us\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://thehebrewscholar.com/index.php/contact": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: net::ERR_ABORTED; maybe frame was detached?\nCall log:\nnavigating to \"https://thehebrewscholar.com/index.php/contact\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://petpointmedia.com/contact-us/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.wait_for_timeout: Target page, context or browser has been closed"
+      },
+      "attempts": 2
+    },
+    "https://teqtopaustralia.xcelanceweb.com/contact": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://teqtopaustralia.xcelanceweb.com/contact\", waiting until \"load\"\n"
+      },
+      "attempts": 2
+    },
+    "https://interiordesign.xcelanceweb.com/": {
+      "success": false,
+      "result": {
+        "status": "error",
+        "message": "Page.wait_for_timeout: Target page, context or browser has been closed"
+      },
+      "attempts": 2
+    }
+  }
+}

@@ -110,7 +110,10 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
           // Use ONLY local solver (disable hybrid mode by default)
           const templateData = {
             ...currentTemplate.fieldMappings,
-            headless: isTest ? false : currentTemplate.fieldMappings.headless ?? true, // Test mode shows browser
+            // Headless mode will be determined by the API route based on environment
+            // (checks for DISPLAY availability - works on local dev, uses headless on remote servers)
+            // For test mode, always show browser
+            headless: isTest ? false : undefined, // Let API route decide based on environment
             use_local_captcha_solver: currentTemplate.fieldMappings.use_local_captcha_solver ?? true,
             use_hybrid_captcha_solver: currentTemplate.fieldMappings.use_hybrid_captcha_solver ?? false, // Default to false - local only
             captcha_service: currentTemplate.fieldMappings.captcha_service ?? "local", // Default to local only
