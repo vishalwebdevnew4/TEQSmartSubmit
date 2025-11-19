@@ -32,7 +32,7 @@ TEST_SITES = [
     "https://interiordesign.xcelanceweb.com/"
 ]
 
-API_BASE_URL = "http://localhost:3000/api/domains/upload"
+API_BASE_URL = "https://teqsmartsubmit.xcelanceweb.com/api/domains/upload"
 
 
 def seed_domains(urls=None, category=None, is_active=True):
@@ -99,7 +99,7 @@ def seed_domains(urls=None, category=None, is_active=True):
             
     except requests.exceptions.ConnectionError:
         print("❌ CONNECTION ERROR!")
-        print("  Could not connect to http://localhost:3000")
+        print("  Could not connect to https://teqsmartsubmit.xcelanceweb.com/")
         print("  Make sure the Next.js server is running:")
         print("    cd /var/www/html/TEQSmartSubmit")
         print("    npm run dev")

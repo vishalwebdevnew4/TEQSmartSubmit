@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-API_BASE_URL = "http://localhost:3000/api/templates"
+API_BASE_URL = "https://teqsmartsubmit.xcelanceweb.com/api/templates"
 
 # Universal template that works with auto-detection for all domains
 UNIVERSAL_TEMPLATE = {
