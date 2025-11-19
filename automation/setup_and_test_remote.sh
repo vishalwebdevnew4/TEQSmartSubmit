@@ -1,12 +1,32 @@
 #!/bin/bash
 # TEQSmartSubmit Remote Server Setup and Test Script
 # This script installs all dependencies (without sudo) and tests headless mode
+#
+# Usage:
+#   cd /var/www/html/TEQSmartSubmit/automation
+#   bash setup_and_test_remote.sh
+#
+# What it does:
+#   1. Installs Playwright (user level, no sudo)
+#   2. Installs Chromium browser
+#   3. Sets up environment variables
+#   4. Tests headless mode
+#   5. Verifies everything works
 
 set -e  # Exit on error
 
 echo "================================================================================"
 echo "TEQSmartSubmit Remote Server Setup and Test"
 echo "================================================================================"
+echo ""
+echo "This script will:"
+echo "  ✅ Install Playwright (no sudo required)"
+echo "  ✅ Install Chromium browser"
+echo "  ✅ Set up environment variables"
+echo "  ✅ Test headless mode"
+echo ""
+echo "Note: 'No display detected' messages are EXPECTED and CORRECT for remote servers"
+echo "      Headless mode means no browser window - this is what we want!"
 echo ""
 
 # Colors for output
