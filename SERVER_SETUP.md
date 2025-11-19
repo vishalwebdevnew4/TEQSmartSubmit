@@ -429,6 +429,40 @@ echo "✅ Setup complete (no sudo required)!"
 echo "⚠️  Note: Some system libraries may be missing. If you get errors, contact your hosting provider."
 ```
 
+## Automated Setup Script
+
+We've created an automated setup and test script that does everything for you:
+
+### Full Setup and Test Script
+
+```bash
+cd /var/www/html/TEQSmartSubmit/automation
+bash setup_and_test_remote.sh
+```
+
+This script will:
+1. ✅ Check Python installation
+2. ✅ Install Playwright (user level, no sudo)
+3. ✅ Install Chromium browser
+4. ✅ Set up environment variables
+5. ✅ Install optional CAPTCHA dependencies
+6. ✅ Run headless mode test
+7. ✅ Test form submission (optional)
+
+### Quick One-Liner Setup
+
+For a minimal setup, use the quick script:
+
+```bash
+cd /var/www/html/TEQSmartSubmit/automation
+bash QUICK_REMOTE_SETUP.sh
+```
+
+Or copy-paste this one-liner:
+```bash
+pip3 install --user playwright && export PATH="$HOME/.local/bin:$PATH" && export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" && python3 -m playwright install chromium && echo "export PATH=\$HOME/.local/bin:\$PATH" >> ~/.bashrc && echo "export PLAYWRIGHT_BROWSERS_PATH=\$HOME/.cache/ms-playwright" >> ~/.bashrc && echo "✅ Setup complete! Run: source ~/.bashrc"
+```
+
 ## Production Recommendations
 
 1. **Use a process manager** (PM2, systemd) to manage the Next.js app
@@ -437,4 +471,5 @@ echo "⚠️  Note: Some system libraries may be missing. If you get errors, con
 4. **Use a reverse proxy** (Nginx) for the Next.js app
 5. **Monitor disk space** - browser cache can grow over time
 6. **For no-sudo setups:** Consider using Conda/Miniconda for better library management
+7. **Use the automated setup script** (`setup_and_test_remote.sh`) for easy installation
 
