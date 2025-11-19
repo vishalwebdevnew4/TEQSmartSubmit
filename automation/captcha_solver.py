@@ -531,19 +531,64 @@ class LocalCaptchaSolver(CaptchaSolver):
                 print(f"⚠️  Error clicking checkbox: {str(e)[:50]}", file=sys.stderr)
                 # Continue anyway - checkbox might already be clicked
             
-            # Step 2: Quickly check if token is already available (no challenge)
-            # Sometimes reCAPTCHA solves immediately without challenge
-            for i in range(3):
-                await asyncio.sleep(0.5)  # Faster polling
+            # Step 2: Wait longer and check if token is already available (no challenge)
+            # Sometimes reCAPTCHA solves immediately without challenge, especially in headless mode
+            # In headless mode, it might take longer for the token to appear
+            print("⏳ Waiting for token after checkbox click (no challenge case)...", file=sys.stderr)
+            max_quick_checks = 40  # Check up to 40 times (20 seconds total) - increased for headless
+            for i in range(max_quick_checks):
+                await asyncio.sleep(0.5)
                 token = await self._get_recaptcha_token()
                 if token:
-                    print(f"✅ CAPTCHA solved without challenge! (checked {i+1} times)", file=sys.stderr)
+                    print(f"✅ CAPTCHA solved without challenge! (checked {i+1} times, waited {i*0.5:.1f}s)", file=sys.stderr)
                     return token
+                
+                # Also check if checkbox is actually checked (might indicate success even without token yet)
+                if i % 5 == 0:  # Check every 2.5 seconds
+                    checkbox_checked = await self.page.evaluate("""
+                        () => {
+                            const iframe = document.querySelector('iframe[src*="recaptcha"][src*="anchor"]');
+                            if (iframe && iframe.contentDocument) {
+                                const checkbox = iframe.contentDocument.querySelector('.recaptcha-checkbox');
+                                if (checkbox) {
+                                    return checkbox.getAttribute('aria-checked') === 'true' || 
+                                           checkbox.classList.contains('recaptcha-checkbox-checked');
+                                }
+                            }
+                            return false;
+                        }
+                    """)
+                    if checkbox_checked:
+                        print(f"   ✅ Checkbox is checked! Waiting for token... ({i*0.5:.1f}s)", file=sys.stderr)
+                
+                if i % 4 == 0 and i > 0:  # Log every 2 seconds
+                    print(f"   Still waiting for token... ({i*0.5:.1f}s)", file=sys.stderr)
             
             # Step 3: Wait a bit for challenge to appear, then check
-            print("🔍 Waiting for challenge to appear...", file=sys.stderr)
-            await asyncio.sleep(2)  # Wait for challenge iframe to load
-            challenge_present = await self._check_challenge_present()
+            # Also check for token during this wait - sometimes it appears while challenge is loading
+            print("🔍 Waiting for challenge to appear (also checking for token)...", file=sys.stderr)
+            for wait_i in range(10):  # Wait up to 5 seconds for challenge
+                await asyncio.sleep(0.5)
+                # Check for token first (might appear even if challenge is loading)
+                token = await self._get_recaptcha_token()
+                if token:
+                    print(f"✅ CAPTCHA solved! Token appeared while waiting for challenge (waited {wait_i*0.5:.1f}s)", file=sys.stderr)
+                    return token
+                # Check for challenge
+                challenge_present = await self._check_challenge_present()
+                if challenge_present:
+                    print(f"🎯 Challenge detected after {wait_i*0.5:.1f}s", file=sys.stderr)
+                    break
+            else:
+                # No challenge appeared, check one more time for token
+                challenge_present = await self._check_challenge_present()
+                if not challenge_present:
+                    print("   ℹ️  No challenge appeared, checking for token one more time...", file=sys.stderr)
+                    await asyncio.sleep(2)
+                    token = await self._get_recaptcha_token()
+                    if token:
+                        print("✅ CAPTCHA solved without challenge!", file=sys.stderr)
+                        return token
             
             if challenge_present:
                 print("🎯 Challenge detected, attempting to solve...", file=sys.stderr)
@@ -588,8 +633,9 @@ class LocalCaptchaSolver(CaptchaSolver):
                 
                 # After solving attempt, wait and check for token
                 # This is critical - sometimes the token appears after a delay
+                # In headless mode, this can take longer
                 print("⏳ Waiting for CAPTCHA token after solving attempt...", file=sys.stderr)
-                max_wait_attempts = 20  # Wait up to 20 seconds
+                max_wait_attempts = 30  # Wait up to 30 seconds (increased for headless mode)
                 for i in range(max_wait_attempts):
                     await asyncio.sleep(1)
                     token = await self._get_recaptcha_token()
@@ -705,24 +751,54 @@ class LocalCaptchaSolver(CaptchaSolver):
                             print("   🖱️  Clicking checkbox...", file=sys.stderr)
                             # Scroll into view
                             await checkbox.scroll_into_view_if_needed()
-                            await asyncio.sleep(0.5)
+                            await asyncio.sleep(1)  # Wait a bit longer for stability
                             
-                            # Try multiple click methods
+                            # Try multiple click methods with human-like behavior
                             try:
-                                await checkbox.click(timeout=5000)
+                                # First, hover over the checkbox (human-like)
+                                box = await checkbox.bounding_box()
+                                if box:
+                                    await self.page.mouse.move(box['x'] + box['width']/2, box['y'] + box['height']/2)
+                                    await asyncio.sleep(0.3)  # Small delay like a human
+                                
+                                # Click with a slight delay
+                                await checkbox.click(timeout=5000, delay=100)  # 100ms delay like human
                                 print("   ✅ Checkbox clicked successfully!", file=sys.stderr)
-                            except:
-                                # Try JavaScript click
+                                await asyncio.sleep(1)  # Wait after click
+                            except Exception as e:
+                                print(f"   ⚠️  Direct click failed: {str(e)[:50]}, trying JavaScript...", file=sys.stderr)
+                                # Try JavaScript click with mouse events
                                 await frame.evaluate("""
                                     () => {
                                         const checkbox = document.querySelector('#recaptcha-anchor') || 
                                                          document.querySelector('.recaptcha-checkbox') ||
                                                          document.querySelector('[role="checkbox"]');
                                         if (checkbox) {
-                                            checkbox.click();
+                                            // Simulate human-like mouse events
+                                            const mouseOver = new MouseEvent('mouseover', { bubbles: true, cancelable: true });
+                                            const mouseMove = new MouseEvent('mousemove', { bubbles: true, cancelable: true });
+                                            const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+                                            const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
+                                            const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+                                            
+                                            checkbox.dispatchEvent(mouseOver);
+                                            setTimeout(() => {
+                                                checkbox.dispatchEvent(mouseMove);
+                                                setTimeout(() => {
+                                                    checkbox.dispatchEvent(mouseDown);
+                                                    setTimeout(() => {
+                                                        checkbox.dispatchEvent(mouseUp);
+                                                        setTimeout(() => {
+                                                            checkbox.dispatchEvent(clickEvent);
+                                                            checkbox.click();
+                                                        }, 50);
+                                                    }, 50);
+                                                }, 50);
+                                            }, 50);
                                         }
                                     }
                                 """)
+                                await asyncio.sleep(2)  # Wait longer after JS click
                                 print("   ✅ Checkbox clicked via JavaScript!", file=sys.stderr)
                             
                             await asyncio.sleep(3)  # Wait for response
@@ -2288,6 +2364,41 @@ class LocalCaptchaSolver(CaptchaSolver):
             
             if token and len(token) > 0:
                 return token
+            
+            # Strategy 1.5: Get token from challenge frame (recaptcha-token input)
+            # Sometimes the token is in the challenge iframe before it's copied to the main page
+            try:
+                # Try to access challenge frame directly using Playwright
+                challenge_frame_element = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
+                if challenge_frame_element:
+                    challenge_frame = await challenge_frame_element.content_frame()
+                    if challenge_frame:
+                        challenge_token = await challenge_frame.evaluate("""
+                            () => {
+                                const tokenInput = document.querySelector('#recaptcha-token');
+                                if (tokenInput && tokenInput.value && tokenInput.value.length > 0) {
+                                    return tokenInput.value;
+                                }
+                                return null;
+                            }
+                        """)
+                        if challenge_token and len(challenge_token) > 0:
+                            print(f"   ✅ Found token in challenge frame!", file=sys.stderr)
+                            # Copy token to response field
+                            await self.page.evaluate("""
+                                (token) => {
+                                    const responseField = document.querySelector('textarea[name="g-recaptcha-response"]');
+                                    if (responseField) {
+                                        responseField.value = token;
+                                        responseField.dispatchEvent(new Event('change', { bubbles: true }));
+                                        responseField.dispatchEvent(new Event('input', { bubbles: true }));
+                                    }
+                                }
+                            """, challenge_token)
+                            return challenge_token
+            except Exception as e:
+                # Frame might not be accessible, continue to other strategies
+                pass
             
             # Strategy 2: Try to get token from grecaptcha callback
             token = await self.page.evaluate("""

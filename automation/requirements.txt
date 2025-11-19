@@ -1,0 +1,10 @@
+# Core dependencies for TEQSmartSubmit automation
+playwright>=1.40.0
+
+# Optional: For local CAPTCHA solving (audio recognition)
+# SpeechRecognition>=3.10.0
+# pydub>=0.25.1
+
+# Note: Install Playwright browsers after installing this:
+# python3 -m playwright install chromium
+

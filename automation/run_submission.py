@@ -665,54 +665,72 @@ def auto_fill_form_without_template(discovered_fields: List[Dict], test_data: Di
     
     # Second pass: If no fields were detected, fill any visible text/textarea fields as fallback
     if len(auto_fields) == 0:
-        print("   ⚠️  No fields detected by type matching, using fallback: filling any visible text/textarea fields", file=sys.stderr)
+        print("   ⚠️  No fields detected by type matching, using fallback: filling ANY text/textarea fields (ignoring visibility check)", file=sys.stderr)
         visible_text_fields = []
         for field in discovered_fields:
-            # Skip hidden fields, honeypots, and already processed fields
-            if field.get("isHidden", False) or field.get("type", "").lower() == "hidden":
+            # Skip ONLY explicitly hidden fields and honeypots
+            field_type_attr = field.get("type", "").lower()
+            if field_type_attr == "hidden":
                 continue
-            if field.get("name", "").lower() in ["_token", "csrf", "token", "website", "honeypot", "from_url", "curnt_url"]:
+            field_name_lower = field.get("name", "").lower()
+            if field_name_lower in ["_token", "csrf", "token", "website", "honeypot", "from_url", "curnt_url", "g-recaptcha-response"]:
                 continue
             
             field_tag = field.get("tagName", "").lower()
             field_type = field.get("type", "").lower()
             
-            # Only fill visible text inputs and textareas
+            # Fill ANY text input or textarea (ignore isVisible check in fallback mode)
+            # This is more aggressive - we'll try to fill fields even if they appear "invisible"
             if (field_tag == "textarea" or (field_tag == "input" and field_type in ["text", "email", "tel", ""])):
-                if field.get("isVisible", True):  # Only visible fields
-                    selector = field.get("selectors", [""])[0] if field.get("selectors") else None
-                    if not selector and field.get("name"):
+                # In fallback mode, ignore visibility - just check if it's a fillable field type
+                # Many forms use CSS to hide/show fields, but they're still fillable
+                selector = field.get("selectors", [""])[0] if field.get("selectors") else None
+                if not selector:
+                    # Try to build selector from available info
+                    if field.get("name"):
                         tag = field.get("tagName", "input").lower()
                         selector = f"{tag}[name='{field['name']}']"
-                    
-                    if selector:
-                        # Determine value based on field position and type
-                        if field_tag == "textarea":
-                            value = test_data.get("message", "This is an automated test submission.")
-                        elif field_type == "email" or "email" in (field.get("name", "") + field.get("placeholder", "")).lower():
+                    elif field.get("id"):
+                        selector = f"#{field['id']}"
+                    elif field.get("placeholder"):
+                        tag = field.get("tagName", "input").lower()
+                        selector = f"{tag}[placeholder='{field['placeholder']}']"
+                    else:
+                        # Last resort: use index-based selector
+                        tag = field.get("tagName", "input").lower()
+                        field_index = field.get("index", 0)
+                        # Try to find by position in form
+                        selector = f"{tag}:nth-of-type({field_index + 1})"
+                
+                if selector:
+                    print(f"   🔍 Fallback: Found field - tag: {field_tag}, type: {field_type}, name: {field.get('name', 'no-name')}, selector: {selector[:50]}", file=sys.stderr)
+                    # Determine value based on field position and type
+                    if field_tag == "textarea":
+                        value = test_data.get("message", "This is an automated test submission.")
+                    elif field_type == "email" or "email" in (field.get("name", "") + field.get("placeholder", "")).lower():
+                        value = test_data.get("email", "test@example.com")
+                    elif field_type == "tel" or "phone" in (field.get("name", "") + field.get("placeholder", "")).lower():
+                        value = test_data.get("phone", "+1234567890")
+                    else:
+                        # Fill with name, then email, then message based on position
+                        field_index = len(visible_text_fields)
+                        if field_index == 0:
+                            value = test_data.get("name", "Test User")
+                        elif field_index == 1:
                             value = test_data.get("email", "test@example.com")
-                        elif field_type == "tel" or "phone" in (field.get("name", "") + field.get("placeholder", "")).lower():
+                        elif field_index == 2:
                             value = test_data.get("phone", "+1234567890")
                         else:
-                            # Fill with name, then email, then message based on position
-                            field_index = len(visible_text_fields)
-                            if field_index == 0:
-                                value = test_data.get("name", "Test User")
-                            elif field_index == 1:
-                                value = test_data.get("email", "test@example.com")
-                            elif field_index == 2:
-                                value = test_data.get("phone", "+1234567890")
-                            else:
-                                value = test_data.get("message", "Test message")
-                        
-                        visible_text_fields.append({
-                            "name": field.get("name", f"field_{len(visible_text_fields)}"),
-                            "selector": selector,
-                            "value": str(value),
-                            "field_type": "text",
-                            "original_name": field.get("name", ""),
-                            "auto_detected": True
-                        })
+                            value = test_data.get("message", "Test message")
+                    
+                    visible_text_fields.append({
+                        "name": field.get("name", f"field_{len(visible_text_fields)}"),
+                        "selector": selector,
+                        "value": str(value),
+                        "field_type": "text",
+                        "original_name": field.get("name", ""),
+                        "auto_detected": True
+                    })
         
         # Add visible text fields to auto_fields (limit to first 5 to avoid filling too many)
         if visible_text_fields:
@@ -785,6 +803,48 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
             storage_state=None,
         )
         context.set_default_timeout(180000)  # 3 minutes default timeout
+        
+        # Add stealth scripts to hide automation
+        await context.add_init_script("""
+            // Override navigator.webdriver
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            
+            // Override chrome object
+            window.chrome = {
+                runtime: {}
+            };
+            
+            // Override permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+            
+            // Override plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            
+            // Override languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en']
+            });
+            
+            // Mock getBattery
+            if (navigator.getBattery) {
+                navigator.getBattery = () => Promise.resolve({
+                    charging: true,
+                    chargingTime: 0,
+                    dischargingTime: Infinity,
+                    level: 1
+                });
+            }
+        """)
+        
         page = await context.new_page()
         page.set_default_timeout(180000)  # 3 minutes page timeout
         
@@ -1049,11 +1109,20 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         # Auto-detect mode: If enabled and no fields in template, auto-detect fields
         if use_auto_detect and (not fields or len(fields) == 0):
             print("🤖 Auto-detect mode enabled: Automatically detecting form fields...", file=sys.stderr)
-            test_data = template.get("test_data", {})
+            test_data = template.get("test_data") or template.get("testData") or {}
             fields = auto_fill_form_without_template(discovered_fields, test_data)
-            print(f"   ✅ Auto-detected {len(fields)} fields: {', '.join([f.get('name', 'unknown') for f in fields])}", file=sys.stderr)
-            if not fields:
-                print("   ⚠️  Could not auto-detect any fillable fields. Make sure form has name, email, or message fields.", file=sys.stderr)
+            if fields:
+                field_names = [f.get('name', f.get('field_type', 'unknown')) for f in fields[:5]]
+                print(f"   ✅ Auto-detected {len(fields)} fields: {', '.join(field_names)}", file=sys.stderr)
+            else:
+                print("   ⚠️  Could not auto-detect any fillable fields.", file=sys.stderr)
+                # Debug: Show what fields were discovered
+                visible_fields = [f for f in discovered_fields if f.get("isVisible", True) and f.get("type", "").lower() != "hidden"]
+                print(f"   📊 Debug: Found {len(visible_fields)} visible fields in discovered_fields", file=sys.stderr)
+                if visible_fields:
+                    print(f"   📊 Debug: First 3 visible field names: {[f.get('name', 'no-name') for f in visible_fields[:3]]}", file=sys.stderr)
+                    print(f"   📊 Debug: First 3 visible field types: {[f.get('type', 'no-type') for f in visible_fields[:3]]}", file=sys.stderr)
+                    print(f"   📊 Debug: First 3 visible field tags: {[f.get('tagName', 'no-tag') for f in visible_fields[:3]]}", file=sys.stderr)
         
         # If discovered fields are fewer than expected, wait and rediscover
         if fields and len(discovered_fields) < len(fields):
@@ -1103,33 +1172,48 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 if not value:
                     continue
                 
-                # Try to find matching discovered field
-                discovered_field = find_matching_field(discovered_fields, field)
+                # Initialize variables
+                discovered_field = None
+                selectors_to_try = []
                 
-                if discovered_field:
-                    # Use the first available selector from discovered field
-                    selectors_to_try = discovered_field.get("selectors", [])
-                    if not selectors_to_try and discovered_field.get("name"):
-                        tag = discovered_field.get("tagName", "input").lower()
-                        selectors_to_try = [
-                            f"{tag}[name='{discovered_field['name']}']",
-                            f"{tag}[name=\"{discovered_field['name']}\"]",
-                        ]
-                        if discovered_field.get("id"):
-                            selectors_to_try.append(f"#{discovered_field['id']}")
-                else:
-                    # Fall back to template selector, but also try common field name variations
+                # If field has a selector from auto-detection, use it directly (highest priority)
+                # This avoids trying variations that might not exist
+                if field.get("auto_detected") and field.get("selector"):
+                    selectors_to_try = [field.get("selector")]
+                    # Also try with different quote styles
                     template_selector = field.get("selector")
-                    template_field_name = field.get("name", "").lower()
-                    selectors_to_try = []
+                    if "'" in template_selector:
+                        selectors_to_try.append(template_selector.replace("'", '"'))
+                    elif '"' in template_selector:
+                        selectors_to_try.append(template_selector.replace('"', "'"))
+                else:
+                    # Try to find matching discovered field
+                    discovered_field = find_matching_field(discovered_fields, field)
                     
-                    if template_selector:
-                        selectors_to_try.append(template_selector)
-                        # Also try with different quote styles
-                        if "'" in template_selector:
-                            selectors_to_try.append(template_selector.replace("'", '"'))
-                        elif '"' in template_selector:
-                            selectors_to_try.append(template_selector.replace('"', "'"))
+                    if discovered_field:
+                        # Use the first available selector from discovered field
+                        selectors_to_try = discovered_field.get("selectors", [])
+                        if not selectors_to_try and discovered_field.get("name"):
+                            tag = discovered_field.get("tagName", "input").lower()
+                            selectors_to_try = [
+                                f"{tag}[name='{discovered_field['name']}']",
+                                f"{tag}[name=\"{discovered_field['name']}\"]",
+                            ]
+                            if discovered_field.get("id"):
+                                selectors_to_try.append(f"#{discovered_field['id']}")
+                    else:
+                        # Fall back to template selector, but also try common field name variations
+                        template_selector = field.get("selector")
+                        template_field_name = field.get("name", "").lower()
+                        selectors_to_try = []
+                        
+                        if template_selector:
+                            selectors_to_try.append(template_selector)
+                            # Also try with different quote styles
+                            if "'" in template_selector:
+                                selectors_to_try.append(template_selector.replace("'", '"'))
+                            elif '"' in template_selector:
+                                selectors_to_try.append(template_selector.replace('"', "'"))
                     
                     # Try common field name variations based on field type
                     if template_field_name:
@@ -1181,10 +1265,16 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 
                 for selector in selectors_to_try:
                     try:
-                        # Wait for the field to be visible and ready (longer timeout for dynamic fields)
-                        # Use first() to handle multiple matches (e.g., newsletter + contact form)
-                        # Wait for selector - handle multiple matches by using first visible element
-                        await page.wait_for_selector(selector, state="visible", timeout=15000)
+                        # First, check if selector exists (don't wait for visibility yet)
+                        # This handles cases where elements exist but might be hidden initially
+                        element_exists = await page.evaluate("""
+                            (sel) => {
+                                return document.querySelectorAll(sel).length > 0;
+                            }
+                        """, selector)
+                        
+                        if not element_exists:
+                            continue
                         
                         # Use JavaScript to find the first visible element matching the selector
                         # This handles cases where multiple forms have the same field (e.g., newsletter + contact)
@@ -1195,8 +1285,8 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                                 for (const el of elements) {
                                     const rect = el.getBoundingClientRect();
                                     const style = window.getComputedStyle(el);
-                                    if (rect.width > 0 && rect.height > 0 && 
-                                        style.display !== 'none' && 
+                                    // More lenient visibility check - just check if it's not explicitly hidden
+                                    if (style.display !== 'none' && 
                                         style.visibility !== 'hidden' &&
                                         style.opacity !== '0') {
                                         // Prefer elements in contact forms (forms with more fields)
@@ -1206,21 +1296,28 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                                             const visibleInputs = Array.from(formInputs).filter(inp => {
                                                 const r = inp.getBoundingClientRect();
                                                 const s = window.getComputedStyle(inp);
-                                                return r.width > 0 && r.height > 0 && s.display !== 'none';
+                                                return s.display !== 'none' && s.visibility !== 'hidden';
                                             });
                                             // Prefer forms with more visible fields (contact forms)
                                             if (visibleInputs.length > 1) {
                                                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                                return { found: true, selector: sel };
+                                                return { found: true, selector: sel, id: el.id || null };
                                             }
                                         }
                                     }
                                 }
-                                // Fallback to first element
-                                const first = elements[0];
-                                if (first) {
-                                    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    return { found: true, selector: sel };
+                                // Fallback to first element that's not explicitly hidden
+                                for (const el of elements) {
+                                    const style = window.getComputedStyle(el);
+                                    if (style.display !== 'none' && style.visibility !== 'hidden') {
+                                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        return { found: true, selector: sel, id: el.id || null };
+                                    }
+                                }
+                                // Last resort: use first element
+                                if (elements[0]) {
+                                    elements[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    return { found: true, selector: sel, id: elements[0].id || null };
                                 }
                                 return { found: false };
                             }
@@ -1228,6 +1325,19 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                         
                         if not element_info.get("found"):
                             continue
+                        
+                        # If we found an element with an ID, try using that selector (more reliable)
+                        if element_info.get("id"):
+                            id_selector = f"#{element_info['id']}"
+                            # Try ID selector first if available
+                            try:
+                                await page.wait_for_selector(id_selector, state="attached", timeout=5000)
+                                selector = id_selector  # Use ID selector instead
+                            except:
+                                pass  # Fall back to original selector
+                        
+                        # Now wait for the element to be attached (not necessarily visible)
+                        await page.wait_for_selector(selector, state="attached", timeout=10000)
                         
                         await page.wait_for_timeout(500)
                         
@@ -2815,5 +2925,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 
