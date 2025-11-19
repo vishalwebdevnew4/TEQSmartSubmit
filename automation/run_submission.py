@@ -551,6 +551,7 @@ def auto_fill_form_without_template(discovered_fields: List[Dict], test_data: Di
     auto_fields = []
     used_field_types = set()
     
+    # First pass: Try to detect known field types
     for field in discovered_fields:
         field_type = auto_detect_field_type(field)
         
@@ -661,6 +662,62 @@ def auto_fill_form_without_template(discovered_fields: List[Dict], test_data: Di
                 "is_select": field_tag == "select",
                 "options": field.get("options", []) if field_tag == "select" else []
             })
+    
+    # Second pass: If no fields were detected, fill any visible text/textarea fields as fallback
+    if len(auto_fields) == 0:
+        print("   ⚠️  No fields detected by type matching, using fallback: filling any visible text/textarea fields", file=sys.stderr)
+        visible_text_fields = []
+        for field in discovered_fields:
+            # Skip hidden fields, honeypots, and already processed fields
+            if field.get("isHidden", False) or field.get("type", "").lower() == "hidden":
+                continue
+            if field.get("name", "").lower() in ["_token", "csrf", "token", "website", "honeypot", "from_url", "curnt_url"]:
+                continue
+            
+            field_tag = field.get("tagName", "").lower()
+            field_type = field.get("type", "").lower()
+            
+            # Only fill visible text inputs and textareas
+            if (field_tag == "textarea" or (field_tag == "input" and field_type in ["text", "email", "tel", ""])):
+                if field.get("isVisible", True):  # Only visible fields
+                    selector = field.get("selectors", [""])[0] if field.get("selectors") else None
+                    if not selector and field.get("name"):
+                        tag = field.get("tagName", "input").lower()
+                        selector = f"{tag}[name='{field['name']}']"
+                    
+                    if selector:
+                        # Determine value based on field position and type
+                        if field_tag == "textarea":
+                            value = test_data.get("message", "This is an automated test submission.")
+                        elif field_type == "email" or "email" in (field.get("name", "") + field.get("placeholder", "")).lower():
+                            value = test_data.get("email", "test@example.com")
+                        elif field_type == "tel" or "phone" in (field.get("name", "") + field.get("placeholder", "")).lower():
+                            value = test_data.get("phone", "+1234567890")
+                        else:
+                            # Fill with name, then email, then message based on position
+                            field_index = len(visible_text_fields)
+                            if field_index == 0:
+                                value = test_data.get("name", "Test User")
+                            elif field_index == 1:
+                                value = test_data.get("email", "test@example.com")
+                            elif field_index == 2:
+                                value = test_data.get("phone", "+1234567890")
+                            else:
+                                value = test_data.get("message", "Test message")
+                        
+                        visible_text_fields.append({
+                            "name": field.get("name", f"field_{len(visible_text_fields)}"),
+                            "selector": selector,
+                            "value": str(value),
+                            "field_type": "text",
+                            "original_name": field.get("name", ""),
+                            "auto_detected": True
+                        })
+        
+        # Add visible text fields to auto_fields (limit to first 5 to avoid filling too many)
+        if visible_text_fields:
+            auto_fields.extend(visible_text_fields[:5])
+            print(f"   ✅ Fallback: Found {len(visible_text_fields[:5])} visible text/textarea fields to fill", file=sys.stderr)
     
     return auto_fields
 
@@ -1595,16 +1652,20 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                     solver = local_solver_instance
                     local_solver_used = True
                     
+                    # Use longer timeout for headless mode
+                    is_headless_mode = headless
+                    timeout_seconds = 180 if is_headless_mode else 120
+                    
                     try:
                         token = await asyncio.wait_for(
                             solver.solve_hcaptcha(site_key, page.url),
-                            timeout=120
+                            timeout=timeout_seconds
                         )
                     except asyncio.TimeoutError:
-                        print("   ⏰ Local solver timeout (120s) for hCaptcha", file=sys.stderr)
+                        print(f"   ⏰ Local solver timeout ({timeout_seconds}s) for hCaptcha", file=sys.stderr)
                         token = None
                         local_solver_failed = True
-                        local_solver_error = "Timeout after 120 seconds"
+                        local_solver_error = f"Timeout after {timeout_seconds} seconds"
                     
                     if token:
                         # Inject hCaptcha token
@@ -1652,14 +1713,20 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                     local_solver_used = True
                     
                     # Try with timeout to prevent hanging
-                    # Increase timeout to 90 seconds to give local solver more time
+                    # Increase timeout for headless mode (CAPTCHA solving takes longer without display)
+                    # Check if we're in headless mode
+                    is_headless_mode = headless
+                    timeout_seconds = 180 if is_headless_mode else 120  # 3 minutes for headless, 2 minutes for visible
+                    
+                    print(f"   ⏱️  Using timeout: {timeout_seconds}s ({'headless' if is_headless_mode else 'visible'} mode)", file=sys.stderr)
+                    
                     try:
                         token = await asyncio.wait_for(
                             solver.solve_recaptcha_v2(site_key, page.url),
-                            timeout=120  # 120 second timeout for local solver (increased for complex CAPTCHAs)
+                            timeout=timeout_seconds
                         )
                     except asyncio.TimeoutError:
-                        print("   ⏰ Local solver timeout (120s)", file=sys.stderr)
+                        print(f"   ⏰ Local solver timeout ({timeout_seconds}s)", file=sys.stderr)
                         if use_hybrid:
                             print("   Will try external service...", file=sys.stderr)
                         else:

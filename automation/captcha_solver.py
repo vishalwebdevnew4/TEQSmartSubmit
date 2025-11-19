@@ -918,10 +918,26 @@ class LocalCaptchaSolver(CaptchaSolver):
         """Solve audio CAPTCHA challenge - SIMPLIFIED VERSION."""
         try:
             # Quick timeout wrapper to prevent hanging
-            result = await asyncio.wait_for(self._solve_audio_impl(), timeout=55)
+            # Increase timeout for headless mode (audio challenges take longer without display)
+            # Check if page is in headless mode by checking if it has a display
+            is_headless = True  # Default to headless
+            try:
+                # Try to check if we're in headless mode
+                # In headless mode, some operations might behave differently
+                if self.page:
+                    # Check viewport size - headless often uses default sizes
+                    viewport = await self.page.viewport_size()
+                    # This is a heuristic - adjust as needed
+                    is_headless = viewport is None or viewport.get('width', 0) < 800
+            except:
+                pass
+            
+            timeout = 90 if is_headless else 55  # 90 seconds for headless, 55 for visible
+            print(f"   ⏱️  Audio challenge timeout: {timeout}s ({'headless' if is_headless else 'visible'} mode)", file=sys.stderr)
+            result = await asyncio.wait_for(self._solve_audio_impl(), timeout=timeout)
             return result
         except asyncio.TimeoutError:
-            print("   ⏰ Audio solving timeout (55s)", file=sys.stderr)
+            print(f"   ⏰ Audio solving timeout ({timeout}s)", file=sys.stderr)
             return False
         except Exception as e:
             print(f"   ❌ Audio solving error: {str(e)[:80]}", file=sys.stderr)
