@@ -785,9 +785,10 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 headless = False
                 print("🖥️  Display detected - running with visible browser for better CAPTCHA solving", file=sys.stderr)
             else:
-                # No display or in container - use headless mode
+                # No display or in container - use headless mode (this is EXPECTED and CORRECT for remote servers)
                 headless = True
-                print("🖥️  No display detected - running in headless mode", file=sys.stderr)
+                print("🖥️  No display detected - running in HEADLESS mode (expected for remote servers)", file=sys.stderr)
+                print("   ℹ️  This is normal! Headless mode works perfectly for automation.", file=sys.stderr)
         
         # Final fallback
         if headless is None:

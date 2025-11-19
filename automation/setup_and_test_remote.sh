@@ -141,10 +141,14 @@ async def test_headless():
         print("🚀 Testing headless mode...")
         print(f"   Browser path: {os.environ.get('PLAYWRIGHT_BROWSERS_PATH', 'default')}")
         print(f"   Headless mode: True")
+        print(f"   DISPLAY env: {os.environ.get('DISPLAY', 'NOT SET (expected for remote servers)')}")
+        print("   ℹ️  Note: 'No display detected' is EXPECTED and CORRECT for remote servers")
+        print("   ℹ️  Headless mode means no browser window opens - this is what we want!")
+        print("")
         
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, timeout=60000)
-            print("   ✅ Browser launched successfully")
+            print("   ✅ Browser launched successfully (headless)")
             
             page = await browser.new_page()
             print("   ✅ Page created")
@@ -159,10 +163,13 @@ async def test_headless():
             print("   ✅ Browser closed")
         
         print("\n✅ Headless mode test PASSED!")
+        print("   ✅ No display needed - headless mode works perfectly!")
         return True
         
     except Exception as e:
         print(f"\n❌ Headless mode test FAILED: {e}")
+        print("   ℹ️  Note: If you see 'No display detected', that's NOT the error")
+        print("   ℹ️  The error is above - check for missing libraries or network issues")
         import traceback
         traceback.print_exc()
         return False
@@ -182,15 +189,26 @@ echo "==========================================================================
 echo "Running Headless Mode Test"
 echo "================================================================================"
 echo ""
+print_info "Note: 'No display detected' message is EXPECTED and CORRECT for remote servers"
+print_info "Headless mode is what we want - no browser window will open"
+echo ""
 
 cd "$AUTOMATION_DIR"
+
+# Ensure headless environment
+export TEQ_PLAYWRIGHT_HEADLESS=true
+export HEADLESS=true
+export DISPLAY=""  # Explicitly unset DISPLAY
+
 python3 test_remote_headless.py
 
 if [ $? -eq 0 ]; then
     print_success "Basic headless test PASSED!"
+    print_info "Headless mode is working correctly - no display needed!"
 else
     print_error "Basic headless test FAILED"
     print_info "This might be due to missing system libraries. Check the error above."
+    print_info "Note: 'No display detected' is NOT an error - it's expected for remote servers"
 fi
 
 # Step 8: Test with actual form submission (optional)
