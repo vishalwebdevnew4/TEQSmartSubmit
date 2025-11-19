@@ -593,43 +593,116 @@ class LocalCaptchaSolver(CaptchaSolver):
             if challenge_present:
                 print("🎯 Challenge detected, attempting to solve...", file=sys.stderr)
                 
-                # Wait for challenge frame to be fully loaded
-                await asyncio.sleep(1)
+                # Retry logic: If challenge is closed/dismissed, retry the whole process
+                max_challenge_retries = 3
+                challenge_solved = False
                 
-                # Get the challenge frame
-                challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                if not challenge_frame:
-                    # Try waiting a bit more
-                    await asyncio.sleep(2)
+                for challenge_retry in range(max_challenge_retries):
+                    if challenge_retry > 0:
+                        print(f"   🔄 Challenge retry attempt {challenge_retry + 1}/{max_challenge_retries}...", file=sys.stderr)
+                        # Re-click the checkbox to reopen challenge
+                        try:
+                            await self._click_recaptcha_checkbox()
+                            await asyncio.sleep(3)  # Wait for challenge to appear
+                        except:
+                            pass
+                    
+                    # Check if challenge is still present (might have been closed)
+                    challenge_still_present = await self._check_challenge_present()
+                    if not challenge_still_present:
+                        print("   ⚠️  Challenge was closed/dismissed, checking for token...", file=sys.stderr)
+                        # Challenge might have been solved or closed - check for token
+                        for check_i in range(5):
+                            await asyncio.sleep(1)
+                            token = await self._get_recaptcha_token()
+                            if token:
+                                print(f"   ✅ Token found after challenge closed! (check {check_i + 1})", file=sys.stderr)
+                                return token
+                        # No token found, retry clicking checkbox
+                        if challenge_retry < max_challenge_retries - 1:
+                            print("   🔄 No token found, will retry clicking checkbox...", file=sys.stderr)
+                            continue
+                    
+                    # Wait for challenge frame to be fully loaded
+                    await asyncio.sleep(1)
+                    
+                    # Get the challenge frame
                     challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                
-                if challenge_frame:
+                    if not challenge_frame:
+                        # Try waiting a bit more
+                        await asyncio.sleep(2)
+                        challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
+                    
+                    if not challenge_frame:
+                        print("   ⚠️  Challenge frame not found, will retry...", file=sys.stderr)
+                        if challenge_retry < max_challenge_retries - 1:
+                            continue
+                        else:
+                            break
+                    
                     frame = await challenge_frame.content_frame()
-                    if frame:
-                        # Wait for frame content to load
-                        await asyncio.sleep(1)
-                        
-                        # Check if it's an image challenge and switch to audio
-                        is_image_challenge = await frame.evaluate("""
-                            () => {
-                                const grid = document.querySelector('.rc-imageselect-grid, .rc-imageselect-tile, .rc-imageselect-challenge');
-                                return grid !== null;
-                            }
-                        """)
-                        
-                        if is_image_challenge:
-                            print("🖼️  Image challenge detected, switching to audio...", file=sys.stderr)
-                            # Use a more comprehensive approach to switch to audio
-                            audio_switched = await self._switch_to_audio_challenge(frame)
-                            if audio_switched:
-                                print("   ✅ Successfully switched to audio challenge", file=sys.stderr)
-                                await asyncio.sleep(2)  # Wait for audio challenge to load
-                            else:
-                                print("   ⚠️  Could not switch to audio, will try anyway", file=sys.stderr)
+                    if not frame:
+                        print("   ⚠️  Could not access challenge frame, will retry...", file=sys.stderr)
+                        if challenge_retry < max_challenge_retries - 1:
+                            continue
+                        else:
+                            break
+                    
+                    # Wait for frame content to load
+                    await asyncio.sleep(1)
+                    
+                    # Check if challenge was closed (iframe still exists but content is gone)
+                    frame_content = await frame.evaluate("() => document.body ? document.body.innerHTML.length : 0")
+                    if frame_content == 0:
+                        print("   ⚠️  Challenge frame is empty (might be closed), will retry...", file=sys.stderr)
+                        if challenge_retry < max_challenge_retries - 1:
+                            continue
+                    
+                    # Check if it's an image challenge and switch to audio
+                    is_image_challenge = await frame.evaluate("""
+                        () => {
+                            const grid = document.querySelector('.rc-imageselect-grid, .rc-imageselect-tile, .rc-imageselect-challenge');
+                            return grid !== null;
+                        }
+                    """)
+                    
+                    if is_image_challenge:
+                        print("🖼️  Image challenge detected, switching to audio...", file=sys.stderr)
+                        # Use a more comprehensive approach to switch to audio
+                        audio_switched = await self._switch_to_audio_challenge(frame)
+                        if audio_switched:
+                            print("   ✅ Successfully switched to audio challenge", file=sys.stderr)
+                            await asyncio.sleep(2)  # Wait for audio challenge to load
+                        else:
+                            print("   ⚠️  Could not switch to audio, will try anyway", file=sys.stderr)
+                    
+                    # Try audio challenge solving
+                    print("🎧 Attempting to solve audio challenge...", file=sys.stderr)
+                    solved = await self._solve_audio_challenge()
+                    
+                    # After solving attempt, check if challenge was closed during solving
+                    challenge_still_open = await self._check_challenge_present()
+                    if not challenge_still_open:
+                        print("   ℹ️  Challenge closed during solving, checking for token...", file=sys.stderr)
+                        for check_i in range(10):
+                            await asyncio.sleep(1)
+                            token = await self._get_recaptcha_token()
+                            if token:
+                                print(f"   ✅ Token found after challenge closed! (check {check_i + 1})", file=sys.stderr)
+                                return token
+                        # If no token and we have retries left, try again
+                        if challenge_retry < max_challenge_retries - 1:
+                            print("   🔄 No token found, retrying...", file=sys.stderr)
+                            continue
+                    
+                    # If we got here and solved, break out of retry loop
+                    if solved:
+                        challenge_solved = True
+                        break
                 
-                # Try audio challenge solving
-                print("🎧 Attempting to solve audio challenge...", file=sys.stderr)
-                solved = await self._solve_audio_challenge()
+                # Use the solved variable from the last attempt
+                if not challenge_solved:
+                    solved = False
                 
                 # After solving attempt, wait and check for token
                 # This is critical - sometimes the token appears after a delay
@@ -909,39 +982,83 @@ class LocalCaptchaSolver(CaptchaSolver):
     async def _switch_to_audio_challenge(self, frame) -> bool:
         """Switch from image challenge to audio challenge."""
         try:
-            # Comprehensive list of audio button selectors
+            # Comprehensive list of audio button selectors (prioritized)
             audio_selectors = [
-                '#recaptcha-audio-button',
-                'button[title*="audio"]',
-                'button[title*="Audio"]',
+                '#recaptcha-audio-button',  # Most common
+                'button#recaptcha-audio-button',
+                'button[title*="audio" i]',
+                'button[title*="Audio" i]',
+                'button[aria-label*="audio" i]',
+                'button[aria-label*="Audio" i]',
                 '.rc-button-audio',
                 'button.rc-button-audio',
-                'button[aria-label*="audio"]',
-                'button[aria-label*="Audio"]',
-                'button[id*="audio"]',
-                'div[role="button"][aria-label*="audio"]',
-                'div[role="button"][aria-label*="Audio"]',
+                'button[id*="audio" i]',
+                'div[role="button"][aria-label*="audio" i]',
+                'div[role="button"][aria-label*="Audio" i]',
                 'a.rc-audiochallenge-tdownload',
-                'a[href*="audio"]',
-                '[class*="audio"]',
-                '[id*="audio"]'
+                'a[href*="audio" i]',
+                '[class*="audio" i]',
+                '[id*="audio" i]'
             ]
             
-            # Try direct selector clicks first
+            # Try direct selector clicks first (with multiple attempts)
             for selector in audio_selectors:
-                try:
-                    audio_btn = await frame.query_selector(selector)
-                    if audio_btn:
-                        is_visible = await audio_btn.is_visible()
-                        if is_visible:
-                            print(f"   ✅ Found audio button: {selector}, clicking...", file=sys.stderr)
-                            await audio_btn.scroll_into_view_if_needed()
-                            await asyncio.sleep(0.5)
-                            await audio_btn.click()
-                            await asyncio.sleep(2)
-                            return True
-                except Exception as e:
-                    continue
+                for attempt in range(3):  # Try each selector up to 3 times
+                    try:
+                        audio_btn = await frame.query_selector(selector)
+                        if audio_btn:
+                            # Check if button exists and is potentially clickable
+                            is_visible = await audio_btn.is_visible()
+                            is_enabled = True
+                            try:
+                                is_enabled = await audio_btn.is_enabled()
+                            except:
+                                pass
+                            
+                            if is_visible or not is_enabled:  # Try even if not visible (might be hidden but clickable)
+                                print(f"   ✅ Found audio button: {selector} (attempt {attempt + 1}), clicking...", file=sys.stderr)
+                                await audio_btn.scroll_into_view_if_needed()
+                                await asyncio.sleep(0.5)
+                                
+                                # Try multiple click methods
+                                try:
+                                    await audio_btn.click(timeout=5000)
+                                    print(f"   ✅ Clicked audio button via Playwright", file=sys.stderr)
+                                except:
+                                    # Try JavaScript click
+                                    await frame.evaluate(f"""
+                                        (sel) => {{
+                                            const btn = document.querySelector(sel);
+                                            if (btn) {{
+                                                btn.click();
+                                                // Also trigger mouse events
+                                                const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true }});
+                                                btn.dispatchEvent(evt);
+                                            }}
+                                        }}
+                                    """, selector)
+                                    print(f"   ✅ Clicked audio button via JavaScript", file=sys.stderr)
+                                
+                                await asyncio.sleep(2)
+                                
+                                # Verify we switched to audio
+                                is_audio_now = await frame.evaluate("""
+                                    () => {
+                                        return document.querySelector('.rc-audiochallenge, #audio-source, audio') !== null;
+                                    }
+                                """)
+                                
+                                if is_audio_now:
+                                    print(f"   ✅ Successfully switched to audio challenge!", file=sys.stderr)
+                                    return True
+                                else:
+                                    print(f"   ⚠️  Clicked but didn't switch to audio, trying again...", file=sys.stderr)
+                                    await asyncio.sleep(1)
+                                    continue
+                    except Exception as e:
+                        if attempt < 2:  # Don't print error on last attempt
+                            continue
+                        pass
             
             # If direct clicks failed, try JavaScript approach
             print("   🔄 Trying JavaScript to find and click audio button...", file=sys.stderr)
@@ -1034,15 +1151,64 @@ class LocalCaptchaSolver(CaptchaSolver):
                 return False
             
             print("   🎧 Starting audio challenge solving...", file=sys.stderr)
-            # Switch to challenge iframe
-            challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-            if not challenge_frame:
-                print("   ⚠️  Challenge iframe not found", file=sys.stderr)
-                return False
             
-            frame = await challenge_frame.content_frame()
-            if not frame:
-                print("   ⚠️  Could not access challenge iframe content", file=sys.stderr)
+            # Retry logic: If challenge is closed, try to reopen it
+            max_frame_retries = 3
+            for frame_retry in range(max_frame_retries):
+                if frame_retry > 0:
+                    print(f"   🔄 Frame retry attempt {frame_retry + 1}/{max_frame_retries} (challenge might have been closed)...", file=sys.stderr)
+                    # Try clicking checkbox again to reopen challenge
+                    try:
+                        await self._click_recaptcha_checkbox()
+                        await asyncio.sleep(3)
+                    except:
+                        pass
+                
+                # Switch to challenge iframe
+                challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
+                if not challenge_frame:
+                    if frame_retry < max_frame_retries - 1:
+                        print(f"   ⚠️  Challenge iframe not found, will retry...", file=sys.stderr)
+                        continue
+                    else:
+                        print("   ⚠️  Challenge iframe not found after retries", file=sys.stderr)
+                        # Check if token is available (challenge might have been solved)
+                        token = await self._get_recaptcha_token()
+                        if token:
+                            print("   ✅ Token found! Challenge was solved.", file=sys.stderr)
+                            return True
+                        return False
+                
+                frame = await challenge_frame.content_frame()
+                if not frame:
+                    if frame_retry < max_frame_retries - 1:
+                        print(f"   ⚠️  Could not access challenge frame, will retry...", file=sys.stderr)
+                        continue
+                    else:
+                        print("   ⚠️  Could not access challenge frame content after retries", file=sys.stderr)
+                        # Check if token is available
+                        token = await self._get_recaptcha_token()
+                        if token:
+                            print("   ✅ Token found! Challenge was solved.", file=sys.stderr)
+                            return True
+                        return False
+                
+                # Check if frame is still valid (not closed)
+                try:
+                    frame_title = await frame.evaluate("() => document.title || 'no-title'")
+                except:
+                    if frame_retry < max_frame_retries - 1:
+                        print(f"   ⚠️  Frame closed or invalid, will retry...", file=sys.stderr)
+                        continue
+                    else:
+                        print("   ⚠️  Frame closed or invalid after retries", file=sys.stderr)
+                        return False
+                
+                # If we got here, frame is valid - break out of retry loop
+                break
+            else:
+                # No frame found after all retries
+                print("   ⚠️  Could not get challenge frame after retries", file=sys.stderr)
                 return False
             
             # Wait for challenge to load
@@ -1334,61 +1500,118 @@ class LocalCaptchaSolver(CaptchaSolver):
                     pass
             
             # Try to click play/download button if it exists - CRITICAL: Must play audio
-            print("   🎵 Looking for audio play/download button...", file=sys.stderr)
+            # More aggressive approach with multiple attempts
+            print("   🎵 Looking for audio play/download button (aggressive search)...", file=sys.stderr)
             audio_played = False
-            try:
-                play_button_selectors = [
-                    'a.rc-audiochallenge-tdownload',  # Download link (most common)
-                    '.rc-audiochallenge-play-button',
-                    'button[title*="play" i]',
-                    'button[aria-label*="play" i]',
-                    'a[href*="audio"]',
-                    'a[class*="download"]',
-                    '[class*="play"][class*="button"]',
-                    '[id*="play"]',
-                    '[id*="audio"]'
-                ]
-                for selector in play_button_selectors:
-                    try:
-                        play_btn = await frame.query_selector(selector)
-                        if play_btn:
-                            is_visible = await play_btn.is_visible()
-                            if is_visible:
-                                print(f"   ▶️  Found play/download button: {selector}, clicking to play audio...", file=sys.stderr)
+            
+            # Try multiple times with different strategies
+            for play_attempt in range(5):  # Try up to 5 times
+                if audio_played:
+                    break
+                    
+                try:
+                    play_button_selectors = [
+                        'a.rc-audiochallenge-tdownload',  # Download link (most common)
+                        '.rc-audiochallenge-play-button',
+                        'button[title*="play" i]',
+                        'button[aria-label*="play" i]',
+                        'a[href*="audio"]',
+                        'a[class*="download"]',
+                        '[class*="play"][class*="button"]',
+                        '[id*="play"]',
+                        '[id*="audio"]',
+                        'a[href*="mp3"]',
+                        'a[href*="wav"]'
+                    ]
+                    
+                    for selector in play_button_selectors:
+                        try:
+                            play_btn = await frame.query_selector(selector)
+                            if play_btn:
+                                # Don't check visibility - try clicking anyway (button might be hidden but clickable)
+                                print(f"   ▶️  Found play/download element: {selector} (attempt {play_attempt + 1}), clicking...", file=sys.stderr)
+                                
                                 # Scroll into view first
-                                await play_btn.scroll_into_view_if_needed()
-                                await asyncio.sleep(0.5)
+                                try:
+                                    await play_btn.scroll_into_view_if_needed()
+                                except:
+                                    pass
+                                await asyncio.sleep(0.3)
                                 
                                 # Try multiple click methods
+                                clicked = False
                                 try:
-                                    await play_btn.click(timeout=5000)
-                                    print("   ✅ Play button clicked!", file=sys.stderr)
-                                    audio_played = True
-                                except:
-                                    # Try JavaScript click
-                                    await frame.evaluate("""
-                                        (selector) => {
-                                            const btn = document.querySelector(selector);
-                                            if (btn) {
-                                                btn.click();
-                                                // Also try to trigger play if it's an audio element
-                                                const audio = btn.closest('.rc-audiochallenge')?.querySelector('audio');
-                                                if (audio) {
-                                                    audio.play();
+                                    await play_btn.click(timeout=5000, delay=50)
+                                    print("   ✅ Play button clicked via Playwright!", file=sys.stderr)
+                                    clicked = True
+                                except Exception as e1:
+                                    # Try JavaScript click with more events
+                                    try:
+                                        await frame.evaluate("""
+                                            (sel) => {
+                                                const btn = document.querySelector(sel);
+                                                if (btn) {
+                                                    // Trigger multiple events
+                                                    btn.focus();
+                                                    btn.click();
+                                                    // Mouse events
+                                                    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+                                                    const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
+                                                    const clickEvt = new MouseEvent('click', { bubbles: true, cancelable: true });
+                                                    btn.dispatchEvent(mouseDown);
+                                                    btn.dispatchEvent(mouseUp);
+                                                    btn.dispatchEvent(clickEvt);
+                                                    // Also try to trigger play if it's an audio element
+                                                    const audio = btn.closest('.rc-audiochallenge')?.querySelector('audio');
+                                                    if (audio) {
+                                                        audio.play().catch(() => {});
+                                                    }
                                                 }
                                             }
-                                        }
-                                    """, selector)
-                                    print("   ✅ Play button clicked via JavaScript!", file=sys.stderr)
-                                    audio_played = True
+                                        """, selector)
+                                        print("   ✅ Play button clicked via JavaScript!", file=sys.stderr)
+                                        clicked = True
+                                    except Exception as e2:
+                                        print(f"   ⚠️  Both click methods failed: {str(e2)[:50]}", file=sys.stderr)
                                 
-                                await asyncio.sleep(3)  # Wait for audio to start playing
-                                break
-                    except Exception as e:
-                        print(f"   ⚠️  Error with selector {selector}: {str(e)[:50]}", file=sys.stderr)
-                        continue
-            except Exception as e:
-                print(f"   ⚠️  Error finding play button: {str(e)[:50]}", file=sys.stderr)
+                                if clicked:
+                                    audio_played = True
+                                    await asyncio.sleep(3)  # Wait for audio to start playing
+                                    
+                                    # Verify audio is playing
+                                    is_playing = await frame.evaluate("""
+                                        () => {
+                                            const audio = document.querySelector('audio');
+                                            if (audio) {
+                                                return !audio.paused && audio.currentTime > 0;
+                                            }
+                                            return false;
+                                        }
+                                    """)
+                                    
+                                    if is_playing:
+                                        print("   ✅ Audio is playing!", file=sys.stderr)
+                                    else:
+                                        print("   ⚠️  Audio might not be playing yet, continuing...", file=sys.stderr)
+                                    
+                                    break
+                        except Exception as e:
+                            if play_attempt == 0:  # Only print on first attempt
+                                print(f"   ⚠️  Error with selector {selector}: {str(e)[:50]}", file=sys.stderr)
+                            continue
+                    
+                    if audio_played:
+                        break
+                    
+                    # If no button found, wait a bit and try again (frame might still be loading)
+                    if play_attempt < 4:
+                        await asyncio.sleep(2)
+                        print(f"   🔄 Retrying play button search (attempt {play_attempt + 2}/5)...", file=sys.stderr)
+                        
+                except Exception as e:
+                    print(f"   ⚠️  Error in play button search (attempt {play_attempt + 1}): {str(e)[:50]}", file=sys.stderr)
+                    if play_attempt < 4:
+                        await asyncio.sleep(2)
             
             # If no button found, try JavaScript to find and click any play/download element
             if not audio_played:

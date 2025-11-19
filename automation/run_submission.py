@@ -853,10 +853,10 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         await page.set_viewport_size({'width': 1920, 'height': 1080})
         # Zoom will be reset after page load to ensure it works
 
-        # Use "load" instead of "networkidle" for faster loading
-        wait_until = template.get("wait_until", "load")
+        # Use "domcontentloaded" for fastest loading (faster than "load")
+        wait_until = template.get("wait_until", "domcontentloaded")
         print("📄 Loading page...", file=sys.stderr)
-        await page.goto(url, wait_until=wait_until, timeout=60000)
+        await page.goto(url, wait_until=wait_until, timeout=30000)  # Reduced from 60s to 30s
         print("✅ Page loaded", file=sys.stderr)
 
         # Fix zoom and positioning issues - ensure 100% zoom and centered
@@ -883,7 +883,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
             }
         """)
         await page.set_viewport_size({'width': 1920, 'height': 1080})
-        await asyncio.sleep(0.5)  # Brief pause for zoom to apply
+        # Removed sleep - not needed for speed optimization
         
         # Automatically detect and close overlay banners, cookie consent, modals, etc.
         print("🔍 Checking for overlay banners, cookie consent, and modals...", file=sys.stderr)
@@ -978,7 +978,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         
         if overlays_closed > 0:
             print(f"   ✅ Closed {overlays_closed} overlay(s)/banner(s)", file=sys.stderr)
-            await page.wait_for_timeout(1000)  # Wait for overlay to disappear
+            await page.wait_for_timeout(500)  # Reduced from 1000ms to 500ms for speed
         else:
             print("   ℹ️  No overlays found or already closed", file=sys.stderr)
         
@@ -1002,16 +1002,15 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 print(f"   ⚠️  Pre-action {i} failed: {str(e)[:50]}", file=sys.stderr)
                 pass
 
-        # Wait for page to be fully interactive and forms to load
-        await page.wait_for_timeout(8000)
+        # Wait for page to be fully interactive and forms to load (reduced for speed)
+        await page.wait_for_timeout(2000)  # Reduced from 8000ms to 2000ms
         
         # Wait for form fields to be available (they might load dynamically)
         print("🔍 Waiting for form fields to load...", file=sys.stderr)
         try:
-            # Wait for at least one form field to appear
-            # Increased timeout to 20s since the form takes 10+ seconds to render
-            await page.wait_for_selector("form input, form textarea", timeout=20000)
-            await page.wait_for_timeout(2000)  # Wait a bit more for all fields
+            # Wait for at least one form field to appear (reduced timeout for speed)
+            await page.wait_for_selector("form input, form textarea", timeout=10000)  # Reduced from 20s to 10s
+            await page.wait_for_timeout(500)  # Reduced from 2000ms to 500ms
         except:
             print("   ⚠️  Form fields not found immediately, continuing...", file=sys.stderr)
         
@@ -1023,7 +1022,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         # If no forms found, wait longer and try again (forms might be dynamically loaded)
         if not discovered_forms:
             print("   ⏳ No forms found, waiting longer for dynamic content...", file=sys.stderr)
-            await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(2000)  # Reduced from 5000ms to 2000ms
             discovered_forms = await discover_forms(page)
             print(f"   Found {len(discovered_forms)} form(s) after longer wait", file=sys.stderr)
         
@@ -2701,10 +2700,10 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 else:
                     submission_error = "No POST request detected - form may not have submitted. Check if form validation or CAPTCHA is blocking submission."
         
-        # Wait a bit longer after submission to ensure server processes it
+        # Wait a bit longer after submission to ensure server processes it (reduced for speed)
         if submission_success or post_requests or fetch_requests or responses_received:
             print("⏳ Waiting for server to process submission...", file=sys.stderr)
-            await page.wait_for_timeout(5000)  # Increased to 5 seconds for server processing
+            await page.wait_for_timeout(2000)  # Reduced from 5000ms to 2000ms for speed
             
             # Check if page URL changed (might indicate redirect after successful submission)
             current_url = page.url

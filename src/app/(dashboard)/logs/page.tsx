@@ -41,12 +41,36 @@ export default function LogsPage() {
       params.append("limit", "100");
 
       const response = await fetch(`/api/logs?${params.toString()}`);
-      if (response.ok) {
-        const data = await response.json();
-        setLogs(data.logs || []);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Failed to fetch logs:", {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        
+        // Show user-friendly error message
+        if (response.status === 500) {
+          setLogs([]);
+          alert(`Error loading logs: ${errorData.detail || errorData.error || "Database connection issue. Please check server logs."}`);
+        }
+        return;
+      }
+      
+      const data = await response.json();
+      setLogs(data.logs || []);
+      
+      // Log for debugging
+      if (data.logs && data.logs.length > 0) {
+        console.log(`[LogsPage] Loaded ${data.logs.length} logs`);
+      } else {
+        console.log("[LogsPage] No logs found");
       }
     } catch (error) {
       console.error("Failed to fetch logs:", error);
+      setLogs([]);
+      alert(`Network error: ${error instanceof Error ? error.message : "Failed to connect to server"}`);
     } finally {
       setLoading(false);
       if (isRefresh) {
