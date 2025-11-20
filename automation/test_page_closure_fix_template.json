@@ -1,0 +1,7 @@
+{
+  "reuse_browser": false,
+  "use_auto_detect": true,
+  "headless": true,
+  "wait_until": "domcontentloaded",
+  "fields": []
+}

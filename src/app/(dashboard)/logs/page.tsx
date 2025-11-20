@@ -58,8 +58,8 @@ export default function LogsPage() {
         return;
       }
       
-      const data = await response.json();
-      setLogs(data.logs || []);
+        const data = await response.json();
+        setLogs(data.logs || []);
       
       // Log for debugging
       if (data.logs && data.logs.length > 0) {

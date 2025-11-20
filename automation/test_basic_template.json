@@ -1,0 +1,7 @@
+{
+  "fields": [],
+  "use_auto_detect": false,
+  "headless": true,
+  "use_local_captcha_solver": false,
+  "captcha": false
+}

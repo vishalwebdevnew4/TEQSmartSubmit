@@ -1,0 +1,15 @@
+{
+  "fields": [],
+  "use_auto_detect": true,
+  "use_virtual_display": true,
+  "headless": true,
+  "use_local_captcha_solver": true,
+  "captcha_service": "local",
+  "test_data": {
+    "name": "Test User",
+    "email": "test@example.com",
+    "phone": "+1234567890",
+    "message": "Virtual display test"
+  }
+}
+

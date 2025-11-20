@@ -52,14 +52,24 @@ export async function POST(req: NextRequest) {
     const forceHeadless = process.env.TEQ_FORCE_HEADLESS === 'true';
     const shouldUseHeadless = forceHeadless || (!hasDisplay && !isTest);
     
+    // Enable virtual display for better CAPTCHA solving when headless
+    // Virtual display allows browser to render on a virtual screen instead of requiring physical monitor
+    const useVirtualDisplay = template.use_virtual_display ?? template.useVirtualDisplay ?? (process.env.TEQ_USE_VIRTUAL_DISPLAY === 'true');
+    
+    // Enable browser reuse mode (single tab, just navigate to new URLs)
+    // Browser runs in background (headless=false with virtual display)
+    const reuseBrowser = template.reuse_browser ?? template.reuseBrowser ?? false;
+    
     const enhancedTemplate = {
       ...template,
       use_local_captcha_solver: template.use_local_captcha_solver ?? true,
       use_hybrid_captcha_solver: template.use_hybrid_captcha_solver ?? false, // Default to false - use ONLY local solver
       captcha_service: template.captcha_service ?? "local", // Default to local only
-      // Use headless mode if no display available (remote server) or if forced
-      // Otherwise, show browser for better CAPTCHA solving reliability
-      headless: isTest ? false : shouldUseHeadless,
+      // For reuse mode: headless=false but with virtual display (runs in background)
+      // For normal mode: Use headless if no display available (remote server) or if forced
+      headless: reuseBrowser ? false : (isTest ? false : shouldUseHeadless),
+      use_virtual_display: reuseBrowser ? true : useVirtualDisplay, // Always use virtual display in reuse mode
+      reuse_browser: reuseBrowser, // Enable browser reuse (single tab mode)
       use_auto_detect: template.use_auto_detect ?? (!hasFields), // Auto-detect if no fields provided
       test_data: template.test_data ?? {
         name: "TEQ QA User",

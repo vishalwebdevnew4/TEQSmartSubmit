@@ -1,0 +1,19 @@
+{
+  "reuse_browser": false,
+  "use_auto_detect": true,
+  "headless": true,
+  "fields": [
+    {
+      "name": "name",
+      "value": "Test User"
+    },
+    {
+      "name": "email",
+      "value": "test@example.com"
+    },
+    {
+      "name": "message",
+      "value": "Test message from automation"
+    }
+  ]
+}

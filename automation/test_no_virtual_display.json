@@ -1,0 +1,9 @@
+{
+  "fields": [],
+  "use_auto_detect": true,
+  "use_virtual_display": false,
+  "headless": true,
+  "use_local_captcha_solver": true,
+  "captcha_service": "local"
+}
+
