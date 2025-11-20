@@ -1,0 +1,80 @@
+🚀 Starting automation...
+   URL: https://www.seoily.com/contact-us
+   Fields to fill: 0
+📄 Loading page...
+✅ Page loaded
+🔧 Fixing zoom and positioning...
+🔍 Checking for overlay banners, cookie consent, and modals...
+   ℹ️  No overlays found or already closed
+🔍 Waiting for form fields to load...
+   ⚠️  Form fields not found immediately, continuing...
+🔍 Discovering forms on page...
+✅ Found 2 form(s)
+   📋 Selected form with 20 fields (score: 5)
+📝 Found 20 fields in target form
+🤖 Auto-detect mode enabled: Automatically detecting form fields...
+   ⚠️  No fields detected by type matching, using fallback: filling ANY text/textarea fields (ignoring visibility check)
+   🔍 Fallback: Found field - tag: input, type: text, name: full_name, selector: input[name="full_name"]
+   🔍 Fallback: Found field - tag: input, type: text, name: company, selector: input[name="company"]
+   🔍 Fallback: Found field - tag: input, type: text, name: phone, selector: input[name="phone"]
+   🔍 Fallback: Found field - tag: input, type: email, name: email, selector: input[name="email"]
+   🔍 Fallback: Found field - tag: input, type: text, name: subject, selector: input[name="subject"]
+   🔍 Fallback: Found field - tag: textarea, type: textarea, name: message, selector: textarea[name="message"]
+   🔍 Fallback: Found field - tag: input, type: text, name: full_name, selector: input[name="full_name"]
+   🔍 Fallback: Found field - tag: input, type: text, name: company, selector: input[name="company"]
+   🔍 Fallback: Found field - tag: input, type: text, name: phone, selector: input[name="phone"]
+   🔍 Fallback: Found field - tag: input, type: email, name: email, selector: input[name="email"]
+   🔍 Fallback: Found field - tag: input, type: text, name: subject, selector: input[name="subject"]
+   🔍 Fallback: Found field - tag: textarea, type: textarea, name: message, selector: textarea[name="message"]
+   ✅ Fallback: Found 5 visible text/textarea fields to fill
+   ✅ Auto-detected 5 fields: full_name, company, phone, email, subject
+✍️  Filling 5 form fields...
+   Field 1/5: input[name="full_name"]...
+Traceback (most recent call last):
+  File "test_headless_local.py", line 89, in test_submission
+    result = await run_submission(TEST_URL, template_path)
+  File "/var/www/html/TEQSmartSubmit/automation/./run_submission.py", line 1523, in run_submission
+    if discovered_field:
+UnboundLocalError: local variable 'discovered_field' referenced before assignment
+
+================================================================================
+TEQSmartSubmit Local Headless Mode Test
+================================================================================
+Server: teqtop-OptiPlex-3050
+Python: 3.8.10 (default, Mar 18 2025, 20:04:55) 
+[GCC 9.4.0]
+Working Directory: /var/www/html/TEQSmartSubmit/automation
+================================================================================
+
+================================================================================
+Local Headless Mode Test - Environment Check
+================================================================================
+DISPLAY environment variable: NOT SET (simulating remote server)
+Has display: False
+TEQ_FORCE_HEADLESS: true
+HEADLESS: NOT SET
+
+Expected browser mode: HEADLESS MODE (forced)
+================================================================================
+
+================================================================================
+Testing Form Submission in Headless Mode
+================================================================================
+URL: https://www.seoily.com/contact-us
+Template headless: True
+================================================================================
+
+🚀 Starting automation in HEADLESS mode...
+
+================================================================================
+
+❌ EXCEPTION: local variable 'discovered_field' referenced before assignment
+
+Troubleshooting:
+1. Ensure Playwright is installed: pip install playwright && playwright install chromium
+2. Check Python dependencies
+3. Verify network connectivity to the target URL
+
+================================================================================
+Test Complete
+================================================================================

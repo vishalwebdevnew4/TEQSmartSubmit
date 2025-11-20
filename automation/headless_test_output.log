@@ -1,0 +1,98 @@
+🚀 Starting automation...
+   URL: https://www.seoily.com/contact-us
+   Fields to fill: 0
+📄 Loading page...
+✅ Page loaded
+🔧 Fixing zoom and positioning...
+🔍 Checking for overlay banners, cookie consent, and modals...
+   ℹ️  No overlays found or already closed
+🔍 Waiting for form fields to load...
+   ⚠️  Form fields not found immediately, continuing...
+🔍 Discovering forms on page...
+✅ Found 2 form(s)
+   📋 Selected form with 20 fields (score: 5)
+📝 Found 20 fields in target form
+🤖 Auto-detect mode enabled: Automatically detecting form fields...
+   ⚠️  No fields detected by type matching, using fallback: filling any visible text/textarea fields
+   ✅ Auto-detected 0 fields: 
+   ⚠️  Could not auto-detect any fillable fields. Make sure form has name, email, or message fields.
+⚠️  No fields to fill. Skipping form fill.
+🔍 Checking for overlays that might block CAPTCHA...
+✅ Checking consent/terms checkboxes automatically...
+   ℹ️  No unchecked consent checkboxes found
+🔐 Checking for CAPTCHA (initial check)...
+   CAPTCHA detected: recaptcha
+🔍 CAPTCHA solving check: use_local=True, captcha_type=recaptcha, site_key=present
+🤖 Step 1: Trying LOCAL CAPTCHA SOLVER (fully automated)...
+   Site key: 6LdwsYQqAAAAANyLuMH-...
+   Page URL: https://www.seoily.com/contact-us
+   ⏱️  Using timeout: 180s (headless mode)
+🖱️  Clicking reCAPTCHA checkbox...
+   🔍 Looking for reCAPTCHA checkbox...
+   ⏳ Waiting for reCAPTCHA to load...
+   📋 Strategy 1: Looking for reCAPTCHA iframe...
+   ✅ Found iframe with selector: iframe[src*="recaptcha"][src*="anchor"]
+   🔄 Accessing iframe content...
+   ✅ Iframe content accessible
+   ✅ Checkbox element found in iframe
+   🖱️  Clicking checkbox...
+   ⏰ Local solver timeout (180s)
+   Hybrid mode disabled - will not try external services
+⚠️  Local solver failed: Local CAPTCHA solver returned empty token
+📋 Full error trace:
+Traceback (most recent call last):
+  File "/var/www/html/TEQSmartSubmit/automation/./run_submission.py", line 1769, in run_submission
+    raise RuntimeError("Local CAPTCHA solver returned empty token")
+RuntimeError: Local CAPTCHA solver returned empty token
+
+❌ Local solver failed and hybrid mode is disabled. Will not try external services.
+   ⚠️  Local solver already failed, skipping external fallback (no API keys)
+⚠️  No CAPTCHA solver available. Please configure API keys or enable manual solving.
+Traceback (most recent call last):
+  File "test_headless_local.py", line 89, in test_submission
+    result = await run_submission(TEST_URL, template_path)
+  File "/var/www/html/TEQSmartSubmit/automation/./run_submission.py", line 1911, in run_submission
+    raise RuntimeError(error_msg)
+RuntimeError: reCAPTCHA detected but all automated solvers failed. Local solver failed (Local CAPTCHA solver returned empty token). No external solver available (no API keys configured). Options: 1) Enable local solver with 'use_local_captcha_solver': true (already enabled), 2) Set CAPTCHA API keys, 3) Use test mode with 'headless': false for manual solving
+
+================================================================================
+TEQSmartSubmit Local Headless Mode Test
+================================================================================
+Server: teqtop-OptiPlex-3050
+Python: 3.8.10 (default, Mar 18 2025, 20:04:55) 
+[GCC 9.4.0]
+Working Directory: /var/www/html/TEQSmartSubmit/automation
+================================================================================
+
+================================================================================
+Local Headless Mode Test - Environment Check
+================================================================================
+DISPLAY environment variable: NOT SET (simulating remote server)
+Has display: False
+TEQ_FORCE_HEADLESS: true
+HEADLESS: NOT SET
+
+Expected browser mode: HEADLESS MODE (forced)
+================================================================================
+
+================================================================================
+Testing Form Submission in Headless Mode
+================================================================================
+URL: https://www.seoily.com/contact-us
+Template headless: True
+================================================================================
+
+🚀 Starting automation in HEADLESS mode...
+
+================================================================================
+
+❌ EXCEPTION: reCAPTCHA detected but all automated solvers failed. Local solver failed (Local CAPTCHA solver returned empty token). No external solver available (no API keys configured). Options: 1) Enable local solver with 'use_local_captcha_solver': true (already enabled), 2) Set CAPTCHA API keys, 3) Use test mode with 'headless': false for manual solving
+
+Troubleshooting:
+1. Ensure Playwright is installed: pip install playwright && playwright install chromium
+2. Check Python dependencies
+3. Verify network connectivity to the target URL
+
+================================================================================
+Test Complete
+================================================================================

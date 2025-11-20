@@ -1,0 +1,261 @@
+
+================================================================================
+Testing All Websites with Detailed Logs
+================================================================================
+Total sites: 19
+Start time: 2025-11-19 14:35:13
+================================================================================
+
+📄 Using template: auto_detect_template.json
+
+
+################################################################################
+# SITE 1/19
+################################################################################
+
+
+================================================================================
+Testing: https://thefabcode.com/contact-us/
+================================================================================
+Time: 2025-11-19 14:35:13
+================================================================================
+🚀 Starting automation...
+   URL: https://thefabcode.com/contact-us/
+   Fields to fill: 0
+📄 Loading page...
+✅ Page loaded
+{"status": "error", "message": "Page.wait_for_timeout: Target page, context or browser has been closed"}
+
+❌ FAILED: https://thefabcode.com/contact-us/
+   Status: error
+   Message: Page.wait_for_timeout: Target page, context or browser has been closed
+
+
+################################################################################
+# SITE 2/19
+################################################################################
+
+
+================================================================================
+Testing: https://www.seodiscovery.com/contact-us.php
+================================================================================
+Time: 2025-11-19 14:35:30
+================================================================================
+🚀 Starting automation...
+   URL: https://www.seodiscovery.com/contact-us.php
+   Fields to fill: 0
+📄 Loading page...
+✅ Page loaded
+🔍 Waiting for form fields to load...
+   ⚠️  Form fields not found immediately, continuing...
+🔍 Discovering forms on page...
+{"status": "error", "message": "Page.evaluate: Target page, context or browser has been closed"}
+
+❌ FAILED: https://www.seodiscovery.com/contact-us.php
+   Status: error
+   Message: Page.evaluate: Target page, context or browser has been closed
+
+
+################################################################################
+# SITE 3/19
+################################################################################
+
+
+================================================================================
+Testing: https://blacklisted.agency/contact/
+================================================================================
+Time: 2025-11-19 14:36:02
+================================================================================
+🚀 Starting automation...
+   URL: https://blacklisted.agency/contact/
+   Fields to fill: 0
+📄 Loading page...
+✅ Page loaded
+🔍 Waiting for form fields to load...
+   ⚠️  Form fields not found immediately, continuing...
+🔍 Discovering forms on page...
+{"status": "error", "message": "Page.evaluate: Target page, context or browser has been closed"}
+
+❌ FAILED: https://blacklisted.agency/contact/
+   Status: error
+   Message: Page.evaluate: Target page, context or browser has been closed
+
+
+################################################################################
+# SITE 4/19
+################################################################################
+
+
+================================================================================
+Testing: https://www.imarkinfotech.com/contact/
+================================================================================
+Time: 2025-11-19 14:36:25
+================================================================================
+🚀 Starting automation...
+   URL: https://www.imarkinfotech.com/contact/
+   Fields to fill: 0
+📄 Loading page...
+✅ Page loaded
+🔍 Waiting for form fields to load...
+   ⚠️  Form fields not found immediately, continuing...
+🔍 Discovering forms on page...
+✅ Found 2 form(s)
+   📋 Selected form with 29 fields (score: 31)
+📝 Found 29 fields in target form
+🤖 Auto-detect mode enabled: Automatically detecting form fields...
+   ✅ Auto-detected 11 fields: name, email, phone, company, text, radio, radio, radio, text, message, checkbox
+✍️  Filling 11 form fields...
+   Field 1/11: input[name="fname"]...
+   ✅ Field 1 filled successfully
+   Field 2/11: input[name="email"]...
+   ✅ Field 2 filled successfully
+   Field 3/11: input[name="phone"]...
+   ✅ Field 3 filled successfully
+   Field 4/11: input[name="company"]...
+   ✅ Field 4 filled successfully
+   Field 5/11: input[name="industry"]...
+   ✅ Field 5 filled successfully
+   Field 6/11: input[name="reach_you"]...
+   ✅ Field 6 filled successfully
+   Field 7/11: input[name="reach_you"]...
+   ✅ Field 7 filled successfully
+   Field 8/11: input[name="reach_you"]...
+   ✅ Field 8 filled successfully
+   Field 9/11: input[name="find_us"]...
+   ✅ Field 9 filled successfully
+   Field 10/11: textarea[name="textarea-931"]...
+   ✅ Field 10 filled successfully
+   Field 11/11: input[name="checkbox-842[]"]...
+   ✅ Field 11 filled successfully
+✅ Checking consent/terms checkboxes automatically...
+   ℹ️  No unchecked consent checkboxes found
+🔐 Checking for CAPTCHA (initial check)...
+   CAPTCHA detected: recaptcha
+🤖 Step 1: Trying LOCAL CAPTCHA SOLVER (fully automated)...
+🖱️  Clicking reCAPTCHA checkbox...
+🔍 Waiting for challenge to appear...
+🎯 Challenge detected, attempting to solve...
+🖼️  Image challenge detected, switching to audio...
+   ✅ Found audio button: #recaptcha-audio-button, clicking...
+   ✅ Successfully switched to audio challenge
+🎧 Attempting to solve audio challenge...
+   🎧 Starting audio challenge solving...
+   🔍 Checking for Buster extension...
+   ✅ Already in audio challenge mode
+   ⏳ Waiting for audio challenge to fully load (checking network requests)...
+   ⏳ Frame has content (3 elements), waiting for audio... (1/15)
+   ⏳ Frame has content (3 elements), waiting for audio... (4/15)
+   ⏳ Frame has content (3 elements), waiting for audio... (7/15)
+   ⏳ Frame has content (3 elements), waiting for audio... (10/15)
+   ⚠️  Page closed during wait (attempt 13)
+   ⚠️  Audio elements not fully detected, but continuing anyway...
+   📥 Getting audio source (checking download links first)...
+   ▶️  Trying to trigger audio download/load...
+   ⚠️  Error triggering audio: Frame.evaluate: Target page, context or browser ha
+   ❌ Page closed during audio source check (attempt 1)
+⏳ Waiting for CAPTCHA token after solving attempt...
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+   ✅ Challenge iframe disappeared, checking for token...
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+   Still waiting for token... (6/20)
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+   ✅ Challenge iframe disappeared, checking for token...
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+   Still waiting for token... (11/20)
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+   ✅ Challenge iframe disappeared, checking for token...
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+   Still waiting for token... (16/20)
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+🖼️  Audio failed, trying image challenge as last resort...
+   🖼️  Image challenge detected, attempting to solve...
+   ❌ Challenge solving error: Page.query_selector: Target page, context or browser has been closed
+   Traceback: Traceback (most recent call last):
+  File "/var/www/html/TEQSmartSubmit/automation/captcha_solver.py", line 1834, in _solve_challenge
+    challenge_frame = await self.page.query_selector('iframe[title
+🔍 Final token check...
+⚠️  Error getting token: Page.evaluate: Target page, context or browser has been closed
+⚠️  Warning: Could not retrieve CAPTCHA token after solving attempt
+   ⏰ Local solver timeout (120s)
+   Hybrid mode disabled - will not try external services
+⚠️  Local solver failed: Local CAPTCHA solver returned empty token
+📋 Full error trace:
+Traceback (most recent call last):
+  File "run_submission.py", line 1449, in run_submission
+    raise RuntimeError("Local CAPTCHA solver returned empty token")
+RuntimeError: Local CAPTCHA solver returned empty token
+
+❌ Local solver failed and hybrid mode is disabled. Will not try external services.
+⚠️  No CAPTCHA solver available. Please configure API keys or enable manual solving.
+⚠️  All automated CAPTCHA solvers failed. Waiting for manual CAPTCHA solving...
+⚠️  Please solve the CAPTCHA manually in the browser window.
+⚠️  Waiting up to 5 minutes for manual CAPTCHA solving...
+{"status": "error", "message": "CAPTCHA not solved within timeout. Please solve it manually in the browser window, or configure CAPTCHA solver API keys."}
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed\nCall log:\nattempting scroll into view action\n  -   waiting for element to be stable\n')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Call log:
+attempting scroll into view action
+  -   waiting for element to be stable
+
+
+❌ FAILED: https://www.imarkinfotech.com/contact/
+   Status: error
+   Message: CAPTCHA not solved within timeout. Please solve it manually in the browser window, or configure CAPTCHA solver API keys.
+
+
+################################################################################
+# SITE 5/19
+################################################################################
+
+
+================================================================================
+Testing: https://www.softtrix.com/contact
+================================================================================
+Time: 2025-11-19 14:40:03
+================================================================================
+🚀 Starting automation...
+   URL: https://www.softtrix.com/contact
+   Fields to fill: 0
+📄 Loading page...
+{"status": "error", "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://www.softtrix.com/contact\", waiting until \"load\"\n"}
+
+❌ FAILED: https://www.softtrix.com/contact
+   Status: error
+   Message: Page.goto: Target page, context or browser has been closed
+Call log:
+navigating to "https://www.softtrix.com/contact", waiting until "load"
+
+
+
+################################################################################
+# SITE 6/19
+################################################################################
+
+
+================================================================================
+Testing: https://www.offsure.com/#/contact
+================================================================================
+Time: 2025-11-19 14:40:08
+================================================================================
+🚀 Starting automation...
+   URL: https://www.offsure.com/#/contact
+   Fields to fill: 0
+📄 Loading page...
+{"status": "error", "message": "Page.goto: Target page, context or browser has been closed\nCall log:\nnavigating to \"https://www.offsure.com/#/contact\", waiting until \"load\"\n"}
