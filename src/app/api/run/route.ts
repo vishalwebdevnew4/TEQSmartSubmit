@@ -108,13 +108,33 @@ export async function POST(req: NextRequest) {
 
     let stdout = "";
     let stderr = "";
+    let lastLogUpdate = Date.now();
+    const LOG_UPDATE_INTERVAL = 2000; // Update database every 2 seconds with logs
 
     python.stdout.on("data", (chunk) => {
       stdout += chunk;
     });
 
-    python.stderr.on("data", (chunk) => {
+    python.stderr.on("data", async (chunk) => {
       stderr += chunk;
+      // Update database periodically with stderr logs so they appear in real-time
+      const now = Date.now();
+      if (now - lastLogUpdate > LOG_UPDATE_INTERVAL) {
+        lastLogUpdate = now;
+        try {
+          // Store last 5000 chars of stderr in message field for real-time viewing
+          const logPreview = stderr.slice(-5000);
+          await prisma.submissionLog.update({
+            where: { id: submission.id },
+            data: {
+              message: logPreview || "Automation in progress...",
+            },
+          });
+        } catch (updateError) {
+          // Ignore update errors to avoid breaking the main flow
+          console.error("Failed to update log:", updateError);
+        }
+      }
     });
 
     // Add timeout (5 minutes for automation to complete)
@@ -180,7 +200,9 @@ export async function POST(req: NextRequest) {
     // If we found valid JSON, use it regardless of exit code
     if (parsed && typeof parsed === "object") {
       const finalStatus = parsed.status === "success" ? "success" : parsed.status || (exitCode === 0 ? "success" : "failed");
-      const finalMessage = parsed.message || stdoutTrimmed || null;
+      // Include stderr logs in the final message if available (last 10000 chars)
+      const stderrPreview = stderr.trim().slice(-10000);
+      const finalMessage = parsed.message || stdoutTrimmed || stderrPreview || null;
       
       await prisma.submissionLog.update({
         where: { id: submission.id },
@@ -207,7 +229,8 @@ export async function POST(req: NextRequest) {
 
     // If exit code is non-zero and no JSON found, treat as error
     if (exitCode !== 0) {
-      const errorMessage = stderr.trim() || stdoutTrimmed || `Python exited with code ${exitCode}`;
+      // Include full stderr logs in error message (last 15000 chars to show full context)
+      const errorMessage = (stderr.trim() || stdoutTrimmed || `Python exited with code ${exitCode}`).slice(-15000);
       await prisma.submissionLog.update({
         where: { id: submission.id },
         data: {

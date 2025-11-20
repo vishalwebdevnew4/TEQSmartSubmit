@@ -33,6 +33,34 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
+# Force unbuffered output for immediate log visibility on remote servers
+# This ensures logs appear immediately even when running in background
+# PYTHONUNBUFFERED should be set by the caller, but we ensure it here too
+os.environ.setdefault('PYTHONUNBUFFERED', '1')
+
+# Reopen stderr with line buffering to ensure immediate output on remote servers
+# This is critical for logs to appear in real-time when running via subprocess
+try:
+    # If stderr is not a TTY (e.g., redirected to file or pipe), make it line-buffered
+    if not sys.stderr.isatty():
+        sys.stderr = os.fdopen(sys.stderr.fileno(), 'w', buffering=1)  # Line buffered (flush on newline)
+        sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)  # Line buffered
+except (OSError, AttributeError):
+    # If we can't reopen, at least try to flush frequently
+    pass
+
+# Helper function to print to stderr and immediately flush
+def log_print(*args, **kwargs):
+    """Print to stderr and immediately flush to ensure logs appear on remote servers."""
+    # Ensure file=sys.stderr is set if not specified
+    if 'file' not in kwargs:
+        kwargs['file'] = sys.stderr
+    print(*args, **kwargs)
+    try:
+        sys.stderr.flush()
+    except (OSError, AttributeError):
+        pass
+
 # Add automation directory to Python path to ensure imports work when running from root directory
 _script_dir = Path(__file__).parent.absolute()
 if str(_script_dir) not in sys.path:
@@ -756,9 +784,9 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         submit_selector = "button[type='submit'], input[type='submit'], button:has-text('Submit'), button:has-text('Send'), button:has-text('Send message')"
 
     # Add progress logging
-    print("🚀 Starting automation...", file=sys.stderr)
-    print(f"   URL: {url}", file=sys.stderr)
-    print(f"   Fields to fill: {len(fields)}", file=sys.stderr)
+    log_print("🚀 Starting automation...")
+    log_print(f"   URL: {url}")
+    log_print(f"   Fields to fill: {len(fields)}")
 
     async with async_playwright() as p:
         # Check if we should run in headless mode
@@ -1689,8 +1717,15 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
             print("   No CAPTCHA detected initially", file=sys.stderr)
         
         # Wait a bit and check again - CAPTCHA might load after form interaction
-        # Use longer wait for CAPTCHA to appear
-        for attempt in range(5):  # Try 5 times with 2-second intervals
+        # Use shorter wait and exit early if no CAPTCHA found
+        if not captcha_present:
+            # Only check a couple times if no CAPTCHA initially detected
+            max_attempts = 2
+        else:
+            # If CAPTCHA was detected, check more times
+            max_attempts = 5
+        
+        for attempt in range(max_attempts):
             await page.wait_for_timeout(2000)
             captcha_info_after_fill = await detect_captcha(page)
             if captcha_info_after_fill.get("present", False):
@@ -1700,12 +1735,11 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 captcha_present = True
                 captcha_solved = captcha_info.get("solved", False)
                 break
-            elif attempt == 0:
-                # First check found nothing, but continue checking
-                continue
-            else:
-                # Still no CAPTCHA after multiple checks
-                if attempt == 4:
+            elif attempt == max_attempts - 1:
+                # Last attempt - no CAPTCHA found
+                if not captcha_present:
+                    print("   ✅ No CAPTCHA detected - will proceed directly to submission", file=sys.stderr)
+                else:
                     print("   No CAPTCHA found after waiting", file=sys.stderr)
         
         if captcha_present and not captcha_solved:
@@ -2050,26 +2084,44 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 locator = page.locator(discovered_selector).first
                 if await locator.count() > 0:
                     submit_button = locator
-                    print("   ✅ Submit button found via discovery", file=sys.stderr)
+                    print(f"   ✅ Submit button found via discovery: {discovered_selector[:50]}", file=sys.stderr)
                     break
-            except Exception:
+            except Exception as e:
+                print(f"   ⚠️  Failed to find submit button with selector {discovered_selector[:50]}: {str(e)[:50]}", file=sys.stderr)
                 continue
         
         # Fall back to template selector
         if not submit_button:
-            print("   Trying template selector...", file=sys.stderr)
+            print(f"   Trying template selector: {submit_selector[:50]}...", file=sys.stderr)
             try:
                 submit_button = page.locator(submit_selector).first
-                if await submit_button.count() == 0:
+                count = await submit_button.count()
+                if count == 0:
+                    print(f"   ⚠️  Template selector found 0 buttons, trying fallback...", file=sys.stderr)
                     raise RuntimeError(f"Submit button not found: {submit_selector}")
+                else:
+                    print(f"   ✅ Submit button found via template selector (count: {count})", file=sys.stderr)
             except Exception as e:
                 # Try to find any submit button in the form
+                print(f"   Trying fallback selectors...", file=sys.stderr)
                 try:
                     submit_button = page.locator("form button[type='submit']").first
-                    if await submit_button.count() == 0:
+                    count = await submit_button.count()
+                    if count == 0:
+                        print(f"   Trying generic form button...", file=sys.stderr)
                         submit_button = page.locator("form button").first
-                except Exception:
-                    raise RuntimeError(f"Could not find submit button: {e}")
+                        count = await submit_button.count()
+                        if count == 0:
+                            raise RuntimeError(f"Could not find submit button with any selector")
+                        else:
+                            print(f"   ✅ Submit button found via generic form button (count: {count})", file=sys.stderr)
+                    else:
+                        print(f"   ✅ Submit button found via form button[type='submit'] (count: {count})", file=sys.stderr)
+                except Exception as e2:
+                    raise RuntimeError(f"Could not find submit button: {e2}")
+        
+        if not submit_button:
+            raise RuntimeError("Submit button is None - this should not happen")
         
         # Track all POST requests to verify submission (including AJAX/fetch)
         post_requests = []
@@ -2257,6 +2309,7 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         await page.wait_for_timeout(2000)  # Wait for any dynamic CAPTCHA to load
         captcha_info_after = await detect_captcha(page)
         if captcha_info_after.get("present", False) and not captcha_info_after.get("solved", False):
+            # CAPTCHA detected after form fill - need to solve it
             print(f"   ✅ CAPTCHA detected after form fill: {captcha_info_after.get('type', 'unknown')}", file=sys.stderr)
             # Update captcha info and solve it
             captcha_present = True
@@ -2322,6 +2375,12 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                                 captcha_solved = True
                         except Exception as ext_error:
                             print(f"   ⚠️  External solver also failed: {str(ext_error)[:100]}", file=sys.stderr)
+        else:
+            # No CAPTCHA detected - proceed directly to submission
+            if not captcha_present:
+                print("   ✅ No CAPTCHA detected - proceeding directly to form submission", file=sys.stderr)
+            else:
+                print("   ✅ CAPTCHA already solved or not required - proceeding to form submission", file=sys.stderr)
         
         # First, try clicking the submit button and wait for POST
         print("📤 Submitting form...", file=sys.stderr)
@@ -2332,8 +2391,9 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
         responses_received.clear()
         fetch_requests.clear()
         
-        # Double-check CAPTCHA token one more time right before submission
+        # Double-check CAPTCHA token one more time right before submission (only if CAPTCHA was detected)
         if captcha_present:
+            print("   🔍 Verifying CAPTCHA token before submission...", file=sys.stderr)
             final_token_check = await page.evaluate("""
                 () => {
                     const field = document.querySelector('textarea[name="g-recaptcha-response"]');
@@ -2358,6 +2418,8 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                 raise RuntimeError("CAPTCHA token is missing. Cannot submit form without valid CAPTCHA token.")
             else:
                 print(f"   ✅ CAPTCHA token verified: length={final_token_check.get('length', 'unknown')}", file=sys.stderr)
+        else:
+            print("   ✅ No CAPTCHA required - ready to submit form", file=sys.stderr)
         
         try:
             # Wait for POST response with longer timeout (including AJAX/fetch)
@@ -2368,9 +2430,24 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
             ) as response_info:
                 # Click the submit button
                 print("   🖱️  Clicking submit button...", file=sys.stderr)
+                # Verify submit button is still available
+                try:
+                    count = await submit_button.count()
+                    if count == 0:
+                        raise RuntimeError("Submit button disappeared before click")
+                    print(f"   ✅ Submit button verified (count: {count})", file=sys.stderr)
+                except Exception as e:
+                    print(f"   ⚠️  Error verifying submit button: {str(e)[:100]}", file=sys.stderr)
+                    # Try to find it again
+                    submit_button = page.locator(submit_selector).first
+                    if await submit_button.count() == 0:
+                        submit_button = page.locator("form button[type='submit']").first
+                
                 # Scroll submit button into view first
                 await submit_button.scroll_into_view_if_needed()
                 await page.wait_for_timeout(500)
+                
+                # Click the submit button
                 await submit_button.click()
                 print("   ✅ Submit button clicked, waiting for response...", file=sys.stderr)
             
