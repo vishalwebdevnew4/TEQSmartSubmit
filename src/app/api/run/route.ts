@@ -50,7 +50,26 @@ export async function POST(req: NextRequest) {
     // Check for DISPLAY env var (X11) or if we're in a headless environment
     const hasDisplay = process.env.DISPLAY !== undefined && process.env.DISPLAY !== '';
     const forceHeadless = process.env.TEQ_FORCE_HEADLESS === 'true';
-    const shouldUseHeadless = forceHeadless || (!hasDisplay && !isTest);
+    
+    // If template explicitly sets headless, use that; otherwise auto-detect
+    // For sites with CAPTCHA issues, prefer visible browser (headless=false)
+    const templateHeadless = template.headless ?? template.Headless;
+    let shouldUseHeadless: boolean;
+    
+    if (templateHeadless !== undefined) {
+      // Template explicitly sets headless mode
+      shouldUseHeadless = templateHeadless;
+    } else if (forceHeadless) {
+      // Environment forces headless
+      shouldUseHeadless = true;
+    } else if (isTest) {
+      // Test mode - always use visible browser
+      shouldUseHeadless = false;
+    } else {
+      // Auto-detect: prefer visible browser for better CAPTCHA solving
+      // Use headless only if no display available
+      shouldUseHeadless = !hasDisplay;
+    }
     
     // Enable virtual display for better CAPTCHA solving when headless
     // Virtual display allows browser to render on a virtual screen instead of requiring physical monitor
@@ -66,8 +85,9 @@ export async function POST(req: NextRequest) {
       use_hybrid_captcha_solver: template.use_hybrid_captcha_solver ?? false, // Default to false - use ONLY local solver
       captcha_service: template.captcha_service ?? "local", // Default to local only
       // For reuse mode: headless=false but with virtual display (runs in background)
-      // For normal mode: Use headless if no display available (remote server) or if forced
-      headless: reuseBrowser ? false : (isTest ? false : shouldUseHeadless),
+      // For normal mode: Prefer visible browser (headless=false) for better CAPTCHA solving
+      // Only use headless if explicitly set or no display available
+      headless: reuseBrowser ? false : shouldUseHeadless,
       use_virtual_display: reuseBrowser ? true : useVirtualDisplay, // Always use virtual display in reuse mode
       reuse_browser: reuseBrowser, // Enable browser reuse (single tab mode)
       use_auto_detect: template.use_auto_detect ?? (!hasFields), // Auto-detect if no fields provided

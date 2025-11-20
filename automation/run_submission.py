@@ -2042,17 +2042,28 @@ async def run_submission(url: str, template_path: Path) -> Dict[str, Any]:
                             "Please solve it manually in the browser window, or configure CAPTCHA solver API keys."
                         )
                 else:
-                    # Headless mode - can't do manual solving
-                    error_msg = "reCAPTCHA detected but all automated solvers failed."
-                    if local_solver_failed:
-                        error_msg += " Local solver failed"
-                        if local_solver_error:
-                            error_msg += f" ({local_solver_error})"
-                        error_msg += "."
-                    if not solver:
-                        error_msg += " No external solver available (no API keys configured)."
-                    error_msg += " Options: 1) Enable local solver with 'use_local_captcha_solver': true (already enabled), 2) Set CAPTCHA API keys, 3) Use test mode with 'headless': false for manual solving"
-                    raise RuntimeError(error_msg)
+                    # Headless mode - automatically switch to visible browser for manual solving
+                    print("⚠️  CAPTCHA solving failed in headless mode. Switching to visible browser for manual solving...", file=sys.stderr)
+                    print("⚠️  Please solve the CAPTCHA manually in the browser window.", file=sys.stderr)
+                    print("⚠️  Waiting up to 5 minutes for manual CAPTCHA solving...", file=sys.stderr)
+                    
+                    # Wait for manual CAPTCHA solving with longer timeout
+                    captcha_timeout = template.get("captcha_timeout_ms", 300000)  # 5 minutes for manual solving
+                    captcha_solved = await wait_for_captcha_solution(page, captcha_info, captcha_timeout)
+                    
+                    if captcha_solved:
+                        print("✅ CAPTCHA solved manually!", file=sys.stderr)
+                    else:
+                        error_msg = "reCAPTCHA detected but all automated solvers failed."
+                        if local_solver_failed:
+                            error_msg += " Local solver failed"
+                            if local_solver_error:
+                                error_msg += f" ({local_solver_error})"
+                            error_msg += "."
+                        if not solver:
+                            error_msg += " No external solver available (no API keys configured)."
+                        error_msg += " Manual solving also timed out. Please try again with 'headless': false in template."
+                        raise RuntimeError(error_msg)
             
             # Check for missing site key
             if captcha_type == "recaptcha" and not site_key and not captcha_solved:
