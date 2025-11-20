@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { urls, category, isActive } = body;
+    const { urls, categories, category, isActive } = body;
 
     if (!Array.isArray(urls) || urls.length === 0) {
       return NextResponse.json({ detail: "URLs array is required." }, { status: 400 });
@@ -16,7 +16,12 @@ export async function POST(req: NextRequest) {
       errors: [] as string[],
     };
 
-    for (const url of urls) {
+    // Support both single category and array of categories
+    const categoryArray = categories && Array.isArray(categories) ? categories : null;
+    const defaultCategory = category || null;
+
+    for (let i = 0; i < urls.length; i++) {
+      const url = urls[i];
       if (!url || typeof url !== "string") {
         results.skipped++;
         results.errors.push(`Invalid URL: ${url}`);
@@ -32,11 +37,14 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // Get category for this URL (from array if provided, otherwise use default)
+      const urlCategory = categoryArray && categoryArray[i] ? categoryArray[i] : defaultCategory;
+
       try {
         await prisma.domain.create({
           data: {
             url: url.trim(),
-            category: category || null,
+            category: urlCategory || null,
             isActive: isActive !== undefined ? isActive : true,
           },
         });

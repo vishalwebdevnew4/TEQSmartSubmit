@@ -142,12 +142,12 @@ export async function POST(req: NextRequest) {
       if (now - lastLogUpdate > LOG_UPDATE_INTERVAL) {
         lastLogUpdate = now;
         try {
-          // Store last 5000 chars of stderr in message field for real-time viewing
-          const logPreview = stderr.slice(-5000);
+          // Store complete stderr logs (no truncation) for real-time viewing
+          // Database Text field can handle large logs
           await prisma.submissionLog.update({
             where: { id: submission.id },
             data: {
-              message: logPreview || "Automation in progress...",
+              message: stderr || "Automation in progress...",
             },
           });
         } catch (updateError) {
@@ -220,9 +220,10 @@ export async function POST(req: NextRequest) {
     // If we found valid JSON, use it regardless of exit code
     if (parsed && typeof parsed === "object") {
       const finalStatus = parsed.status === "success" ? "success" : parsed.status || (exitCode === 0 ? "success" : "failed");
-      // Include stderr logs in the final message if available (last 10000 chars)
-      const stderrPreview = stderr.trim().slice(-10000);
-      const finalMessage = parsed.message || stdoutTrimmed || stderrPreview || null;
+      // Include complete stderr logs in the final message (no truncation)
+      // Combine stderr (main logs) with stdout (JSON output) for complete log
+      const completeLogs = stderr.trim() || stdoutTrimmed || "";
+      const finalMessage = completeLogs || parsed.message || null;
       
       await prisma.submissionLog.update({
         where: { id: submission.id },
@@ -249,19 +250,20 @@ export async function POST(req: NextRequest) {
 
     // If exit code is non-zero and no JSON found, treat as error
     if (exitCode !== 0) {
-      // Include full stderr logs in error message (last 15000 chars to show full context)
-      const errorMessage = (stderr.trim() || stdoutTrimmed || `Python exited with code ${exitCode}`).slice(-15000);
+      // Include complete stderr logs in error message (no truncation)
+      // Combine stderr and stdout for complete error context
+      const completeErrorLogs = stderr.trim() || stdoutTrimmed || `Python exited with code ${exitCode}`;
       await prisma.submissionLog.update({
         where: { id: submission.id },
         data: {
           status: "failed",
-          message: errorMessage,
+          message: completeErrorLogs,
           finishedAt: new Date(),
         },
       });
       
       // Check if it was a timeout
-      if (errorMessage.includes("SIGTERM") || errorMessage.includes("killed")) {
+      if (completeErrorLogs.includes("SIGTERM") || completeErrorLogs.includes("killed")) {
         return NextResponse.json(
           {
             status: "error",
@@ -274,7 +276,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           status: "error",
-          message: errorMessage,
+          message: completeErrorLogs,
           submissionId: submission.id,
         },
         { status: 500 }
@@ -285,24 +287,26 @@ export async function POST(req: NextRequest) {
     try {
       parsed = JSON.parse(stdoutTrimmed || "{}");
       if (parsed && typeof parsed === "object") {
+      // Include complete logs (stderr + stdout) for successful submissions
+      const completeLogs = (stderr.trim() || stdoutTrimmed || parsed.message || "").trim();
       await prisma.submissionLog.update({
         where: { id: submission.id },
         data: {
           status: parsed.status === "success" ? "success" : parsed.status ?? "success",
-          message: parsed.message ?? null,
+          message: completeLogs || null,
           finishedAt: new Date(),
         },
       });
       return NextResponse.json({ ...parsed, submissionId: submission.id });
       }
     } catch (parseError) {
-      // Not JSON, treat as success with message output
-      const message = stdoutTrimmed || "Automation complete.";
+      // Not JSON, treat as success with complete message output
+      const completeLogs = (stderr.trim() || stdoutTrimmed || "Automation complete.").trim();
       await prisma.submissionLog.update({
         where: { id: submission.id },
         data: {
           status: "success",
-          message,
+          message: completeLogs,
           finishedAt: new Date(),
         },
       });

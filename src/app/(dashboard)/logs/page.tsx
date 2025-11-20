@@ -83,6 +83,38 @@ export default function LogsPage() {
     fetchLogs(true);
   };
 
+  const handleClearLogs = async () => {
+    // Confirm before clearing
+    const confirmed = window.confirm(
+      "⚠️ Are you sure you want to delete ALL logs from the database?\n\nThis action cannot be undone."
+    );
+    
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/logs", {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        alert(`Failed to clear logs: ${errorData.detail || errorData.error || "Unknown error"}`);
+        return;
+      }
+
+      const data = await response.json();
+      alert(`✅ ${data.message || `Successfully deleted ${data.deletedCount || 0} log(s)`}`);
+      
+      // Refresh logs after clearing
+      fetchLogs(true);
+    } catch (error) {
+      console.error("Failed to clear logs:", error);
+      alert(`Network error: ${error instanceof Error ? error.message : "Failed to connect to server"}`);
+    }
+  };
+
   const handleExport = async (format: "csv" | "json") => {
     try {
       const params = new URLSearchParams();
@@ -227,6 +259,13 @@ export default function LogsPage() {
           className="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-200 hover:bg-slate-800"
         >
           Export JSON
+        </button>
+        <button
+          onClick={handleClearLogs}
+          className="rounded-lg border border-rose-600 px-4 py-2 font-medium text-rose-400 hover:bg-rose-600/20 hover:border-rose-500 transition-colors"
+          title="Delete all logs from database"
+        >
+          Clear Logs
         </button>
       </div>
 

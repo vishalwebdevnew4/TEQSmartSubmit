@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type TemplateFieldMappings = Record<string, unknown>;
 
@@ -34,6 +34,131 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
 
   const delaySeconds = 5;
   const retryLimit = 2;
+
+  // Check for running submissions on mount and periodically
+  useEffect(() => {
+    const checkRunningSubmissions = async () => {
+      try {
+        const response = await fetch("/api/logs?status=running&limit=10");
+        if (response.ok) {
+          const data = await response.json();
+          const runningLogs = data.logs || [];
+          
+          if (runningLogs.length > 0) {
+            // Find running submissions for our domains
+            const relevantDomains = runAllDomains && allDomains.length > 0 
+              ? allDomains.map(d => d.url)
+              : (domain ? [domain.url] : []);
+            
+            const relevantRunningLogs = runningLogs.filter((log: any) => {
+              const logUrl = log.domain?.url || log.url || "";
+              return relevantDomains.some(domainUrl => 
+                logUrl.includes(domainUrl) || 
+                domainUrl.includes(logUrl) ||
+                logUrl === domainUrl
+              );
+            });
+            
+            if (relevantRunningLogs.length > 0) {
+              // Find the most recent running submission
+              const latestRunning = relevantRunningLogs[0];
+              
+              // Restore or update running state
+              if (!isRunning) {
+                setStatus("running");
+                setIsRunning(true);
+              }
+              
+              // Extract and update message from log
+              const logMessage = latestRunning.message || "";
+              if (logMessage) {
+                // Try to find the "Running automation for..." line
+                const lines = logMessage.split("\n");
+                const runningLine = lines.find((line: string) => 
+                  line.includes("Running automation for") || 
+                  line.includes("Running") ||
+                  line.trim().startsWith("🚀")
+                );
+                
+                if (runningLine) {
+                  setMessage(runningLine.trim());
+                } else {
+                  // Extract domain from log
+                  const domainUrl = latestRunning.domain?.url || latestRunning.url || "domain";
+                  setMessage(`Running automation for ${domainUrl}...`);
+                }
+              } else {
+                // Fallback message
+                const domainUrl = latestRunning.domain?.url || latestRunning.url || "domain";
+                setMessage(`Running automation for ${domainUrl}...`);
+              }
+              
+              // Set last run time
+              if (latestRunning.createdAt) {
+                setLastRun(new Date(latestRunning.createdAt));
+              }
+            } else if (isRunning && status === "running") {
+              // We think we're running but no running logs found for our domains
+              // Check if there are recent completed submissions
+              const completedResponse = await fetch("/api/logs?limit=5");
+              if (completedResponse.ok) {
+                const completedData = await completedResponse.json();
+                const recentLogs = completedData.logs || [];
+                
+                if (recentLogs.length > 0) {
+                  const latest = recentLogs[0];
+                  if (latest.status === "success" || latest.status === "failed") {
+                    // Automation completed
+                    setStatus(latest.status === "success" ? "success" : "error");
+                    setIsRunning(false);
+                    if (latest.finishedAt) {
+                      setLastRun(new Date(latest.finishedAt));
+                    }
+                    if (latest.message) {
+                      setMessage(latest.message);
+                    }
+                  }
+                }
+              }
+            }
+          } else if (isRunning && status === "running") {
+            // No running submissions found, but we think we're running
+            // Check if there are recent completed submissions
+            const completedResponse = await fetch("/api/logs?limit=5");
+            if (completedResponse.ok) {
+              const completedData = await completedResponse.json();
+              const recentLogs = completedData.logs || [];
+              
+              if (recentLogs.length > 0) {
+                const latest = recentLogs[0];
+                if (latest.status === "success" || latest.status === "failed") {
+                  // Automation completed
+                  setStatus(latest.status === "success" ? "success" : "error");
+                  setIsRunning(false);
+                  if (latest.finishedAt) {
+                    setLastRun(new Date(latest.finishedAt));
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Failed to check running submissions:", error);
+      }
+    };
+
+    // Check immediately on mount
+    checkRunningSubmissions();
+
+    // Poll every 3 seconds for running submissions (only if not manually running)
+    const intervalId = setInterval(() => {
+      // Always check to update status from database
+      checkRunningSubmissions();
+    }, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [domain, allDomains, status, isRunning, runAllDomains]);
 
   const primaryTemplate = domain?.templates?.[0];
   // When runAllDomains is true, use all domains (they'll be filtered during execution)

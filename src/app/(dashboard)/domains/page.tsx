@@ -28,6 +28,8 @@ export default function DomainsPage() {
     isActive: true,
   });
   const [csvContent, setCsvContent] = useState("");
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [uploadMode, setUploadMode] = useState<"paste" | "file">("paste");
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
@@ -114,39 +116,111 @@ export default function DomainsPage() {
     }
   };
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCsvFile(file);
+    
+    // Read file content
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setCsvContent(content);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDownloadSample = () => {
+    const sampleCSV = `url,category
+https://example1.com,interior-design
+https://example2.com,web-design
+https://example3.com,marketing`;
+    
+    const blob = new Blob([sampleCSV], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "domains-sample.csv";
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  };
+
   const handleUploadCSV = async () => {
-    if (!csvContent.trim()) {
-      alert("Please paste CSV content");
-      return;
+    let content = csvContent.trim();
+    
+    if (uploadMode === "file" && csvFile) {
+      // File content is already loaded in csvContent
+      if (!content) {
+        alert("Please select a CSV file");
+        return;
+      }
+    } else {
+      if (!content) {
+        alert("Please paste CSV content or upload a file");
+        return;
+      }
     }
 
     setProcessing(true);
     try {
-      const lines = csvContent.trim().split("\n");
-      const urls: string[] = [];
+      const lines = content.split("\n").filter(line => line.trim());
+      if (lines.length === 0) {
+        alert("No data found in CSV");
+        return;
+      }
 
-      for (const line of lines) {
+      const domains: Array<{ url: string; category: string | null }> = [];
+      let hasHeaders = false;
+      
+      // Check if first line looks like headers
+      const firstLine = lines[0].toLowerCase();
+      if (firstLine.includes("url") || firstLine.includes("domain") || firstLine.includes("category")) {
+        hasHeaders = true;
+      }
+
+      // Start from line 1 if headers exist
+      const dataLines = hasHeaders ? lines.slice(1) : lines;
+
+      for (const line of dataLines) {
         const trimmed = line.trim();
-        if (trimmed) {
-          // Support both comma and tab separated
-          const parts = trimmed.split(/[,\t]/).map((p) => p.trim());
-          // First column is usually the URL
-          if (parts[0]) {
-            urls.push(parts[0]);
+        if (!trimmed) continue;
+
+        // Support both comma and tab separated
+        const parts = trimmed.split(/[,\t]/).map((p) => p.trim());
+        
+        if (parts[0]) {
+          const url = parts[0];
+          const category = parts[1] || null;
+          
+          // Validate URL format
+          try {
+            new URL(url);
+            domains.push({ url, category });
+          } catch {
+            // Skip invalid URLs
+            console.warn(`Invalid URL skipped: ${url}`);
           }
         }
       }
 
-      if (urls.length === 0) {
+      if (domains.length === 0) {
         alert("No valid URLs found in CSV");
         return;
       }
+
+      // Group by category for batch upload
+      const urls = domains.map(d => d.url);
+      const categories = domains.map(d => d.category);
 
       const response = await fetch("/api/domains/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           urls,
+          categories,
           isActive: true,
         }),
       });
@@ -156,6 +230,7 @@ export default function DomainsPage() {
         alert(result.message);
         setShowUploadModal(false);
         setCsvContent("");
+        setCsvFile(null);
         fetchDomains();
       } else {
         const error = await response.json();
@@ -465,22 +540,98 @@ export default function DomainsPage() {
       {/* Upload CSV Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-6">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-6 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-semibold text-white mb-4">Upload CSV</h3>
-            <p className="text-sm text-slate-400 mb-4">
-              Paste CSV content with one URL per line. Each line can be comma or tab separated.
-            </p>
-            <textarea
-              value={csvContent}
-              onChange={(e) => setCsvContent(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono text-sm h-64"
-              placeholder="https://example1.com&#10;https://example2.com&#10;https://example3.com"
-            />
-            <div className="flex gap-3 justify-end mt-4">
+            
+            {/* Download Sample Button */}
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-sm text-slate-400">
+                Upload a CSV file or paste content. Format: <code className="text-xs bg-slate-800 px-1 rounded">url,category</code>
+              </p>
+              <button
+                onClick={handleDownloadSample}
+                className="rounded-lg border border-indigo-600 px-3 py-1.5 text-xs font-medium text-indigo-400 hover:bg-indigo-600/20 transition-colors"
+              >
+                📥 Download Sample
+              </button>
+            </div>
+
+            {/* Upload Mode Toggle */}
+            <div className="mb-4 flex gap-2">
+              <button
+                onClick={() => {
+                  setUploadMode("paste");
+                  setCsvFile(null);
+                }}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                  uploadMode === "paste"
+                    ? "border-indigo-500 bg-indigo-500/20 text-indigo-300"
+                    : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                Paste Content
+              </button>
+              <button
+                onClick={() => {
+                  setUploadMode("file");
+                  setCsvContent("");
+                }}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                  uploadMode === "file"
+                    ? "border-indigo-500 bg-indigo-500/20 text-indigo-300"
+                    : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                Upload File
+              </button>
+            </div>
+
+            {/* File Upload Input */}
+            {uploadMode === "file" && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-slate-300 mb-2">Select CSV File</label>
+                <input
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={handleFileSelect}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-400"
+                />
+                {csvFile && (
+                  <p className="mt-2 text-xs text-slate-400">
+                    Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(2)} KB)
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* CSV Content Textarea */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                {uploadMode === "file" ? "CSV Content Preview" : "CSV Content"}
+              </label>
+              <textarea
+                value={csvContent}
+                onChange={(e) => setCsvContent(e.target.value)}
+                readOnly={uploadMode === "file" && csvFile !== null}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono text-sm h-64 resize-y"
+                placeholder={uploadMode === "file" 
+                  ? "Select a CSV file to preview content..."
+                  : "url,category\nhttps://example1.com,interior-design\nhttps://example2.com,web-design\nhttps://example3.com,marketing"}
+              />
+              {uploadMode === "paste" && (
+                <p className="mt-2 text-xs text-slate-500">
+                  💡 Tip: Copy the sample CSV, paste your data under the headers, and upload
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3 justify-end">
               <button
                 onClick={() => {
                   setShowUploadModal(false);
                   setCsvContent("");
+                  setCsvFile(null);
+                  setUploadMode("paste");
                 }}
                 className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
               >
@@ -488,7 +639,7 @@ export default function DomainsPage() {
               </button>
               <button
                 onClick={handleUploadCSV}
-                disabled={processing || !csvContent.trim()}
+                disabled={processing || (!csvContent.trim() && !csvFile)}
                 className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400 disabled:opacity-50"
               >
                 {processing ? "Uploading..." : "Upload"}

@@ -3,6 +3,44 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
+export async function DELETE(req: NextRequest) {
+  try {
+    // Test database connection first
+    try {
+      await prisma.$connect();
+    } catch (dbError) {
+      console.error("Database connection error:", dbError);
+      return NextResponse.json(
+        { 
+          detail: `Database connection failed: ${(dbError as Error).message}`,
+          error: "DATABASE_CONNECTION_ERROR"
+        },
+        { status: 500 }
+      );
+    }
+
+    // Delete all submission logs
+    const result = await prisma.submissionLog.deleteMany({});
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully deleted ${result.count} log(s)`,
+      deletedCount: result.count,
+    });
+  } catch (error) {
+    console.error("Error clearing logs:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    
+    return NextResponse.json(
+      { 
+        detail: `Unable to clear logs: ${errorMessage}`,
+        error: "CLEAR_LOGS_ERROR"
+      },
+      { status: 500 }
+    );
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
