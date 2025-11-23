@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Seed all test sites to the domains database via the Next.js API.
 """
 
 import json
 import sys
+import os
 from pathlib import Path
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import requests
 
@@ -32,7 +40,7 @@ TEST_SITES = [
     "https://interiordesign.xcelanceweb.com/"
 ]
 
-API_BASE_URL = "https://teqsmartsubmit.xcelanceweb.com/api/domains/upload"
+API_BASE_URL = "http://localhost:3000/api/domains/upload"
 
 
 def seed_domains(urls=None, category=None, is_active=True):

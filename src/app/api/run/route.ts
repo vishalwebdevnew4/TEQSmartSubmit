@@ -118,69 +118,76 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const python = spawn("python3", [scriptPath, "--url", url, "--template", templatePath], {
-      cwd: process.cwd(),
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
-    });
+    // Use 'python' on Windows, 'python3' on Linux/Mac
+    const pythonCommand = os.platform() === "win32" ? "python" : "python3";
+    
+    // Return immediately with submission ID - let automation run in background
+    // This prevents the API from timing out while automation is running
+    (async () => {
+      try {
+        const python = spawn(pythonCommand, [scriptPath, "--url", url, "--template", templatePath], {
+          cwd: process.cwd(),
+          env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
+        });
 
-    python.stdout.setEncoding("utf8");
-    python.stderr.setEncoding("utf8");
+        python.stdout.setEncoding("utf8");
+        python.stderr.setEncoding("utf8");
 
-    let stdout = "";
-    let stderr = "";
-    let lastLogUpdate = Date.now();
-    const LOG_UPDATE_INTERVAL = 2000; // Update database every 2 seconds with logs
+        let stdout = "";
+        let stderr = "";
+        let lastLogUpdate = Date.now();
+        const LOG_UPDATE_INTERVAL = 2000; // Update database every 2 seconds with logs
 
-    python.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
+        python.stdout.on("data", (chunk) => {
+          stdout += chunk;
+        });
 
-    python.stderr.on("data", async (chunk) => {
-      stderr += chunk;
-      // Update database periodically with stderr logs so they appear in real-time
-      const now = Date.now();
-      if (now - lastLogUpdate > LOG_UPDATE_INTERVAL) {
-        lastLogUpdate = now;
-        try {
-          // Store complete stderr logs (no truncation) for real-time viewing
-          // Database Text field can handle large logs
-          await prisma.submissionLog.update({
-            where: { id: submission.id },
-            data: {
-              message: stderr || "Automation in progress...",
-            },
+        python.stderr.on("data", async (chunk) => {
+          stderr += chunk;
+          // Update database periodically with stderr logs so they appear in real-time
+          const now = Date.now();
+          if (now - lastLogUpdate > LOG_UPDATE_INTERVAL) {
+            lastLogUpdate = now;
+            try {
+              // Store complete stderr logs (no truncation) for real-time viewing
+              // Database Text field can handle large logs
+              await prisma.submissionLog.update({
+                where: { id: submission.id },
+                data: {
+                  message: stderr || "Automation in progress...",
+                },
+              });
+            } catch (updateError) {
+              // Ignore update errors to avoid breaking the main flow
+              console.error("Failed to update log:", updateError);
+            }
+          }
+        });
+
+        // Add timeout (5 minutes for automation to complete)
+        const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+        const timeoutId = setTimeout(() => {
+          python.kill("SIGTERM");
+          // Force kill after 10 seconds if still running
+          setTimeout(() => {
+            if (!python.killed) {
+              python.kill("SIGKILL");
+            }
+          }, 10000);
+        }, TIMEOUT_MS);
+
+        const exitCode: number = await new Promise((resolve, reject) => {
+          python.on("error", (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
           });
-        } catch (updateError) {
-          // Ignore update errors to avoid breaking the main flow
-          console.error("Failed to update log:", updateError);
-        }
-      }
-    });
+          python.on("close", (code) => {
+            clearTimeout(timeoutId);
+            resolve(code ?? 0);
+          });
+        });
 
-    // Add timeout (5 minutes for automation to complete)
-    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-    const timeoutId = setTimeout(() => {
-      python.kill("SIGTERM");
-      // Force kill after 10 seconds if still running
-      setTimeout(() => {
-        if (!python.killed) {
-          python.kill("SIGKILL");
-        }
-      }, 10000);
-    }, TIMEOUT_MS);
-
-    const exitCode: number = await new Promise((resolve, reject) => {
-      python.on("error", (error) => {
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-      python.on("close", (code) => {
-        clearTimeout(timeoutId);
-        resolve(code ?? 0);
-      });
-    });
-
-    await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
 
     // Try to extract JSON from stdout (might be mixed with logs)
     let parsed: any = null;
@@ -234,18 +241,7 @@ export async function POST(req: NextRequest) {
         },
       });
       
-      // Return appropriate status code based on automation result
-      if (finalStatus === "success") {
-        return NextResponse.json(
-          { ...parsed, submissionId: submission.id, status: finalStatus },
-          { status: 200 }
-        );
-      } else {
-        return NextResponse.json(
-          { ...parsed, submissionId: submission.id, status: finalStatus },
-          { status: 500 }
-        );
-      }
+      // Status already updated in database - no need to return here
     }
 
     // If exit code is non-zero and no JSON found, treat as error
@@ -262,25 +258,7 @@ export async function POST(req: NextRequest) {
         },
       });
       
-      // Check if it was a timeout
-      if (completeErrorLogs.includes("SIGTERM") || completeErrorLogs.includes("killed")) {
-        return NextResponse.json(
-          {
-            status: "error",
-            message: "Automation timed out after 5 minutes. The script may still be running in the background.",
-          },
-          { status: 500 }
-        );
-      }
-      
-      return NextResponse.json(
-        {
-          status: "error",
-          message: completeErrorLogs,
-          submissionId: submission.id,
-        },
-        { status: 500 }
-      );
+      // Error status already updated in database - no need to return here
     }
 
     // Exit code is 0 but no JSON found - try to parse whole stdout as JSON, otherwise treat as success with message
@@ -297,7 +275,7 @@ export async function POST(req: NextRequest) {
           finishedAt: new Date(),
         },
       });
-      return NextResponse.json({ ...parsed, submissionId: submission.id });
+      // Status already updated in database - no need to return here
       }
     } catch (parseError) {
       // Not JSON, treat as success with complete message output
@@ -310,11 +288,32 @@ export async function POST(req: NextRequest) {
           finishedAt: new Date(),
         },
       });
-      return NextResponse.json(
-        { status: "success", message, submissionId: submission.id },
-        { status: 200 }
-      );
+      // Status already updated in database - no need to return here
     }
+      } catch (processError) {
+        // Handle errors in background process
+        const errorMessage = (processError as Error).message || "Unknown error";
+        await prisma.submissionLog.update({
+          where: { id: submission.id },
+          data: {
+            status: "failed",
+            message: errorMessage,
+            finishedAt: new Date(),
+          },
+        }).catch(() => undefined);
+        await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+    })(); // End of async IIFE - runs in background
+
+    // Return immediately with submission ID - don't wait for automation
+    return NextResponse.json(
+      { 
+        status: "running", 
+        message: "Automation started", 
+        submissionId: submission.id 
+      },
+      { status: 202 } // 202 Accepted - request accepted but not yet completed
+    );
   } catch (error) {
     return NextResponse.json(
       { status: "error", message: (error as Error).message },

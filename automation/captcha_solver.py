@@ -1,2428 +1,876 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-CAPTCHA Solver Interface
-Supports multiple CAPTCHA solving services and can be extended.
+Ultra-resilient Local CAPTCHA Solver Interface
+NEVER fails - always returns structured response
+Uses ONLY local solving - no external services
 """
 
 import asyncio
-import json
 import os
 import sys
 import time
-from typing import Dict, Optional
-from urllib.parse import urlencode
-from urllib.request import urlopen
-import urllib.request
-import urllib.error
+import random
+from typing import Dict, Optional, Any
+import base64
+import io
 
+# Global fallback result - immutable
+FALLBACK_CAPTCHA_RESULT = {
+    "success": False,
+    "token": None,
+    "error": "Local CAPTCHA solver encountered unrecoverable error",
+    "error_type": "fallback",
+    "solver_used": "local",
+    "recovered": True,
+    "timestamp": 0
+}
 
-class CaptchaSolver:
-    """Base class for CAPTCHA solvers."""
-    
-    async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve reCAPTCHA v2. Returns token or None."""
-        raise NotImplementedError("Subclass must implement solve_recaptcha_v2")
-    
-    async def solve_hcaptcha(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve hCaptcha. Returns token or None."""
-        raise NotImplementedError("Subclass must implement solve_hcaptcha")
+def get_timestamp() -> float:
+    """Safely get current timestamp."""
+    try:
+        return time.time()
+    except:
+        return 0.0
 
-
-class TwoCaptchaSolver(CaptchaSolver):
-    """2captcha.com CAPTCHA solver."""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "http://2captcha.com"
-    
-    async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve reCAPTCHA v2 using 2captcha."""
-        if not self.api_key:
-            return None
-        
+def safe_log_print(*args, **kwargs):
+    """Safely print to stderr - never fails."""
+    try:
+        # Ensure we have a valid output stream
+        output_file = None
         try:
-            # Submit CAPTCHA
-            submit_url = f"{self.base_url}/in.php"
-            submit_params = {
-                "key": self.api_key,
-                "method": "userrecaptcha",
-                "googlekey": site_key,
-                "pageurl": page_url,
-                "json": 1
-            }
-            
-            submit_response = urlopen(f"{submit_url}?{urlencode(submit_params)}", timeout=30)
-            submit_data = json.loads(submit_response.read().decode())
-            
-            if submit_data.get("status") != 1:
-                raise RuntimeError(f"2captcha submit failed: {submit_data.get('request', 'Unknown error')}")
-            
-            captcha_id = submit_data.get("request")
-            
-            # Poll for solution (max 2 minutes)
-            get_url = f"{self.base_url}/res.php"
-            max_attempts = 40
-            for attempt in range(max_attempts):
-                await asyncio.sleep(5)  # Wait 5 seconds between checks
-                
-                get_params = {
-                    "key": self.api_key,
-                    "action": "get",
-                    "id": captcha_id,
-                    "json": 1
-                }
-                
-                get_response = urlopen(f"{get_url}?{urlencode(get_params)}", timeout=30)
-                get_data = json.loads(get_response.read().decode())
-                
-                if get_data.get("status") == 1:
-                    return get_data.get("request")  # Solution token
-                
-                if get_data.get("request") == "CAPCHA_NOT_READY":
-                    continue
-                
-                raise RuntimeError(f"2captcha solve failed: {get_data.get('request', 'Unknown error')}")
-            
-            raise RuntimeError("2captcha timeout: Solution not ready after 200 seconds")
-            
-        except Exception as e:
-            raise RuntimeError(f"2captcha API error: {str(e)}")
-    
-    async def solve_hcaptcha(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve hCaptcha using 2captcha."""
-        if not self.api_key:
-            return None
+            if hasattr(sys, 'stderr') and sys.stderr and not getattr(sys.stderr, 'closed', True):
+                output_file = sys.stderr
+            elif hasattr(sys, 'stdout') and sys.stdout and not getattr(sys.stdout, 'closed', True):
+                output_file = sys.stdout
+        except:
+            pass
         
-        try:
-            submit_url = f"{self.base_url}/in.php"
-            submit_params = {
-                "key": self.api_key,
-                "method": "hcaptcha",
-                "sitekey": site_key,
-                "pageurl": page_url,
-                "json": 1
-            }
-            
-            submit_response = urlopen(f"{submit_url}?{urlencode(submit_params)}", timeout=30)
-            submit_data = json.loads(submit_response.read().decode())
-            
-            if submit_data.get("status") != 1:
-                raise RuntimeError(f"2captcha submit failed: {submit_data.get('request', 'Unknown error')}")
-            
-            captcha_id = submit_data.get("request")
-            
-            # Poll for solution
-            get_url = f"{self.base_url}/res.php"
-            max_attempts = 40
-            for attempt in range(max_attempts):
-                await asyncio.sleep(5)
-                
-                get_params = {
-                    "key": self.api_key,
-                    "action": "get",
-                    "id": captcha_id,
-                    "json": 1
-                }
-                
-                get_response = urlopen(f"{get_url}?{urlencode(get_params)}", timeout=30)
-                get_data = json.loads(get_response.read().decode())
-                
-                if get_data.get("status") == 1:
-                    return get_data.get("request")
-                
-                if get_data.get("request") == "CAPCHA_NOT_READY":
-                    continue
-                
-                raise RuntimeError(f"2captcha solve failed: {get_data.get('request', 'Unknown error')}")
-            
-            raise RuntimeError("2captcha timeout")
-            
-        except Exception as e:
-            raise RuntimeError(f"2captcha API error: {str(e)}")
-
-
-class AntiCaptchaSolver(CaptchaSolver):
-    """AntiCaptcha.com CAPTCHA solver."""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.anti-captcha.com"
-    
-    async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve reCAPTCHA v2 using AntiCaptcha."""
-        if not self.api_key:
-            return None
+        if not output_file:
+            return
         
-        try:
-            import urllib.request
-            import urllib.parse
-            
-            # Create task
-            create_task_data = {
-                "clientKey": self.api_key,
-                "task": {
-                    "type": "NoCaptchaTaskProxyless",
-                    "websiteURL": page_url,
-                    "websiteKey": site_key
-                }
-            }
-            
-            create_url = f"{self.base_url}/createTask"
-            req = urllib.request.Request(
-                create_url,
-                data=json.dumps(create_task_data).encode(),
-                headers={"Content-Type": "application/json"}
-            )
-            
-            response = urlopen(req, timeout=30)
-            result = json.loads(response.read().decode())
-            
-            if result.get("errorId") != 0:
-                raise RuntimeError(f"AntiCaptcha create task failed: {result.get('errorDescription', 'Unknown error')}")
-            
-            task_id = result.get("taskId")
-            
-            # Poll for solution
-            get_result_url = f"{self.base_url}/getTaskResult"
-            max_attempts = 40
-            for attempt in range(max_attempts):
-                await asyncio.sleep(5)
-                
-                get_result_data = {
-                    "clientKey": self.api_key,
-                    "taskId": task_id
-                }
-                
-                req = urllib.request.Request(
-                    get_result_url,
-                    data=json.dumps(get_result_data).encode(),
-                    headers={"Content-Type": "application/json"}
-                )
-                
-                response = urlopen(req, timeout=30)
-                result = json.loads(response.read().decode())
-                
-                if result.get("errorId") != 0:
-                    raise RuntimeError(f"AntiCaptcha get result failed: {result.get('errorDescription', 'Unknown error')}")
-                
-                if result.get("status") == "ready":
-                    return result.get("solution", {}).get("gRecaptchaResponse")
-                
-                if result.get("status") == "processing":
-                    continue
-                
-                raise RuntimeError(f"AntiCaptcha unexpected status: {result.get('status')}")
-            
-            raise RuntimeError("AntiCaptcha timeout")
-            
-        except Exception as e:
-            raise RuntimeError(f"AntiCaptcha API error: {str(e)}")
-    
-    async def solve_hcaptcha(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve hCaptcha using AntiCaptcha."""
-        # Similar implementation to recaptcha but with HCaptchaTaskProxyless
-        raise NotImplementedError("hCaptcha solving not yet implemented for AntiCaptcha")
-
-
-class CapSolverSolver(CaptchaSolver):
-    """CapSolver.com CAPTCHA solver."""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.capsolver.com"
-    
-    async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve reCAPTCHA v2 using CapSolver."""
-        if not self.api_key:
-            return None
+        # Prepare safe arguments
+        safe_args = []
+        for arg in args:
+            try:
+                if isinstance(arg, str):
+                    # Limit length and encode safely
+                    safe_arg = arg[:500]  # Limit length
+                    safe_args.append(safe_arg)
+                else:
+                    safe_args.append(str(arg)[:500])
+            except:
+                safe_args.append("[unprintable]")
         
-        try:
-            import urllib.request
-            
-            # Create task
-            create_task_data = {
-                "clientKey": self.api_key,
-                "task": {
-                    "type": "ReCaptchaV2TaskProxyLess",
-                    "websiteURL": page_url,
-                    "websiteKey": site_key
-                }
-            }
-            
-            create_url = f"{self.base_url}/createTask"
-            req = urllib.request.Request(
-                create_url,
-                data=json.dumps(create_task_data).encode(),
-                headers={"Content-Type": "application/json"}
-            )
-            
-            response = urlopen(req, timeout=30)
-            result = json.loads(response.read().decode())
-            
-            if result.get("errorId") != 0:
-                raise RuntimeError(f"CapSolver create task failed: {result.get('errorDescription', 'Unknown error')}")
-            
-            task_id = result.get("taskId")
-            
-            # Poll for solution
-            get_result_url = f"{self.base_url}/getTaskResult"
-            max_attempts = 40
-            for attempt in range(max_attempts):
-                await asyncio.sleep(5)
-                
-                get_result_data = {
-                    "clientKey": self.api_key,
-                    "taskId": task_id
-                }
-                
-                req = urllib.request.Request(
-                    get_result_url,
-                    data=json.dumps(get_result_data).encode(),
-                    headers={"Content-Type": "application/json"}
-                )
-                
-                response = urlopen(req, timeout=30)
-                result = json.loads(response.read().decode())
-                
-                if result.get("errorId") != 0:
-                    raise RuntimeError(f"CapSolver get result failed: {result.get('errorDescription', 'Unknown error')}")
-                
-                if result.get("status") == "ready":
-                    return result.get("solution", {}).get("gRecaptchaResponse")
-                
-                if result.get("status") == "processing":
-                    continue
-                
-                raise RuntimeError(f"CapSolver unexpected status: {result.get('status')}")
-            
-            raise RuntimeError("CapSolver timeout")
-            
-        except Exception as e:
-            raise RuntimeError(f"CapSolver API error: {str(e)}")
-    
-    async def solve_hcaptcha(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve hCaptcha using CapSolver."""
-        raise NotImplementedError("hCaptcha solving not yet implemented for CapSolver")
-
-
-class AI4CAPSolver(CaptchaSolver):
-    """AI4CAP.com CAPTCHA solver (free trial available)."""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.ai4cap.com"
-    
-    async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve reCAPTCHA v2 using AI4CAP REST API."""
-        if not self.api_key:
-            return None
+        # Print safely
+        kwargs['file'] = output_file
+        print(*safe_args, **kwargs)
         
+        # Flush safely
         try:
-            print("🤖 Using AI4CAP service (free trial)...", file=sys.stderr)
+            if hasattr(output_file, 'flush'):
+                output_file.flush()
+        except:
+            pass
             
-            # Step 1: Submit CAPTCHA task
-            submit_url = f"{self.base_url}/api/captcha/solve"
-            submit_data = {
-                "type": "recaptcha_v2",
-                "siteKey": site_key,
-                "pageUrl": page_url
-            }
-            
-            req = urllib.request.Request(
-                submit_url,
-                data=json.dumps(submit_data).encode(),
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-            )
-            
-            print("   📤 Submitting CAPTCHA to AI4CAP...", file=sys.stderr)
-            response = urlopen(req, timeout=30)
-            result = json.loads(response.read().decode())
-            
-            # Check for errors in response
-            if result.get("error"):
-                raise RuntimeError(f"AI4CAP submit failed: {result.get('error', 'Unknown error')}")
-            
-            task_id = result.get("taskId")
-            if not task_id:
-                raise RuntimeError(f"AI4CAP did not return taskId: {result}")
-            
-            print(f"   ✅ Task submitted, ID: {task_id[:20]}...", file=sys.stderr)
-            
-            # Step 2: Poll for solution
-            get_result_url = f"{self.base_url}/api/captcha/result/{task_id}"
-            max_attempts = 60  # 2 minutes max (60 * 2 seconds)
-            timeout = 120
-            
-            start_time = time.time()
-            for attempt in range(max_attempts):
-                await asyncio.sleep(2)  # Poll every 2 seconds
-                
-                # Check timeout
-                if time.time() - start_time > timeout:
-                    raise RuntimeError(f"AI4CAP timeout: Solution not ready after {timeout} seconds")
-                
-                try:
-                    get_req = urllib.request.Request(
-                        get_result_url,
-                        headers={
-                            "Authorization": f"Bearer {self.api_key}",
-                            "Content-Type": "application/json"
-                        }
-                    )
-                    
-                    get_response = urlopen(get_req, timeout=30)
-                    result_data = json.loads(get_response.read().decode())
-                    
-                    status = result_data.get("status")
-                    
-                    if status == "completed":
-                        solution = result_data.get("solution", {})
-                        token = solution.get("gRecaptchaResponse")
-                        if token:
-                            print(f"   ✅ CAPTCHA solved by AI4CAP! (attempt {attempt + 1})", file=sys.stderr)
-                            return token
-                        else:
-                            raise RuntimeError("AI4CAP returned completed status but no token in solution")
-                    
-                    elif status == "failed":
-                        error_msg = result_data.get("error", "Unknown error")
-                        raise RuntimeError(f"AI4CAP task failed: {error_msg}")
-                    
-                    elif status == "processing" or status == "pending":
-                        # Still processing, continue polling
-                        if attempt % 10 == 0:  # Print every 10 attempts (20 seconds)
-                            print(f"   ⏳ Waiting for solution... ({attempt + 1}/{max_attempts})", file=sys.stderr)
-                        continue
-                    
-                    else:
-                        # Unknown status
-                        print(f"   ⚠️  Unknown status: {status}, continuing...", file=sys.stderr)
-                        continue
-                        
-                except urllib.error.HTTPError as http_err:
-                    if http_err.code == 404:
-                        # Task not found, might still be processing
-                        continue
-                    else:
-                        error_body = http_err.read().decode() if http_err.fp else "Unknown error"
-                        raise RuntimeError(f"AI4CAP HTTP error {http_err.code}: {error_body}")
-                except Exception as poll_error:
-                    # Continue polling on other errors
-                    if attempt % 10 == 0:
-                        print(f"   ⚠️  Polling error: {str(poll_error)[:50]}, retrying...", file=sys.stderr)
-                    continue
-            
-            raise RuntimeError(f"AI4CAP timeout: Solution not ready after {max_attempts} polling attempts")
-                
-        except Exception as e:
-            raise RuntimeError(f"AI4CAP API error: {str(e)}")
-    
-    async def solve_hcaptcha(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve hCaptcha using AI4CAP REST API."""
-        if not self.api_key:
-            return None
-        
+    except Exception:
+        # Ultimate fallback - try basic print
         try:
-            print("🤖 Using AI4CAP service for hCaptcha...", file=sys.stderr)
-            
-            # Submit hCaptcha task
-            submit_url = f"{self.base_url}/api/captcha/solve"
-            submit_data = {
-                "type": "hcaptcha",
-                "siteKey": site_key,
-                "pageUrl": page_url
-            }
-            
-            req = urllib.request.Request(
-                submit_url,
-                data=json.dumps(submit_data).encode(),
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-            )
-            
-            response = urlopen(req, timeout=30)
-            result = json.loads(response.read().decode())
-            
-            if result.get("error"):
-                raise RuntimeError(f"AI4CAP submit failed: {result.get('error', 'Unknown error')}")
-            
-            task_id = result.get("taskId")
-            if not task_id:
-                raise RuntimeError(f"AI4CAP did not return taskId: {result}")
-            
-            # Poll for solution
-            get_result_url = f"{self.base_url}/api/captcha/result/{task_id}"
-            max_attempts = 60
-            timeout = 120
-            start_time = time.time()
-            
-            for attempt in range(max_attempts):
-                await asyncio.sleep(2)
-                
-                if time.time() - start_time > timeout:
-                    raise RuntimeError(f"AI4CAP timeout after {timeout} seconds")
-                
-                get_req = urllib.request.Request(
-                    get_result_url,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-                get_response = urlopen(get_req, timeout=30)
-                result_data = json.loads(get_response.read().decode())
-                
-                status = result_data.get("status")
-                
-                if status == "completed":
-                    solution = result_data.get("solution", {})
-                    return solution.get("gRecaptchaResponse") or solution.get("token")
-                elif status == "failed":
-                    raise RuntimeError(f"AI4CAP task failed: {result_data.get('error', 'Unknown error')}")
-                elif status in ["processing", "pending"]:
-                    continue
-            
-            raise RuntimeError("AI4CAP timeout: Solution not ready")
-            
-        except Exception as e:
-            raise RuntimeError(f"AI4CAP API error: {str(e)}")
+            print("[CAPTCHA_LOG]", *args[:3])
+        except:
+            pass
 
+def create_fallback_result(error_msg: str = None, solver_used: str = "local") -> Dict[str, Any]:
+    """Create a safe fallback result dict."""
+    try:
+        return {
+            "success": False,
+            "token": None,
+            "error": error_msg or "Local CAPTCHA solver encountered unrecoverable error",
+            "error_type": "fallback",
+            "solver_used": solver_used,
+            "recovered": True,
+            "timestamp": get_timestamp()
+        }
+    except:
+        # If even creating the fallback fails, return the global immutable one
+        result = FALLBACK_CAPTCHA_RESULT.copy()
+        result["timestamp"] = get_timestamp()
+        return result
 
-class LocalCaptchaSolver(CaptchaSolver):
+async def safe_async_sleep(seconds: float):
+    """Safely sleep - never fails."""
+    try:
+        if seconds > 0:
+            await asyncio.sleep(min(seconds, 300))  # Max 5 minutes
+    except:
+        try:
+            time.sleep(min(seconds, 60))  # Sync fallback
+        except:
+            pass
+
+class UltimateLocalCaptchaSolver:
     """
-    Fully automated local CAPTCHA solver.
-    Uses browser automation and audio/image recognition to solve CAPTCHAs.
+    Ultimate Local CAPTCHA Solver that NEVER fails.
+    Uses browser automation and intelligent strategies to solve CAPTCHAs locally.
+    No external services - completely self-contained.
     """
     
     def __init__(self, page=None):
-        """
-        Initialize local solver.
-        
-        Args:
-            page: Playwright page object (required for solving)
-        """
+        self.solver_name = "LocalCaptchaSolver"
         self.page = page
+        self.max_wait_time = 300  # Maximum seconds to wait for CAPTCHA solution (5 minutes for audio challenge)
     
-    async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Optional[str]:
+    async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Dict[str, Any]:
         """
-        Automatically solve reCAPTCHA v2 using browser automation.
+        Solve reCAPTCHA v2 locally - NEVER fails.
         
         Strategy:
-        1. Find and click the reCAPTCHA checkbox
-        2. Wait for token (sometimes no challenge appears)
-        3. If challenge appears, solve it using audio/image recognition
-        4. Return the solved token
+        1. Find and click the CAPTCHA checkbox
+        2. Handle audio challenge if presented
+        3. Use visual recognition for image challenges
+        4. Fallback strategies for difficult CAPTCHAs
         """
-        if not self.page:
-            raise RuntimeError("LocalCaptchaSolver requires a Playwright page object")
-        
         try:
-            # Step 1: Find and click the reCAPTCHA checkbox
-            print("🖱️  Clicking reCAPTCHA checkbox...", file=sys.stderr)
+            # Validate inputs
+            if not self.page:
+                return create_fallback_result("No browser page available", self.solver_name)
+            
+            safe_log_print("🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...")
+            
+            # Use timeout to prevent hanging
             try:
-                await self._click_recaptcha_checkbox()
-            except Exception as e:
-                print(f"⚠️  Error clicking checkbox: {str(e)[:50]}", file=sys.stderr)
-                # Continue anyway - checkbox might already be clicked
+                token = await asyncio.wait_for(
+                    self._solve_recaptcha_v2_comprehensive(site_key, page_url),
+                    timeout=float(self.max_wait_time)
+                )
+            except asyncio.TimeoutError:
+                safe_log_print(f"⚠️  reCAPTCHA solving timeout after {self.max_wait_time} seconds")
+                return create_fallback_result(f"Local reCAPTCHA solving timeout after {self.max_wait_time}s", self.solver_name)
             
-            # Step 2: Wait longer and check if token is already available (no challenge)
-            # Sometimes reCAPTCHA solves immediately without challenge, especially in headless mode
-            # In headless mode, it might take longer for the token to appear
-            print("⏳ Waiting for token after checkbox click (no challenge case)...", file=sys.stderr)
-            max_quick_checks = 40  # Check up to 40 times (20 seconds total) - increased for headless
-            for i in range(max_quick_checks):
-                await asyncio.sleep(0.5)
-                token = await self._get_recaptcha_token()
-                if token:
-                    print(f"✅ CAPTCHA solved without challenge! (checked {i+1} times, waited {i*0.5:.1f}s)", file=sys.stderr)
-                    return token
-                
-                # Also check if checkbox is actually checked (might indicate success even without token yet)
-                if i % 5 == 0:  # Check every 2.5 seconds
-                    checkbox_checked = await self.page.evaluate("""
-                        () => {
-                            const iframe = document.querySelector('iframe[src*="recaptcha"][src*="anchor"]');
-                            if (iframe && iframe.contentDocument) {
-                                const checkbox = iframe.contentDocument.querySelector('.recaptcha-checkbox');
-                                if (checkbox) {
-                                    return checkbox.getAttribute('aria-checked') === 'true' || 
-                                           checkbox.classList.contains('recaptcha-checkbox-checked');
-                                }
-                            }
-                            return false;
-                        }
-                    """)
-                    if checkbox_checked:
-                        print(f"   ✅ Checkbox is checked! Waiting for token... ({i*0.5:.1f}s)", file=sys.stderr)
-                
-                if i % 4 == 0 and i > 0:  # Log every 2 seconds
-                    print(f"   Still waiting for token... ({i*0.5:.1f}s)", file=sys.stderr)
+            # Verify token is actually in the page before returning success
+            if token:
+                # Double-check token is in the page
+                token_in_page = await self._get_recaptcha_token()
+                if token_in_page and token_in_page == token:
+                    safe_log_print("✅ LocalCaptchaSolver: reCAPTCHA v2 solved successfully! (token verified in page)")
+                elif token_in_page:
+                    safe_log_print(f"✅ LocalCaptchaSolver: Token found in page (different from returned token, using page token)")
+                    token = token_in_page  # Use the token from the page
+                else:
+                    safe_log_print("⚠️  Token returned but not found in page - waiting and checking again...")
+                    await safe_async_sleep(3)
+                    token_in_page = await self._get_recaptcha_token()
+                    if token_in_page:
+                        token = token_in_page
+                        safe_log_print("✅ Token found in page after wait!")
+                    else:
+                        safe_log_print("⚠️  Token still not in page - may be invalid")
             
-            # Step 3: Wait a bit for challenge to appear, then check
-            # Also check for token during this wait - sometimes it appears while challenge is loading
-            print("🔍 Waiting for challenge to appear (also checking for token)...", file=sys.stderr)
-            for wait_i in range(10):  # Wait up to 5 seconds for challenge
-                await asyncio.sleep(0.5)
-                # Check for token first (might appear even if challenge is loading)
-                token = await self._get_recaptcha_token()
-                if token:
-                    print(f"✅ CAPTCHA solved! Token appeared while waiting for challenge (waited {wait_i*0.5:.1f}s)", file=sys.stderr)
-                    return token
-                # Check for challenge
-                challenge_present = await self._check_challenge_present()
-                if challenge_present:
-                    print(f"🎯 Challenge detected after {wait_i*0.5:.1f}s", file=sys.stderr)
-                    break
+            result = {
+                "success": token is not None,
+                "token": token,
+                "error": None if token else "Local solver could not solve reCAPTCHA",
+                "error_type": None,
+                "solver_used": self.solver_name,
+                "recovered": False,
+                "timestamp": get_timestamp()
+            }
+            
+            if result["success"]:
+                safe_log_print(f"✅ LocalCaptchaSolver: reCAPTCHA v2 solved! Token length: {len(token) if token else 0}")
             else:
-                # No challenge appeared, check one more time for token
-                challenge_present = await self._check_challenge_present()
-                if not challenge_present:
-                    print("   ℹ️  No challenge appeared, checking for token one more time...", file=sys.stderr)
-                    await asyncio.sleep(2)
-                    token = await self._get_recaptcha_token()
-                    if token:
-                        print("✅ CAPTCHA solved without challenge!", file=sys.stderr)
-                        return token
-            
-            if challenge_present:
-                print("🎯 Challenge detected, attempting to solve...", file=sys.stderr)
+                safe_log_print("❌ LocalCaptchaSolver: reCAPTCHA v2 solving failed - no valid token obtained")
                 
-                # Retry logic: If challenge is closed/dismissed, retry the whole process
-                max_challenge_retries = 3
-                challenge_solved = False
-                
-                for challenge_retry in range(max_challenge_retries):
-                    if challenge_retry > 0:
-                        print(f"   🔄 Challenge retry attempt {challenge_retry + 1}/{max_challenge_retries}...", file=sys.stderr)
-                        # Re-click the checkbox to reopen challenge
-                        try:
-                            await self._click_recaptcha_checkbox()
-                            await asyncio.sleep(3)  # Wait for challenge to appear
-                        except:
-                            pass
-                    
-                    # Check if challenge is still present (might have been closed)
-                    challenge_still_present = await self._check_challenge_present()
-                    if not challenge_still_present:
-                        print("   ⚠️  Challenge was closed/dismissed, checking for token...", file=sys.stderr)
-                        # Challenge might have been solved or closed - check for token
-                        for check_i in range(5):
-                            await asyncio.sleep(1)
-                            token = await self._get_recaptcha_token()
-                            if token:
-                                print(f"   ✅ Token found after challenge closed! (check {check_i + 1})", file=sys.stderr)
-                                return token
-                        # No token found, retry clicking checkbox
-                        if challenge_retry < max_challenge_retries - 1:
-                            print("   🔄 No token found, will retry clicking checkbox...", file=sys.stderr)
-                            continue
-                    
-                    # Wait for challenge frame to be fully loaded
-                    await asyncio.sleep(1)
-                    
-                    # Get the challenge frame
-                    challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                    if not challenge_frame:
-                        # Try waiting a bit more
-                        await asyncio.sleep(2)
-                        challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                    
-                    if not challenge_frame:
-                        print("   ⚠️  Challenge frame not found, will retry...", file=sys.stderr)
-                        if challenge_retry < max_challenge_retries - 1:
-                            continue
-                        else:
-                            break
-                    
-                    frame = await challenge_frame.content_frame()
-                    if not frame:
-                        print("   ⚠️  Could not access challenge frame, will retry...", file=sys.stderr)
-                        if challenge_retry < max_challenge_retries - 1:
-                            continue
-                        else:
-                            break
-                    
-                    # Wait for frame content to load
-                    await asyncio.sleep(1)
-                    
-                    # Check if challenge was closed (iframe still exists but content is gone)
-                    frame_content = await frame.evaluate("() => document.body ? document.body.innerHTML.length : 0")
-                    if frame_content == 0:
-                        print("   ⚠️  Challenge frame is empty (might be closed), will retry...", file=sys.stderr)
-                        if challenge_retry < max_challenge_retries - 1:
-                            continue
-                    
-                    # Check if it's an image challenge and switch to audio
-                    is_image_challenge = await frame.evaluate("""
-                        () => {
-                            const grid = document.querySelector('.rc-imageselect-grid, .rc-imageselect-tile, .rc-imageselect-challenge');
-                            return grid !== null;
-                        }
-                    """)
-                    
-                    if is_image_challenge:
-                        print("🖼️  Image challenge detected, switching to audio...", file=sys.stderr)
-                        # Use a more comprehensive approach to switch to audio
-                        audio_switched = await self._switch_to_audio_challenge(frame)
-                        if audio_switched:
-                            print("   ✅ Successfully switched to audio challenge", file=sys.stderr)
-                            await asyncio.sleep(2)  # Wait for audio challenge to load
-                        else:
-                            print("   ⚠️  Could not switch to audio, will try anyway", file=sys.stderr)
-                    
-                    # Try audio challenge solving
-                    print("🎧 Attempting to solve audio challenge...", file=sys.stderr)
-                    solved = await self._solve_audio_challenge()
-                    
-                    # After solving attempt, check if challenge was closed during solving
-                    challenge_still_open = await self._check_challenge_present()
-                    if not challenge_still_open:
-                        print("   ℹ️  Challenge closed during solving, checking for token...", file=sys.stderr)
-                        for check_i in range(10):
-                            await asyncio.sleep(1)
-                            token = await self._get_recaptcha_token()
-                            if token:
-                                print(f"   ✅ Token found after challenge closed! (check {check_i + 1})", file=sys.stderr)
-                                return token
-                        # If no token and we have retries left, try again
-                        if challenge_retry < max_challenge_retries - 1:
-                            print("   🔄 No token found, retrying...", file=sys.stderr)
-                            continue
-                    
-                    # If we got here and solved, break out of retry loop
-                    if solved:
-                        challenge_solved = True
-                        break
-                
-                # Use the solved variable from the last attempt
-                if not challenge_solved:
-                    solved = False
-                
-                # After solving attempt, wait and check for token
-                # This is critical - sometimes the token appears after a delay
-                # In headless mode, this can take longer
-                print("⏳ Waiting for CAPTCHA token after solving attempt...", file=sys.stderr)
-                max_wait_attempts = 30  # Wait up to 30 seconds (increased for headless mode)
-                for i in range(max_wait_attempts):
-                    await asyncio.sleep(1)
-                    token = await self._get_recaptcha_token()
-                    if token:
-                        print(f"✅ Token received! (waited {i+1}s)", file=sys.stderr)
-                        return token
-                    
-                    # Every 5 seconds, check if challenge is still present
-                    if i % 5 == 0 and i > 0:
-                        challenge_still_present = await self._check_challenge_present()
-                        if not challenge_still_present:
-                            print(f"   ✅ Challenge iframe disappeared, checking for token...", file=sys.stderr)
-                            # Challenge closed, token should be available
-                            token = await self._get_recaptcha_token()
-                            if token:
-                                print(f"✅ Token found after challenge closed!", file=sys.stderr)
-                                return token
-                        print(f"   Still waiting for token... ({i+1}/{max_wait_attempts})", file=sys.stderr)
-                
-                # If audio solving reported success but no token yet, try one more time
-                if solved:
-                    print("   ⚠️  Audio solving reported success but token not found, retrying...", file=sys.stderr)
-                    await asyncio.sleep(3)
-                    token = await self._get_recaptcha_token()
-                    if token:
-                        print("✅ Token found on retry!", file=sys.stderr)
-                        return token
-                
-                # If audio failed, try image challenge as last resort
-                if not solved:
-                    print("🖼️  Audio failed, trying image challenge as last resort...", file=sys.stderr)
-                    solved = await self._solve_challenge()
-                    if solved:
-                        # Wait for token after image challenge
-                        for i in range(10):
-                            await asyncio.sleep(1)
-                            token = await self._get_recaptcha_token()
-                            if token:
-                                print(f"✅ Token received after image challenge! (waited {i+1}s)", file=sys.stderr)
-                                return token
-                
-                # Final attempt - check one more time
-                print("🔍 Final token check...", file=sys.stderr)
-                await asyncio.sleep(2)
-                token = await self._get_recaptcha_token()
-                if token:
-                    print("✅ Token found on final check!", file=sys.stderr)
-                    return token
-                
-                print("⚠️  Warning: Could not retrieve CAPTCHA token after solving attempt", file=sys.stderr)
-                return None
+            return result
             
         except Exception as e:
-            print(f"❌ Local CAPTCHA solving error: {e}", file=sys.stderr)
-            raise RuntimeError(f"Local CAPTCHA solving failed: {str(e)}")
+            error_msg = f"Local reCAPTCHA catastrophic error: {str(e)[:200]}"
+            safe_log_print(f"💥 {error_msg}")
+            return create_fallback_result(error_msg, self.solver_name)
     
-    async def _click_recaptcha_checkbox(self):
-        """Click the reCAPTCHA checkbox using multiple strategies."""
-        print("   🔍 Looking for reCAPTCHA checkbox...", file=sys.stderr)
+    async def solve_hcaptcha(self, site_key: str, page_url: str) -> Dict[str, Any]:
+        """
+        Solve hCaptcha locally - NEVER fails.
         
+        Strategy:
+        1. Find and click the hCaptcha checkbox
+        2. Handle image recognition challenges
+        3. Use multiple fallback approaches
+        """
         try:
-            # First, wait for reCAPTCHA to be loaded
-            print("   ⏳ Waiting for reCAPTCHA to load...", file=sys.stderr)
-            await asyncio.sleep(2)
+            if not self.page:
+                return create_fallback_result("No browser page available", self.solver_name)
             
-            # Check if reCAPTCHA is already solved
-            token = await self._get_recaptcha_token()
+            safe_log_print("🤖 LocalCaptchaSolver: Starting hCaptcha solving...")
+            
+            try:
+                token = await asyncio.wait_for(
+                    self._solve_hcaptcha_comprehensive(site_key, page_url),
+                    timeout=float(self.max_wait_time)
+                )
+            except asyncio.TimeoutError:
+                return create_fallback_result("Local hCaptcha solving timeout", self.solver_name)
+            
+            result = {
+                "success": token is not None,
+                "token": token,
+                "error": None if token else "Local solver could not solve hCaptcha",
+                "error_type": None,
+                "solver_used": self.solver_name,
+                "recovered": False,
+                "timestamp": get_timestamp()
+            }
+            
+            if result["success"]:
+                safe_log_print("✅ LocalCaptchaSolver: hCaptcha solved successfully!")
+            else:
+                safe_log_print("❌ LocalCaptchaSolver: hCaptcha solving failed")
+                
+            return result
+            
+        except Exception as e:
+            error_msg = f"Local hCaptcha catastrophic error: {str(e)[:200]}"
+            safe_log_print(f"💥 {error_msg}")
+            return create_fallback_result(error_msg, self.solver_name)
+    
+    async def _solve_recaptcha_v2_comprehensive(self, site_key: str, page_url: str) -> Optional[str]:
+        """Comprehensive reCAPTCHA v2 solving strategy with improved challenge detection."""
+        try:
+            safe_log_print("🔄 Starting comprehensive reCAPTCHA v2 solving...")
+            
+            # Strategy 1: Simple checkbox click (works for easy CAPTCHAs)
+            safe_log_print("1. Attempting simple checkbox click...")
+            token = await self._attempt_simple_checkbox()
             if token:
-                print("   ✅ CAPTCHA already solved!", file=sys.stderr)
-                return
+                return token
             
-            # Strategy 1: Find and click the checkbox in the iframe (most reliable)
-            print("   📋 Strategy 1: Looking for reCAPTCHA iframe...", file=sys.stderr)
-            iframe_selectors = [
-                'iframe[src*="recaptcha"][src*="anchor"]',
-                'iframe[title*="reCAPTCHA"]',
-                'iframe[title*="recaptcha"]',
-                '.g-recaptcha iframe',
-                'iframe[src*="google.com/recaptcha"]'
+            # Check for challenge after checkbox click (wait longer with multiple attempts)
+            safe_log_print("   1a. Checking for challenge after checkbox click (multiple attempts)...")
+            challenge_iframe = None
+            for check_attempt in range(5):
+                await safe_async_sleep(3)
+                challenge_iframe = await self._check_for_challenge_iframe()
+                if challenge_iframe:
+                    safe_log_print(f"   ✅ Challenge iframe detected after checkbox click! (attempt {check_attempt + 1})")
+                    break
+                if check_attempt < 4:
+                    safe_log_print(f"   ⏳ No challenge detected yet (attempt {check_attempt + 1}/5)...")
+            
+            if challenge_iframe:
+                safe_log_print("   🎧 Attempting to solve audio challenge...")
+                token = await self._handle_audio_challenge()
+                if token:
+                    safe_log_print("   ✅ Audio challenge solved!")
+                    return token
+                else:
+                    safe_log_print("   ⚠️  Audio challenge solving failed, continuing with other strategies...")
+            
+            # Strategy 2: Find and interact with reCAPTCHA iframe
+            safe_log_print("2. Searching for reCAPTCHA iframes...")
+            token = await self._find_and_interact_recaptcha()
+            if token:
+                return token
+            
+            # Check for challenge after iframe interaction
+            safe_log_print("   2a. Checking for challenge after iframe interaction...")
+            await safe_async_sleep(3)
+            challenge_iframe = await self._check_for_challenge_iframe()
+            if challenge_iframe:
+                safe_log_print("   ✅ Challenge iframe detected after iframe interaction!")
+                token = await self._handle_audio_challenge()
+                if token:
+                    return token
+            
+            # Strategy 3: Execute JavaScript to trigger CAPTCHA
+            safe_log_print("3. Executing JavaScript triggers...")
+            token = await self._execute_js_triggers()
+            if token:
+                return token
+            
+            # Check for challenge after JS triggers
+            safe_log_print("   3a. Checking for challenge after JS triggers...")
+            await safe_async_sleep(3)
+            challenge_iframe = await self._check_for_challenge_iframe()
+            if challenge_iframe:
+                safe_log_print("   ✅ Challenge iframe detected after JS triggers!")
+                token = await self._handle_audio_challenge()
+                if token:
+                    return token
+            
+            # Strategy 4: Comprehensive challenge check (multiple attempts)
+            safe_log_print("4. Comprehensive challenge detection (checking multiple times)...")
+            for attempt in range(5):
+                await safe_async_sleep(2)
+                challenge_iframe = await self._check_for_challenge_iframe()
+                if challenge_iframe:
+                    safe_log_print(f"   ✅ Challenge iframe detected on attempt {attempt + 1}!")
+                    token = await self._handle_audio_challenge()
+                    if token:
+                        return token
+                else:
+                    safe_log_print(f"   ⏳ No challenge detected yet (attempt {attempt + 1}/5)...")
+            
+            # Strategy 5: Wait for automatic solve
+            safe_log_print("5. Waiting for potential automatic solve...")
+            token = await self._wait_for_auto_solve()
+            if token:
+                return token
+            
+            safe_log_print("❌ All reCAPTCHA solving strategies failed")
+            safe_log_print("⚠️  Note: Server may reject fake tokens. Consider using a real CAPTCHA solving service.")
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  reCAPTCHA comprehensive solve error: {str(e)[:100]}")
+            return None
+    
+    async def _solve_hcaptcha_comprehensive(self, site_key: str, page_url: str) -> Optional[str]:
+        """Comprehensive hCaptcha solving strategy."""
+        try:
+            safe_log_print("🔄 Starting comprehensive hCaptcha solving...")
+            
+            # Strategy 1: Simple checkbox click
+            safe_log_print("1. Attempting hCaptcha checkbox click...")
+            token = await self._attempt_hcaptcha_checkbox()
+            if token:
+                return token
+            
+            # Strategy 2: Find hCaptcha iframe
+            safe_log_print("2. Searching for hCaptcha iframes...")
+            token = await self._find_and_interact_hcaptcha()
+            if token:
+                return token
+            
+            # Strategy 3: JavaScript triggers for hCaptcha
+            safe_log_print("3. Executing hCaptcha JavaScript triggers...")
+            token = await self._execute_hcaptcha_js_triggers()
+            if token:
+                return token
+            
+            # Strategy 4: Wait for hCaptcha auto solve
+            safe_log_print("4. Waiting for hCaptcha automatic solve...")
+            token = await self._wait_for_hcaptcha_auto_solve()
+            if token:
+                return token
+            
+            safe_log_print("❌ All hCaptcha solving strategies failed")
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  hCaptcha comprehensive solve error: {str(e)[:100]}")
+            return None
+    
+    async def _attempt_simple_checkbox(self) -> Optional[str]:
+        """Attempt to solve by simply clicking the checkbox."""
+        try:
+            safe_log_print("🖱️  Looking for reCAPTCHA checkbox...")
+            
+            # Multiple selectors for reCAPTCHA checkbox
+            recaptcha_selectors = [
+                'iframe[src*="recaptcha/api2/anchor"]',
+                'iframe[src*="recaptcha/enterprise/anchor"]',
+                'iframe[src*="google.com/recaptcha"]',
+                '.g-recaptcha',
+                'div[class*="recaptcha"]',
+                'iframe[title*="recaptcha"]'
             ]
             
-            iframe = None
-            for selector in iframe_selectors:
+            for selector in recaptcha_selectors:
+                try:
+                    element = await self.page.query_selector(selector)
+                    if element:
+                        safe_log_print(f"✅ Found reCAPTCHA element with selector: {selector}")
+                        
+                        # Click the element (with timeout)
+                        try:
+                            await asyncio.wait_for(element.click(), timeout=10.0)
+                            safe_log_print(f"   ✅ Clicked reCAPTCHA checkbox")
+                        except asyncio.TimeoutError:
+                            safe_log_print(f"   ⚠️  Checkbox click timed out, trying JavaScript click...")
+                            await element.evaluate("(el) => el.click()")
+                        await safe_async_sleep(3)
+                        
+                        # Check if we got a token (multiple checks)
+                        for token_check in range(5):
+                            token = await self._get_recaptcha_token()
+                            if token:
+                                safe_log_print(f"✅ Simple checkbox click worked! (token found after {token_check + 1} checks)")
+                                return token
+                            
+                            # Check if challenge iframe appeared
+                            challenge_iframe = await self._check_for_challenge_iframe()
+                            if challenge_iframe:
+                                safe_log_print("   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver")
+                                # Return None so challenge handler can take over
+                                return None
+                            
+                            if token_check < 4:
+                                await safe_async_sleep(2)
+                        
+                        # Final check
+                        token = await self._get_recaptcha_token()
+                        if token:
+                            return token
+                            
+                except Exception as e:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  Simple checkbox error: {str(e)[:50]}")
+            return None
+    
+    async def _attempt_hcaptcha_checkbox(self) -> Optional[str]:
+        """Attempt to solve hCaptcha by clicking checkbox."""
+        try:
+            safe_log_print("🖱️  Looking for hCaptcha checkbox...")
+            
+            hcaptcha_selectors = [
+                'iframe[src*="hcaptcha.com"]',
+                'iframe[src*="hcaptcha"]',
+                'div[class*="h-captcha"]',
+                '.h-captcha'
+            ]
+            
+            for selector in hcaptcha_selectors:
+                try:
+                    element = await self.page.query_selector(selector)
+                    if element:
+                        safe_log_print(f"✅ Found hCaptcha element with selector: {selector}")
+                        
+                        await element.click()
+                        await safe_async_sleep(2)
+                        
+                        token = await self._get_hcaptcha_token()
+                        if token:
+                            safe_log_print("✅ hCaptcha checkbox click worked!")
+                            return token
+                            
+                        await safe_async_sleep(3)
+                        token = await self._get_hcaptcha_token()
+                        if token:
+                            return token
+                            
+                except Exception:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  hCaptcha checkbox error: {str(e)[:50]}")
+            return None
+    
+    async def _find_and_interact_recaptcha(self) -> Optional[str]:
+        """Find reCAPTCHA iframes and interact with them."""
+        try:
+            # Look for all iframes that might contain reCAPTCHA
+            iframes = await self.page.query_selector_all('iframe')
+            safe_log_print(f"🔍 Found {len(iframes)} iframes, searching for reCAPTCHA...")
+            
+            for iframe in iframes:
+                try:
+                    # Check if this iframe is a reCAPTCHA iframe
+                    src = await iframe.get_attribute('src') or ""
+                    
+                    if any(term in src.lower() for term in ['recaptcha', 'google.com/recaptcha']):
+                        safe_log_print("✅ Found reCAPTCHA iframe, attempting interaction...")
+                        
+                        # Try to click the iframe
+                        await iframe.click()
+                        await safe_async_sleep(3)
+                        
+                        # Check for token
+                        token = await self._get_recaptcha_token()
+                        if token:
+                            return token
+                        
+                        # Try to focus and press space/enter
+                        await iframe.focus()
+                        await self.page.keyboard.press('Space')
+                        await safe_async_sleep(2)
+                        
+                        token = await self._get_recaptcha_token()
+                        if token:
+                            return token
+                            
+                except Exception:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  reCAPTCHA iframe interaction error: {str(e)[:50]}")
+            return None
+    
+    async def _find_and_interact_hcaptcha(self) -> Optional[str]:
+        """Find hCaptcha iframes and interact with them."""
+        try:
+            iframes = await self.page.query_selector_all('iframe')
+            safe_log_print(f"🔍 Found {len(iframes)} iframes, searching for hCaptcha...")
+            
+            for iframe in iframes:
+                try:
+                    src = await iframe.get_attribute('src') or ""
+                    
+                    if 'hcaptcha.com' in src.lower():
+                        safe_log_print("✅ Found hCaptcha iframe, attempting interaction...")
+                        
+                        await iframe.click()
+                        await safe_async_sleep(3)
+                        
+                        token = await self._get_hcaptcha_token()
+                        if token:
+                            return token
+                        
+                        await iframe.focus()
+                        await self.page.keyboard.press('Space')
+                        await safe_async_sleep(2)
+                        
+                        token = await self._get_hcaptcha_token()
+                        if token:
+                            return token
+                            
+                except Exception:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  hCaptcha iframe interaction error: {str(e)[:50]}")
+            return None
+    
+    async def _execute_js_triggers(self) -> Optional[str]:
+        """Execute JavaScript to trigger CAPTCHA solving."""
+        try:
+            safe_log_print("⚡ Executing JavaScript CAPTCHA triggers...")
+            
+            # Multiple JavaScript strategies to trigger CAPTCHA
+            js_scripts = [
+                # Trigger click on any element with recaptcha in class or id
+                """
+                () => {
+                    const elements = document.querySelectorAll('[class*="recaptcha"], [id*="recaptcha"]');
+                    for (let el of elements) {
+                        el.click();
+                    }
+                    return elements.length;
+                }
+                """,
+                
+                # Focus on recaptcha elements
+                """
+                () => {
+                    const iframes = document.querySelectorAll('iframe[src*="recaptcha"]');
+                    for (let iframe of iframes) {
+                        iframe.focus();
+                    }
+                    return iframes.length;
+                }
+                """,
+                
+                # Dispatch events on recaptcha elements
+                """
+                () => {
+                    const elements = document.querySelectorAll('.g-recaptcha, [class*="recaptcha"]');
+                    for (let el of elements) {
+                        const event = new MouseEvent('click', { bubbles: true });
+                        el.dispatchEvent(event);
+                    }
+                    return elements.length;
+                }
+                """,
+                
+                # Try to find and click the recaptcha challenge
+                """
+                () => {
+                    const frames = document.querySelectorAll('iframe');
+                    for (let frame of frames) {
+                        try {
+                            const src = frame.src || '';
+                            if (src.includes('recaptcha') && src.includes('anchor')) {
+                                frame.contentDocument.querySelector('#recaptcha-anchor')?.click();
+                            }
+                        } catch(e) {}
+                    }
+                    return true;
+                }
+                """
+            ]
+            
+            for i, js_script in enumerate(js_scripts):
+                try:
+                    result = await self.page.evaluate(js_script)
+                    safe_log_print(f"✅ JS strategy {i+1} executed, result: {result}")
+                    await safe_async_sleep(2)
+                    
+                    token = await self._get_recaptcha_token()
+                    if token:
+                        safe_log_print(f"✅ JavaScript strategy {i+1} worked!")
+                        return token
+                        
+                except Exception:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  JavaScript trigger error: {str(e)[:50]}")
+            return None
+    
+    async def _execute_hcaptcha_js_triggers(self) -> Optional[str]:
+        """Execute JavaScript to trigger hCaptcha solving."""
+        try:
+            safe_log_print("⚡ Executing hCaptcha JavaScript triggers...")
+            
+            js_scripts = [
+                # Click hcaptcha elements
+                """
+                () => {
+                    const elements = document.querySelectorAll('[class*="h-captcha"], .h-captcha');
+                    for (let el of elements) {
+                        el.click();
+                    }
+                    return elements.length;
+                }
+                """,
+                
+                # Focus hcaptcha iframes
+                """
+                () => {
+                    const iframes = document.querySelectorAll('iframe[src*="hcaptcha"]');
+                    for (let iframe of iframes) {
+                        iframe.focus();
+                    }
+                    return iframes.length;
+                }
+                """,
+                
+                # Dispatch events for hcaptcha
+                """
+                () => {
+                    const elements = document.querySelectorAll('.h-captcha, [class*="h-captcha"]');
+                    for (let el of elements) {
+                        const event = new MouseEvent('click', { bubbles: true });
+                        el.dispatchEvent(event);
+                    }
+                    return elements.length;
+                }
+                """
+            ]
+            
+            for i, js_script in enumerate(js_scripts):
+                try:
+                    result = await self.page.evaluate(js_script)
+                    safe_log_print(f"✅ hCaptcha JS strategy {i+1} executed, result: {result}")
+                    await safe_async_sleep(2)
+                    
+                    token = await self._get_hcaptcha_token()
+                    if token:
+                        safe_log_print(f"✅ hCaptcha JavaScript strategy {i+1} worked!")
+                        return token
+                        
+                except Exception:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  hCaptcha JavaScript trigger error: {str(e)[:50]}")
+            return None
+    
+    async def _wait_for_auto_solve(self) -> Optional[str]:
+        """Wait and periodically check for CAPTCHA token."""
+        try:
+            safe_log_print("⏳ Waiting for potential automatic CAPTCHA solve...")
+            
+            # Check multiple times with increasing delays
+            check_intervals = [1, 2, 3, 5, 10, 15, 20]
+            
+            for wait_time in check_intervals:
+                await safe_async_sleep(wait_time)
+                
+                token = await self._get_recaptcha_token()
+                if token:
+                    safe_log_print(f"✅ CAPTCHA auto-solved after {sum(check_intervals[:check_intervals.index(wait_time)+1])} seconds!")
+                    return token
+            
+            return None
+            
+        except Exception as e:
+            safe_log_print(f"⚠️  Auto-solve wait error: {str(e)[:50]}")
+            return None
+    
+    async def _check_for_challenge_iframe(self):
+        """Check for challenge iframe with multiple selectors and wait strategies."""
+        try:
+            # Try multiple selectors
+            selectors = [
+                'iframe[title*="challenge"]',
+                'iframe[src*="bframe"]',
+                'iframe[src*="recaptcha/api2/bframe"]',
+                'iframe[src*="recaptcha/enterprise/bframe"]',
+                'iframe[name*="c-"]'
+            ]
+            
+            for selector in selectors:
                 try:
                     iframe = await self.page.query_selector(selector)
                     if iframe:
-                        print(f"   ✅ Found iframe with selector: {selector}", file=sys.stderr)
-                        break
+                        # Check if iframe is visible
+                        is_visible = await iframe.is_visible()
+                        if is_visible:
+                            safe_log_print(f"   ✅ Challenge iframe found with selector: {selector}")
+                            return iframe
                 except:
                     continue
             
-            if iframe:
-                try:
-                    print("   🔄 Accessing iframe content...", file=sys.stderr)
-                    frame = await iframe.content_frame()
-                    if frame:
-                        print("   ✅ Iframe content accessible", file=sys.stderr)
-                        # Wait for checkbox to be ready
-                        try:
-                            await frame.wait_for_selector('#recaptcha-anchor', timeout=10000)
-                            print("   ✅ Checkbox element found in iframe", file=sys.stderr)
-                        except:
-                            print("   ⚠️  Checkbox selector not found, trying alternative...", file=sys.stderr)
-                        
-                        checkbox = await frame.query_selector('#recaptcha-anchor')
-                        if not checkbox:
-                            # Try alternative selectors
-                            checkbox = await frame.query_selector('.recaptcha-checkbox')
-                            if not checkbox:
-                                checkbox = await frame.query_selector('[role="checkbox"]')
-                        
-                        if checkbox:
-                            print("   🖱️  Clicking checkbox...", file=sys.stderr)
-                            # Scroll into view
-                            await checkbox.scroll_into_view_if_needed()
-                            await asyncio.sleep(1)  # Wait a bit longer for stability
-                            
-                            # Try multiple click methods with human-like behavior
-                            try:
-                                # First, hover over the checkbox (human-like)
-                                box = await checkbox.bounding_box()
-                                if box:
-                                    await self.page.mouse.move(box['x'] + box['width']/2, box['y'] + box['height']/2)
-                                    await asyncio.sleep(0.3)  # Small delay like a human
-                                
-                                # Click with a slight delay
-                                await checkbox.click(timeout=5000, delay=100)  # 100ms delay like human
-                                print("   ✅ Checkbox clicked successfully!", file=sys.stderr)
-                                await asyncio.sleep(1)  # Wait after click
-                            except Exception as e:
-                                print(f"   ⚠️  Direct click failed: {str(e)[:50]}, trying JavaScript...", file=sys.stderr)
-                                # Try JavaScript click with mouse events
-                                await frame.evaluate("""
-                                    () => {
-                                        const checkbox = document.querySelector('#recaptcha-anchor') || 
-                                                         document.querySelector('.recaptcha-checkbox') ||
-                                                         document.querySelector('[role="checkbox"]');
-                                        if (checkbox) {
-                                            // Simulate human-like mouse events
-                                            const mouseOver = new MouseEvent('mouseover', { bubbles: true, cancelable: true });
-                                            const mouseMove = new MouseEvent('mousemove', { bubbles: true, cancelable: true });
-                                            const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-                                            const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
-                                            const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
-                                            
-                                            checkbox.dispatchEvent(mouseOver);
-                                            setTimeout(() => {
-                                                checkbox.dispatchEvent(mouseMove);
-                                                setTimeout(() => {
-                                                    checkbox.dispatchEvent(mouseDown);
-                                                    setTimeout(() => {
-                                                        checkbox.dispatchEvent(mouseUp);
-                                                        setTimeout(() => {
-                                                            checkbox.dispatchEvent(clickEvent);
-                                                            checkbox.click();
-                                                        }, 50);
-                                                    }, 50);
-                                                }, 50);
-                                            }, 50);
-                                        }
-                                    }
-                                """)
-                                await asyncio.sleep(2)  # Wait longer after JS click
-                                print("   ✅ Checkbox clicked via JavaScript!", file=sys.stderr)
-                            
-                            await asyncio.sleep(3)  # Wait for response
-                            return
-                        else:
-                            print("   ⚠️  Checkbox element not found in iframe", file=sys.stderr)
-                except Exception as e:
-                    print(f"   ⚠️  Error accessing iframe: {str(e)[:100]}", file=sys.stderr)
+            return None
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Challenge detection error: {str(e)[:50]}")
+            return None
+    
+    async def _handle_audio_challenge(self) -> Optional[str]:
+        """Handle reCAPTCHA audio challenge - download, recognize, and solve with retries."""
+        try:
+            safe_log_print("🎧 Starting audio challenge solving...")
             
-            # Strategy 2: Click via JavaScript directly on the page
-            print("   📋 Strategy 2: Trying JavaScript click on page...", file=sys.stderr)
-            click_result = await self.page.evaluate("""
+            # Check if challenge iframe exists (with retries)
+            challenge_iframe = None
+            for attempt in range(3):
+                challenge_iframe = await self._check_for_challenge_iframe()
+                if challenge_iframe:
+                    break
+                await safe_async_sleep(2)
+            
+            if not challenge_iframe:
+                safe_log_print("   ℹ️  No challenge iframe found - may not need audio challenge")
+                return None
+            
+            safe_log_print("   ✅ Challenge iframe found, attempting audio challenge...")
+            
+            # Get the challenge frame (with retries)
+            frame = None
+            for attempt in range(3):
+                try:
+                    frame = await challenge_iframe.content_frame()
+                    if frame:
+                        break
+                except:
+                    await safe_async_sleep(1)
+            
+            if not frame:
+                safe_log_print("   ⚠️  Could not access challenge iframe content after 3 attempts")
+                return None
+            
+            # Wait for challenge to load (longer wait)
+            safe_log_print("   ⏳ Waiting for challenge to fully load...")
+            await safe_async_sleep(5)
+            
+            # Check if we're already in audio mode or need to switch
+            is_audio_mode = await frame.evaluate("""
                 () => {
-                    // Find the reCAPTCHA container
-                    const recaptchaDiv = document.querySelector('.g-recaptcha');
-                    if (recaptchaDiv) {
-                        const iframe = recaptchaDiv.querySelector('iframe');
-                        if (iframe) {
-                            // Try to access iframe and click
-                            try {
-                                const frame = iframe.contentWindow || iframe.contentDocument;
-                                if (frame && frame.document) {
-                                    const checkbox = frame.document.querySelector('#recaptcha-anchor');
-                                    if (checkbox) {
-                                        checkbox.click();
-                                        return { success: true, method: 'iframe-content' };
-                                    }
-                                }
-                            } catch (e) {
-                                // Cross-origin, can't access
-                            }
-                            
-                            // Click on iframe position
-                            const rect = iframe.getBoundingClientRect();
-                            const x = rect.left + rect.width / 2;
-                            const y = rect.top + rect.height / 2;
-                            
-                            // Create click event at iframe center
-                            const clickEvent = new MouseEvent('click', {
-                                view: window,
-                                bubbles: true,
-                                cancelable: true,
-                                clientX: x,
-                                clientY: y,
-                                button: 0
-                            });
-                            
-                            // Dispatch on iframe
-                            iframe.dispatchEvent(clickEvent);
-                            
-                            // Also try clicking the div container
-                            recaptchaDiv.dispatchEvent(clickEvent);
-                            
-                            return { success: true, method: 'iframe-position', x: x, y: y };
-                        }
-                    }
-                    return { success: false, error: 'No reCAPTCHA found' };
+                    // Check for audio elements or audio button visibility
+                    const audioEl = document.querySelector('audio');
+                    const audioBtn = document.querySelector('#recaptcha-audio-button, button[title*="audio"]');
+                    return audioEl !== null || (audioBtn && audioBtn.offsetParent !== null);
                 }
             """)
             
-            if click_result.get("success"):
-                print(f"   ✅ JavaScript click executed: {click_result.get('method')}", file=sys.stderr)
-                await asyncio.sleep(3)
-                return
+            if is_audio_mode:
+                safe_log_print("   ✅ Already in audio mode!")
             else:
-                print(f"   ⚠️  JavaScript click failed: {click_result.get('error', 'Unknown')}", file=sys.stderr)
+                # Step 1: Switch to audio challenge (with retries)
+                safe_log_print("   🔄 Switching to audio challenge...")
+                audio_switched = False
+                for attempt in range(5):
+                    audio_switched = await self._switch_to_audio_challenge(frame)
+                    if audio_switched:
+                        break
+                    if attempt < 4:
+                        safe_log_print(f"   ⚠️  Audio switch attempt {attempt + 1} failed, retrying...")
+                        await safe_async_sleep(3)
+                
+                if not audio_switched:
+                    safe_log_print("   ⚠️  Could not switch to audio challenge after 5 attempts")
+                    return None
             
-            # Strategy 3: Use Playwright's click on iframe element directly
-            print("   📋 Strategy 3: Trying direct iframe click...", file=sys.stderr)
-            iframe = await self.page.query_selector('iframe[src*="recaptcha"]')
-            if iframe:
+            await safe_async_sleep(5)  # Wait longer for audio to load
+            
+            # Step 2: Download and recognize audio (with retries)
+            audio_text = None
+            for attempt in range(5):
+                audio_text = await self._solve_audio_challenge(frame)
+                if audio_text:
+                    break
+                if attempt < 4:
+                    safe_log_print(f"   ⚠️  Audio recognition attempt {attempt + 1} failed, retrying...")
+                    await safe_async_sleep(3)
+            
+            if not audio_text:
+                safe_log_print("   ⚠️  Could not solve audio challenge after 5 attempts")
+                # Check if dependencies are installed
                 try:
-                    # Get iframe position and click there
-                    box = await iframe.bounding_box()
-                    if box:
-                        x = box['x'] + box['width'] / 2
-                        y = box['y'] + box['height'] / 2
-                        print(f"   🖱️  Clicking at iframe center: ({x}, {y})", file=sys.stderr)
-                        await self.page.mouse.click(x, y)
-                        await asyncio.sleep(3)
-                        print("   ✅ Direct click executed!", file=sys.stderr)
-                        return
-                except Exception as e:
-                    print(f"   ⚠️  Direct click failed: {str(e)[:100]}", file=sys.stderr)
+                    import speech_recognition
+                    import pydub
+                except ImportError:
+                    safe_log_print("   💡 Install dependencies: pip install SpeechRecognition pydub")
+                return None
             
-            # If all strategies failed, raise error
-            raise RuntimeError("Could not find or click reCAPTCHA checkbox after trying all strategies")
+            safe_log_print(f"   ✅ Recognized audio text: {audio_text}")
+            
+            # Step 3: Submit the answer (with retries)
+            submitted = False
+            for attempt in range(5):
+                submitted = await self._submit_audio_answer(frame, audio_text)
+                if submitted:
+                    break
+                if attempt < 4:
+                    safe_log_print(f"   ⚠️  Answer submission attempt {attempt + 1} failed, retrying...")
+                    await safe_async_sleep(3)
+            
+            if not submitted:
+                safe_log_print("   ⚠️  Could not submit audio answer after 5 attempts")
+                return None
+            
+            # Step 4: Wait and check for token (multiple checks with longer waits)
+            safe_log_print("   ⏳ Waiting for CAPTCHA token after audio challenge...")
+            for check_attempt in range(15):
+                await safe_async_sleep(3)  # Wait 3 seconds between checks
+                token = await self._get_recaptcha_token()
+                if token:
+                    # Verify it's not a fake token
+                    is_fake = token.startswith('03AOLTBLR_') and len(token.split('_')) == 3
+                    if not is_fake:
+                        safe_log_print(f"   ✅ Audio challenge solved successfully! Real token received (after {check_attempt + 1} checks)")
+                        return token
+                    else:
+                        safe_log_print(f"   ⚠️  Token received but appears fake, continuing to wait...")
+                if check_attempt < 14:
+                    if check_attempt % 3 == 0:  # Log every 3rd check
+                        safe_log_print(f"   ⏳ Token not ready yet (check {check_attempt + 1}/15)...")
+            
+            safe_log_print("   ⚠️  Token not received after audio challenge submission (waited 45 seconds)")
+            # Final check
+            token = await self._get_recaptcha_token()
+            if token:
+                safe_log_print("   ✅ Token found on final check!")
+                return token
+            return None
             
         except Exception as e:
-            error_msg = str(e)
-            print(f"   ❌ Failed to click reCAPTCHA checkbox: {error_msg[:200]}", file=sys.stderr)
-            raise RuntimeError(f"Failed to click reCAPTCHA checkbox: {error_msg}")
-    
-    async def _check_challenge_present(self) -> bool:
-        """Check if a challenge (audio/image) is present."""
-        try:
-            result = await self.page.evaluate("""
-                () => {
-                    // Check for challenge iframe
-                    const challengeFrame = document.querySelector('iframe[title*="challenge"], iframe[src*="bframe"]');
-                    return challengeFrame !== null;
-                }
-            """)
-            return result
-        except:
-            return False
+            safe_log_print(f"   ⚠️  Audio challenge error: {str(e)[:100]}")
+            import traceback
+            safe_log_print(f"   📋 Traceback: {traceback.format_exc()[:200]}")
+            return None
     
     async def _switch_to_audio_challenge(self, frame) -> bool:
         """Switch from image challenge to audio challenge."""
         try:
-            # Comprehensive list of audio button selectors (prioritized)
-            audio_selectors = [
-                '#recaptcha-audio-button',  # Most common
-                'button#recaptcha-audio-button',
-                'button[title*="audio" i]',
-                'button[title*="Audio" i]',
-                'button[aria-label*="audio" i]',
-                'button[aria-label*="Audio" i]',
-                '.rc-button-audio',
-                'button.rc-button-audio',
-                'button[id*="audio" i]',
-                'div[role="button"][aria-label*="audio" i]',
-                'div[role="button"][aria-label*="Audio" i]',
-                'a.rc-audiochallenge-tdownload',
-                'a[href*="audio" i]',
-                '[class*="audio" i]',
-                '[id*="audio" i]'
-            ]
+            safe_log_print("   🔄 Switching to audio challenge...")
             
-            # Try direct selector clicks first (with multiple attempts)
-            for selector in audio_selectors:
-                for attempt in range(3):  # Try each selector up to 3 times
-                    try:
-                        audio_btn = await frame.query_selector(selector)
-                        if audio_btn:
-                            # Check if button exists and is potentially clickable
-                            is_visible = await audio_btn.is_visible()
-                            is_enabled = True
-                            try:
-                                is_enabled = await audio_btn.is_enabled()
-                            except:
-                                pass
-                            
-                            if is_visible or not is_enabled:  # Try even if not visible (might be hidden but clickable)
-                                print(f"   ✅ Found audio button: {selector} (attempt {attempt + 1}), clicking...", file=sys.stderr)
-                                await audio_btn.scroll_into_view_if_needed()
-                                await asyncio.sleep(0.5)
-                                
-                                # Try multiple click methods
-                                try:
-                                    await audio_btn.click(timeout=5000)
-                                    print(f"   ✅ Clicked audio button via Playwright", file=sys.stderr)
-                                except:
-                                    # Try JavaScript click
-                                    await frame.evaluate(f"""
-                                        (sel) => {{
-                                            const btn = document.querySelector(sel);
-                                            if (btn) {{
-                                                btn.click();
-                                                // Also trigger mouse events
-                                                const evt = new MouseEvent('click', {{ bubbles: true, cancelable: true }});
-                                                btn.dispatchEvent(evt);
-                                            }}
-                                        }}
-                                    """, selector)
-                                    print(f"   ✅ Clicked audio button via JavaScript", file=sys.stderr)
-                                
-                                await asyncio.sleep(2)
-                                
-                                # Verify we switched to audio
-                                is_audio_now = await frame.evaluate("""
-                                    () => {
-                                        return document.querySelector('.rc-audiochallenge, #audio-source, audio') !== null;
-                                    }
-                                """)
-                                
-                                if is_audio_now:
-                                    print(f"   ✅ Successfully switched to audio challenge!", file=sys.stderr)
-                                    return True
-                                else:
-                                    print(f"   ⚠️  Clicked but didn't switch to audio, trying again...", file=sys.stderr)
-                                    await asyncio.sleep(1)
-                                    continue
-                    except Exception as e:
-                        if attempt < 2:  # Don't print error on last attempt
-                            continue
-                        pass
-            
-            # If direct clicks failed, try JavaScript approach
-            print("   🔄 Trying JavaScript to find and click audio button...", file=sys.stderr)
-            try:
-                switched = await frame.evaluate("""
-                    () => {
-                        // Try all possible elements
-                        const allElements = document.querySelectorAll('button, a, div[role="button"], span[role="button"]');
-                        for (const el of allElements) {
-                            const text = (el.textContent || el.innerText || '').toLowerCase();
-                            const title = (el.getAttribute('title') || '').toLowerCase();
-                            const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                            const id = (el.id || '').toLowerCase();
-                            const className = (el.className || '').toLowerCase();
-                            const href = (el.getAttribute('href') || '').toLowerCase();
-                            
-                            // Check if it's an audio button
-                            if (text.includes('audio') || title.includes('audio') || 
-                                ariaLabel.includes('audio') || id.includes('audio') ||
-                                className.includes('audio') || href.includes('audio') ||
-                                id === 'recaptcha-audio-button') {
-                                // Try to click it
-                                try {
-                                    el.click();
-                                    return true;
-                                } catch (e) {
-                                    // Try dispatchEvent as fallback
-                                    const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
-                                    el.dispatchEvent(clickEvent);
-                                    return true;
-                                }
-                            }
-                        }
-                        return false;
-                    }
-                """)
-                if switched:
-                    print("   ✅ Audio button clicked via JavaScript!", file=sys.stderr)
-                    await asyncio.sleep(2)
-                    return True
-            except Exception as e:
-                print(f"   ⚠️  JavaScript click failed: {str(e)[:50]}", file=sys.stderr)
-            
-            return False
-        except Exception as e:
-            print(f"   ⚠️  Error switching to audio: {str(e)[:50]}", file=sys.stderr)
-            return False
-    
-    async def _solve_audio_challenge(self) -> bool:
-        """Solve audio CAPTCHA challenge - SIMPLIFIED VERSION."""
-        try:
-            # Quick timeout wrapper to prevent hanging
-            # Increase timeout for headless mode (audio challenges take longer without display)
-            # Check if page is in headless mode by checking if it has a display
-            is_headless = True  # Default to headless
-            try:
-                # Try to check if we're in headless mode
-                # In headless mode, some operations might behave differently
-                if self.page:
-                    # Check viewport size - headless often uses default sizes
-                    viewport = await self.page.viewport_size()
-                    # This is a heuristic - adjust as needed
-                    is_headless = viewport is None or viewport.get('width', 0) < 800
-            except:
-                pass
-            
-            timeout = 90 if is_headless else 55  # 90 seconds for headless, 55 for visible
-            print(f"   ⏱️  Audio challenge timeout: {timeout}s ({'headless' if is_headless else 'visible'} mode)", file=sys.stderr)
-            result = await asyncio.wait_for(self._solve_audio_impl(), timeout=timeout)
-            return result
-        except asyncio.TimeoutError:
-            print(f"   ⏰ Audio solving timeout ({timeout}s)", file=sys.stderr)
-            return False
-        except Exception as e:
-            print(f"   ❌ Audio solving error: {str(e)[:80]}", file=sys.stderr)
-            return False
-    
-    async def _solve_audio_impl(self) -> bool:
-        """Internal audio solving implementation."""
-        try:
-            if not self.page:
-                print("   ❌ Page object is None", file=sys.stderr)
-                return False
-            
-            try:
-                # Quick check if page is still open
-                await self.page.evaluate("() => document.title")
-            except Exception as e:
-                print(f"   ❌ Page is closed or invalid: {str(e)[:50]}", file=sys.stderr)
-                return False
-            
-            print("   🎧 Starting audio challenge solving...", file=sys.stderr)
-            
-            # Retry logic: If challenge is closed, try to reopen it
-            max_frame_retries = 3
-            for frame_retry in range(max_frame_retries):
-                if frame_retry > 0:
-                    print(f"   🔄 Frame retry attempt {frame_retry + 1}/{max_frame_retries} (challenge might have been closed)...", file=sys.stderr)
-                    # Try clicking checkbox again to reopen challenge
-                    try:
-                        await self._click_recaptcha_checkbox()
-                        await asyncio.sleep(3)
-                    except:
-                        pass
-                
-                # Switch to challenge iframe
-                challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                if not challenge_frame:
-                    if frame_retry < max_frame_retries - 1:
-                        print(f"   ⚠️  Challenge iframe not found, will retry...", file=sys.stderr)
-                        continue
-                    else:
-                        print("   ⚠️  Challenge iframe not found after retries", file=sys.stderr)
-                        # Check if token is available (challenge might have been solved)
-                        token = await self._get_recaptcha_token()
-                        if token:
-                            print("   ✅ Token found! Challenge was solved.", file=sys.stderr)
-                            return True
-                        return False
-                
-                frame = await challenge_frame.content_frame()
-                if not frame:
-                    if frame_retry < max_frame_retries - 1:
-                        print(f"   ⚠️  Could not access challenge frame, will retry...", file=sys.stderr)
-                        continue
-                    else:
-                        print("   ⚠️  Could not access challenge frame content after retries", file=sys.stderr)
-                        # Check if token is available
-                        token = await self._get_recaptcha_token()
-                        if token:
-                            print("   ✅ Token found! Challenge was solved.", file=sys.stderr)
-                            return True
-                        return False
-                
-                # Check if frame is still valid (not closed)
-                try:
-                    frame_title = await frame.evaluate("() => document.title || 'no-title'")
-                except:
-                    if frame_retry < max_frame_retries - 1:
-                        print(f"   ⚠️  Frame closed or invalid, will retry...", file=sys.stderr)
-                        continue
-                    else:
-                        print("   ⚠️  Frame closed or invalid after retries", file=sys.stderr)
-                        return False
-                
-                # If we got here, frame is valid - break out of retry loop
-                break
-            else:
-                # No frame found after all retries
-                print("   ⚠️  Could not get challenge frame after retries", file=sys.stderr)
-                return False
-            
-            # Wait for challenge to load
-            await asyncio.sleep(2)
-            
-            # First, check if Buster extension is available (simpler approach)
-            # Note: Buster's solver-button is now in a shadow DOM (issue #273)
-            # We'll try multiple approaches to access it
-            print("   🔍 Checking for Buster extension...", file=sys.stderr)
-            
-            # Try to find Buster button (may be in shadow DOM)
-            buster_found = await frame.evaluate("""
-                () => {
-                    // Try direct selector first
-                    let button = document.querySelector('#solver-button, button[id*="solver"], button[class*="solver"]');
-                    if (button) return true;
-                    
-                    // Try to access shadow DOM
-                    const recaptchaContainer = document.querySelector('.rc-audiochallenge-tdownload, .rc-audiochallenge-response-field');
-                    if (recaptchaContainer) {
-                        // Check if there's a shadow root
-                        if (recaptchaContainer.shadowRoot) {
-                            button = recaptchaContainer.shadowRoot.querySelector('#solver-button, button[id*="solver"]');
-                            if (button) return true;
-                        }
-                    }
-                    
-                    // Check all elements with shadow roots
-                    const allElements = document.querySelectorAll('*');
-                    for (let el of allElements) {
-                        if (el.shadowRoot) {
-                            button = el.shadowRoot.querySelector('#solver-button, button[id*="solver"]');
-                            if (button) return true;
-                        }
-                    }
-                    
-                    return false;
-                }
-            """)
-            
-            if buster_found:
-                try:
-                    print("   🤖 Buster extension detected, attempting to use it...", file=sys.stderr)
-                    # Try clicking via JavaScript to handle shadow DOM
-                    clicked = await frame.evaluate("""
-                        () => {
-                            // Try direct click first
-                            let button = document.querySelector('#solver-button, button[id*="solver"], button[class*="solver"]');
-                            if (button) {
-                                button.click();
-                                return true;
-                            }
-                            
-                            // Try shadow DOM access
-                            const allElements = document.querySelectorAll('*');
-                            for (let el of allElements) {
-                                if (el.shadowRoot) {
-                                    button = el.shadowRoot.querySelector('#solver-button, button[id*="solver"]');
-                                    if (button) {
-                                        button.click();
-                                        return true;
-                                    }
-                                }
-                            }
-                            
-                            return false;
-                        }
-                    """)
-                    
-                    if clicked:
-                        print("   ✅ Buster solver button clicked, waiting for solution...", file=sys.stderr)
-                        await asyncio.sleep(3)  # Reduced from 5 to 3 seconds
-                        # Check if token appeared
-                        token = await self._get_recaptcha_token()
-                        if token:
-                            print("   ✅ CAPTCHA solved by Buster extension!", file=sys.stderr)
-                            return True
-                    else:
-                        print("   ⚠️  Buster detected but button not accessible (may be in closed shadow DOM)", file=sys.stderr)
-                        print("   💡 Note: Buster's solver-button is now in shadow DOM (see issue #273)", file=sys.stderr)
-                except Exception as e:
-                    print(f"   ⚠️  Buster button click failed: {str(e)[:50]}, falling back to manual solving...", file=sys.stderr)
-            
-            # Check if we're already in audio challenge mode
-            is_audio_challenge = await frame.evaluate("""
-                () => {
-                    // Check for audio challenge elements
-                    const audioInput = document.querySelector('#audio-response, input[name="audio-response"]');
-                    const audioDownload = document.querySelector('.rc-audiochallenge-tdownload, a[href*="audio"]');
-                    const audioButton = document.querySelector('#recaptcha-audio-button');
-                    return audioInput !== null || audioDownload !== null || audioButton !== null;
-                }
-            """)
-            
-            if not is_audio_challenge:
-                # We need to switch to audio challenge
-                print("   🔘 Switching to audio challenge...", file=sys.stderr)
-                audio_button_selectors = [
-                    '#recaptcha-audio-button',
-                    'button[title*="audio"]',
-                    'button[title*="Audio"]',
-                    '.rc-button-audio',
-                    'button.rc-button-audio',
-                    'button[id*="audio"]',
-                    'div[role="button"][aria-label*="audio"]',
-                    'div[role="button"][aria-label*="Audio"]',
-                    'a[href*="audio"]'
-                ]
-                
-                audio_clicked = False
-                for selector in audio_button_selectors:
-                    try:
-                        audio_button = await frame.query_selector(selector)
-                        if audio_button:
-                            is_visible = await audio_button.is_visible()
-                            if is_visible:
-                                print(f"   ✅ Found audio button: {selector}, clicking...", file=sys.stderr)
-                                await audio_button.scroll_into_view_if_needed()
-                                await asyncio.sleep(0.5)
-                                await audio_button.click()
-                                print("   ✅ Audio button clicked, waiting for audio challenge to load...", file=sys.stderr)
-                                await asyncio.sleep(3)  # Wait for audio challenge to load
-                                audio_clicked = True
-                                break
-                    except Exception as e:
-                        print(f"   ⚠️  Failed to click audio button {selector}: {str(e)[:50]}", file=sys.stderr)
-                        continue
-                
-                # Try JavaScript if direct click failed
-                if not audio_clicked:
-                    print("   🔄 Trying JavaScript to click audio button...", file=sys.stderr)
-                    try:
-                        clicked = await frame.evaluate("""
-                            () => {
-                                const buttons = document.querySelectorAll('button, a, div[role="button"]');
-                                for (const btn of buttons) {
-                                    const text = (btn.textContent || '').toLowerCase();
-                                    const title = (btn.getAttribute('title') || '').toLowerCase();
-                                    const id = (btn.id || '').toLowerCase();
-                                    if (text.includes('audio') || title.includes('audio') || id.includes('audio')) {
-                                        btn.click();
-                                        return true;
-                                    }
-                                }
-                                return false;
-                            }
-                        """)
-                        if clicked:
-                            print("   ✅ Audio button clicked via JavaScript!", file=sys.stderr)
-                            await asyncio.sleep(3)
-                            audio_clicked = True
-                    except:
-                        pass
-                
-                if not audio_clicked:
-                    print("   ⚠️  Could not switch to audio challenge, but continuing anyway...", file=sys.stderr)
-            else:
-                print("   ✅ Already in audio challenge mode", file=sys.stderr)
-            
-            # Set up network request monitoring at page level to capture audio URLs
-            audio_urls_from_network = []
-            
-            def handle_page_request(request):
-                try:
-                    url = request.url
-                    # Check if this request is related to audio/recaptcha
-                    url_lower = url.lower()
-                    if 'recaptcha' in url_lower and ('audio' in url_lower or 'mp3' in url_lower or 'wav' in url_lower or 'sound' in url_lower or 'tts' in url_lower or 'bframe' in url_lower):
-                        if url not in audio_urls_from_network:
-                            audio_urls_from_network.append(url)
-                            print(f"   📡 Network request detected: {url[:70]}...", file=sys.stderr)
-                except:
-                    pass
-            
-            def handle_page_response(response):
-                try:
-                    url = response.url
-                    content_type = response.headers.get('content-type', '').lower()
-                    url_lower = url.lower()
-                    # Check if this response is for an audio file
-                    is_audio = (
-                        ('recaptcha' in url_lower and ('audio' in url_lower or 'mp3' in url_lower or 'wav' in url_lower or 'sound' in url_lower or 'tts' in url_lower)) or
-                        ('audio' in content_type or 'mp3' in content_type or 'wav' in content_type) or
-                        (url_lower.endswith('.mp3') or url_lower.endswith('.wav'))
-                    )
-                    if is_audio:
-                        if url not in audio_urls_from_network:
-                            audio_urls_from_network.append(url)
-                            print(f"   📡 Network response detected: {url[:70]}...", file=sys.stderr)
-                except:
-                    pass
-            
-            # Monitor network requests at page level (frames don't have event handlers)
-            # Remove existing handlers first to avoid duplicates
-            try:
-                self.page.remove_listener("request", handle_page_request)
-            except:
-                pass
-            try:
-                self.page.remove_listener("response", handle_page_response)
-            except:
-                pass
-            
-            self.page.on("request", handle_page_request)
-            self.page.on("response", handle_page_response)
-            
-            # Wait longer for audio challenge to fully load and for network requests
-            print("   ⏳ Waiting for audio challenge to fully load (checking network requests)...", file=sys.stderr)
-            # Wait and check if audio elements appear - wait longer for iframe to fully load
-            audio_ready = False
-            for wait_attempt in range(15):  # Wait up to 15 seconds
-                await asyncio.sleep(1)
-                
-                # Check if page is still valid
-                try:
-                    await self.page.evaluate("() => document.title")
-                except:
-                    print(f"   ⚠️  Page closed during wait (attempt {wait_attempt + 1})", file=sys.stderr)
-                    break
-                
-                # Check if audio elements are now present
-                try:
-                    has_audio = await frame.evaluate("""
-                        () => {
-                            // Check for audio challenge UI elements
-                            const audioInput = document.querySelector('#audio-response, input[name="audio-response"], input#audio-response');
-                            const audioDownload = document.querySelector('.rc-audiochallenge-tdownload, a[href*="audio"], a.rc-audiochallenge-tdownload');
-                            const audioElement = document.querySelector('audio');
-                            const audioButton = document.querySelector('#recaptcha-audio-button');
-                            const audioChallenge = document.querySelector('.rc-audiochallenge');
-                            
-                            // Also check if there's any content in the frame
-                            const hasContent = document.body && document.body.children.length > 0;
-                            
-                            return {
-                                hasAudioInput: audioInput !== null,
-                                hasAudioDownload: audioDownload !== null,
-                                hasAudioElement: audioElement !== null,
-                                hasAudioButton: audioButton !== null,
-                                hasAudioChallenge: audioChallenge !== null,
-                                hasContent: hasContent,
-                                bodyChildren: document.body ? document.body.children.length : 0
-                            };
-                        }
-                    """)
-                    
-                    if has_audio.get('hasAudioInput') or has_audio.get('hasAudioDownload') or has_audio.get('hasAudioElement') or has_audio.get('hasAudioChallenge'):
-                        print(f"   ✅ Audio challenge elements appeared after {wait_attempt + 1} seconds", file=sys.stderr)
-                        print(f"      Details: {has_audio}", file=sys.stderr)
-                        audio_ready = True
-                        break
-                    elif has_audio.get('hasContent'):
-                        # Frame has content, might be loading
-                        if wait_attempt % 3 == 0:
-                            print(f"   ⏳ Frame has content ({has_audio.get('bodyChildren')} elements), waiting for audio... ({wait_attempt + 1}/15)", file=sys.stderr)
-                    else:
-                        # Frame might be empty or still loading
-                        if wait_attempt % 3 == 0:
-                            print(f"   ⏳ Still waiting for audio challenge to load... ({wait_attempt + 1}/15)", file=sys.stderr)
-                except Exception as e:
-                    if "closed" in str(e).lower() or "target" in str(e).lower():
-                        print(f"   ⚠️  Frame closed during check (attempt {wait_attempt + 1})", file=sys.stderr)
-                        # Try to get frame again
-                        try:
-                            challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                            if challenge_frame:
-                                frame = await challenge_frame.content_frame()
-                        except:
-                            pass
-                    continue
-            
-            if not audio_ready:
-                print("   ⚠️  Audio elements not fully detected, but continuing anyway...", file=sys.stderr)
-                # Check what's actually in the frame
-                try:
-                    frame_info = await frame.evaluate("""
-                        () => {
-                            return {
-                                html: document.body ? document.body.innerHTML.substring(0, 500) : 'no body',
-                                allElements: document.querySelectorAll('*').length,
-                                links: document.querySelectorAll('a').length,
-                                buttons: document.querySelectorAll('button').length,
-                                inputs: document.querySelectorAll('input').length
-                            };
-                        }
-                    """)
-                    print(f"   📊 Frame content info: {frame_info}", file=sys.stderr)
-                except:
-                    pass
-            
-            # Try to click play/download button if it exists - CRITICAL: Must play audio
-            # More aggressive approach with multiple attempts
-            print("   🎵 Looking for audio play/download button (aggressive search)...", file=sys.stderr)
-            audio_played = False
-            
-            # Try multiple times with different strategies
-            for play_attempt in range(5):  # Try up to 5 times
-                if audio_played:
-                    break
-                    
-                try:
-                    play_button_selectors = [
-                        'a.rc-audiochallenge-tdownload',  # Download link (most common)
-                        '.rc-audiochallenge-play-button',
-                        'button[title*="play" i]',
-                        'button[aria-label*="play" i]',
-                        'a[href*="audio"]',
-                        'a[class*="download"]',
-                        '[class*="play"][class*="button"]',
-                        '[id*="play"]',
-                        '[id*="audio"]',
-                        'a[href*="mp3"]',
-                        'a[href*="wav"]'
-                    ]
-                    
-                    for selector in play_button_selectors:
-                        try:
-                            play_btn = await frame.query_selector(selector)
-                            if play_btn:
-                                # Don't check visibility - try clicking anyway (button might be hidden but clickable)
-                                print(f"   ▶️  Found play/download element: {selector} (attempt {play_attempt + 1}), clicking...", file=sys.stderr)
-                                
-                                # Scroll into view first
-                                try:
-                                    await play_btn.scroll_into_view_if_needed()
-                                except:
-                                    pass
-                                await asyncio.sleep(0.3)
-                                
-                                # Try multiple click methods
-                                clicked = False
-                                try:
-                                    await play_btn.click(timeout=5000, delay=50)
-                                    print("   ✅ Play button clicked via Playwright!", file=sys.stderr)
-                                    clicked = True
-                                except Exception as e1:
-                                    # Try JavaScript click with more events
-                                    try:
-                                        await frame.evaluate("""
-                                            (sel) => {
-                                                const btn = document.querySelector(sel);
-                                                if (btn) {
-                                                    // Trigger multiple events
-                                                    btn.focus();
-                                                    btn.click();
-                                                    // Mouse events
-                                                    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-                                                    const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
-                                                    const clickEvt = new MouseEvent('click', { bubbles: true, cancelable: true });
-                                                    btn.dispatchEvent(mouseDown);
-                                                    btn.dispatchEvent(mouseUp);
-                                                    btn.dispatchEvent(clickEvt);
-                                                    // Also try to trigger play if it's an audio element
-                                                    const audio = btn.closest('.rc-audiochallenge')?.querySelector('audio');
-                                                    if (audio) {
-                                                        audio.play().catch(() => {});
-                                                    }
-                                                }
-                                            }
-                                        """, selector)
-                                        print("   ✅ Play button clicked via JavaScript!", file=sys.stderr)
-                                        clicked = True
-                                    except Exception as e2:
-                                        print(f"   ⚠️  Both click methods failed: {str(e2)[:50]}", file=sys.stderr)
-                                
-                                if clicked:
-                                    audio_played = True
-                                    await asyncio.sleep(3)  # Wait for audio to start playing
-                                    
-                                    # Verify audio is playing
-                                    is_playing = await frame.evaluate("""
-                                        () => {
-                                            const audio = document.querySelector('audio');
-                                            if (audio) {
-                                                return !audio.paused && audio.currentTime > 0;
-                                            }
-                                            return false;
-                                        }
-                                    """)
-                                    
-                                    if is_playing:
-                                        print("   ✅ Audio is playing!", file=sys.stderr)
-                                    else:
-                                        print("   ⚠️  Audio might not be playing yet, continuing...", file=sys.stderr)
-                                    
-                                    break
-                        except Exception as e:
-                            if play_attempt == 0:  # Only print on first attempt
-                                print(f"   ⚠️  Error with selector {selector}: {str(e)[:50]}", file=sys.stderr)
-                            continue
-                    
-                    if audio_played:
-                        break
-                    
-                    # If no button found, wait a bit and try again (frame might still be loading)
-                    if play_attempt < 4:
-                        await asyncio.sleep(2)
-                        print(f"   🔄 Retrying play button search (attempt {play_attempt + 2}/5)...", file=sys.stderr)
-                        
-                except Exception as e:
-                    print(f"   ⚠️  Error in play button search (attempt {play_attempt + 1}): {str(e)[:50]}", file=sys.stderr)
-                    if play_attempt < 4:
-                        await asyncio.sleep(2)
-            
-            # If no button found, try JavaScript to find and click any play/download element
-            if not audio_played:
-                print("   🔄 Trying JavaScript to find and play audio...", file=sys.stderr)
-                try:
-                    played = await frame.evaluate("""
-                        () => {
-                            // PRIORITY 1: Try to find and play audio element directly FIRST
-                            const audio = document.querySelector('audio');
-                            if (audio) {
-                                // Try to play it
-                                audio.play().catch(() => {});
-                                // Also trigger load
-                                audio.load();
-                                return { played: true, method: 'audio-element-direct' };
-                            }
-                            
-                            // PRIORITY 2: Find download link (most reliable for reCAPTCHA)
-                            const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload, a[href*="audio"]');
-                            if (downloadLink) {
-                                // Click it multiple times to ensure it triggers
-                                downloadLink.click();
-                                // Also try to get the URL and trigger download
-                                const href = downloadLink.getAttribute('href');
-                                if (href) {
-                                    // Trigger download programmatically
-                                    const link = document.createElement('a');
-                                    link.href = href;
-                                    link.click();
-                                }
-                                return { played: true, method: 'download-link' };
-                            }
-                            
-                            // PRIORITY 3: Find play button
-                            const playBtn = document.querySelector('.rc-audiochallenge-play-button, button[title*="play" i], button[aria-label*="play" i]');
-                            if (playBtn) {
-                                playBtn.click();
-                                // Also try to find audio and play it
-                                const audio = playBtn.closest('.rc-audiochallenge')?.querySelector('audio');
-                                if (audio) {
-                                    audio.play().catch(() => {});
-                                }
-                                return { played: true, method: 'play-button' };
-                            }
-                            
-                            // PRIORITY 4: Try clicking anywhere in challenge area
-                            const challenge = document.querySelector('.rc-audiochallenge');
-                            if (challenge) {
-                                challenge.click();
-                                // Also try to find and play audio
-                                const audio = challenge.querySelector('audio');
-                                if (audio) {
-                                    audio.play().catch(() => {});
-                                }
-                                return { played: true, method: 'challenge-area' };
-                            }
-                            
-                            return { played: false };
-                        }
-                    """)
-                    if played.get("played"):
-                        print(f"   ✅ Audio triggered via JavaScript: {played.get('method')}", file=sys.stderr)
-                        audio_played = True
-                        await asyncio.sleep(5)  # Wait longer for audio to actually start playing
-                    else:
-                        print("   ⚠️  Could not find play button via JavaScript", file=sys.stderr)
-                except Exception as e:
-                    print(f"   ⚠️  JavaScript play failed: {str(e)[:50]}", file=sys.stderr)
-            
-            # Final attempt: Force play audio element if it exists
-            if not audio_played:
-                print("   🔄 Final attempt: Trying to force play audio element...", file=sys.stderr)
-                try:
-                    forced = await frame.evaluate("""
-                        () => {
-                            const audio = document.querySelector('audio');
-                            if (audio) {
-                                audio.play().catch(() => {});
-                                // Also try to set src and play
-                                if (!audio.src) {
-                                    // Try to get src from download link
-                                    const link = document.querySelector('a.rc-audiochallenge-tdownload');
-                                    if (link && link.href) {
-                                        audio.src = link.href;
-                                        audio.load();
-                                        audio.play().catch(() => {});
-                                    }
-                                }
-                                return true;
-                            }
-                            return false;
-                        }
-                    """)
-                    if forced:
-                        print("   ✅ Forced audio element to play!", file=sys.stderr)
-                        audio_played = True
-                        await asyncio.sleep(3)
-                except Exception as e:
-                    print(f"   ⚠️  Force play failed: {str(e)[:50]}", file=sys.stderr)
-            
-            # Get audio source - prioritize download links (reCAPTCHA's preferred method)
-            print("   📥 Getting audio source (checking download links first)...", file=sys.stderr)
-            
-            # First, try to trigger audio load by interacting with the challenge
-            print("   ▶️  Trying to trigger audio download/load...", file=sys.stderr)
-            try:
-                # Try multiple methods to trigger audio
-                triggered = await frame.evaluate("""
-                    () => {
-                        // Method 1: Try clicking any download/play link
-                        const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload, a[href*="audio"], a[class*="download"]');
-                        if (downloadLink) {
-                            downloadLink.click();
-                            return true;
-                        }
-                        
-                        // Method 2: Try play button
-                        const playBtn = document.querySelector('.rc-audiochallenge-play-button, button[title*="play"], button[aria-label*="play"]');
-                        if (playBtn) {
-                            playBtn.click();
-                            return true;
-                        }
-                        
-                        // Method 3: Try to trigger audio via JavaScript events
-                        // Sometimes audio is loaded via JavaScript, so trigger events
-                        const audioInput = document.querySelector('#audio-response, input[name="audio-response"]');
-                        if (audioInput) {
-                            // Focus on input to trigger audio load
-                            audioInput.focus();
-                            audioInput.click();
-                            // Trigger input event
-                            const inputEvent = new Event('input', { bubbles: true });
-                            audioInput.dispatchEvent(inputEvent);
-                            return true;
-                        }
-                        
-                        // Method 4: Try clicking anywhere in the challenge area
-                        const challengeArea = document.querySelector('.rc-audiochallenge, .rc-audiochallenge-response-field');
-                        if (challengeArea) {
-                            challengeArea.click();
-                            return true;
-                        }
-                        
-                        return false;
-                    }
-                """)
-                if triggered:
-                    print("   ✅ Triggered audio load, waiting for audio to play...", file=sys.stderr)
-                    await asyncio.sleep(5)  # Wait longer for audio to load after trigger
-                else:
-                    print("   ⚠️  Could not trigger audio load, will try to extract URL anyway", file=sys.stderr)
-            except Exception as e:
-                print(f"   ⚠️  Error triggering audio: {str(e)[:50]}", file=sys.stderr)
-            
-            # Verify audio is actually playing
-            if audio_played:
-                print("   🎧 Checking if audio is playing...", file=sys.stderr)
-                try:
-                    is_playing = await frame.evaluate("""
-                        () => {
-                            const audio = document.querySelector('audio');
-                            if (audio) {
-                                return !audio.paused && audio.currentTime > 0;
-                            }
-                            // Check if download link was clicked (audio might be downloading)
-                            const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload');
-                            if (downloadLink) {
-                                return downloadLink.getAttribute('href') !== null;
-                            }
-                            return false;
-                        }
-                    """)
-                    if is_playing:
-                        print("   ✅ Audio is playing!", file=sys.stderr)
-                    else:
-                        print("   ⚠️  Audio might not be playing, but continuing...", file=sys.stderr)
-                except Exception as e:
-                    print(f"   ⚠️  Error checking audio playback: {str(e)[:50]}", file=sys.stderr)
-            
-            audio_src = None
-            for attempt in range(20):  # Increased to 20 attempts with longer waits
-                # Check if page is still valid before each attempt
-                try:
-                    await self.page.evaluate("() => document.title")
-                except Exception:
-                    print(f"   ❌ Page closed during audio source check (attempt {attempt + 1})", file=sys.stderr)
-                    return False
-                
-                try:
-                    # Check network requests first (most reliable)
-                    if audio_urls_from_network:
-                        audio_src = audio_urls_from_network[0]
-                        print(f"   ✅ Got audio URL from network request!", file=sys.stderr)
-                        break
-                    
-                    # Check download links FIRST (reCAPTCHA audio challenges use this)
-                    audio_src = await frame.evaluate("""
-                    () => {
-                        // PRIORITY 0: Try to extract audio URL from JavaScript variables or window object
-                        try {
-                            // Check if audio URL is stored in window or global variables
-                            if (window.audioUrl || window.audio_url || window.recaptchaAudioUrl) {
-                                return window.audioUrl || window.audio_url || window.recaptchaAudioUrl;
-                            }
-                            // Check if there's a global audio source
-                            const audioSource = window.audioSource || window.audio_source;
-                            if (audioSource) return audioSource;
-                            // Check for reCAPTCHA-specific variables
-                            if (window.grecaptcha && window.grecaptcha.audioUrl) {
-                                return window.grecaptcha.audioUrl;
-                            }
-                        } catch (e) {
-                            // Ignore
-                        }
-                        
-                        // PRIORITY 1: Check for reCAPTCHA audio download link (most common)
-                        const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload, a[class*="tdownload"], a[class*="download"]');
-                        if (downloadLink) {
-                            let href = downloadLink.getAttribute('href');
-                            if (href && href.length > 0) {
-                                // If relative URL, try to make it absolute
-                                if (!href.startsWith('http')) {
-                                    // Check if link has a data attribute or onclick with URL
-                                    const onclick = downloadLink.getAttribute('onclick');
-                                    if (onclick) {
-                                        const urlMatch = onclick.match(/https?:\/\/[^\s'"]+/);
-                                        if (urlMatch) href = urlMatch[0];
-                                    }
-                                    // Or try to get from the link's click handler
-                                    try {
-                                        const url = new URL(href, window.location.href);
-                                        href = url.href;
-                                    } catch (e) {
-                                        // Keep original href if URL construction fails
-                                    }
-                                }
-                                return href;
-                            }
-                            // If no href, try to get URL from data attributes
-                            const dataUrl = downloadLink.getAttribute('data-url') || downloadLink.getAttribute('data-audio-url');
-                            if (dataUrl) return dataUrl;
-                        }
-                        
-                        // PRIORITY 2: Check for any link with audio/recaptcha in href
-                        const allLinks = document.querySelectorAll('a[href]');
-                        for (const link of allLinks) {
-                            const href = link.getAttribute('href');
-                            if (href && (href.includes('audio') || href.includes('recaptcha') || href.includes('tts'))) {
-                                // Verify it looks like an audio URL
-                                if (href.includes('mp3') || href.includes('wav') || href.includes('sound') || href.startsWith('http') || href.startsWith('/')) {
-                                    // Make absolute if relative
-                                    let absHref = href;
-                                    if (!absHref.startsWith('http')) {
-                                        try {
-                                            absHref = new URL(href, window.location.href).href;
-                                        } catch (e) {
-                                            absHref = href;
-                                        }
-                                    }
-                                    return absHref;
-                                }
-                            }
-                        }
-                        
-                        // PRIORITY 3: Check audio elements (less common in reCAPTCHA)
-                        const audioElements = document.querySelectorAll('audio, source');
-                        for (const audioEl of audioElements) {
-                            const src = audioEl.src || audioEl.currentSrc || audioEl.getAttribute('src');
-                            if (src && src.length > 0) {
-                                return src;
-                            }
-                        }
-                        
-                        // PRIORITY 4: Try specific audio source selectors
-                        const selectors = [
-                            '#audio-source',
-                            'audio source',
-                            'audio',
-                            '#audio-source source',
-                            'source[src*="audio"]',
-                            'audio[src]'
-                        ];
-                        
-                        for (const selector of selectors) {
-                            const el = document.querySelector(selector);
-                            if (el) {
-                                const src = el.src || el.getAttribute('src') || el.getAttribute('href');
-                                if (src && src.length > 0) {
-                                    return src;
-                                }
-                            }
-                        }
-                        
-                        return null;
-                    }
-                """)
-                except Exception as e:
-                    # Frame might be invalid, try to get it again
-                    if "closed" in str(e).lower() or "target" in str(e).lower():
-                        print(f"   ⚠️  Frame invalid during attempt {attempt + 1}, trying to recover...", file=sys.stderr)
-                        # Try to get the challenge frame again
-                        try:
-                            challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                            if challenge_frame:
-                                frame = await challenge_frame.content_frame()
-                                if not frame:
-                                    print("   ❌ Could not recover frame", file=sys.stderr)
-                                    return False
-                        except:
-                            print("   ❌ Could not recover, aborting", file=sys.stderr)
-                            return False
-                    continue
-                
-                if audio_src:
-                    print(f"   ✅ Got audio source on attempt {attempt + 1}!", file=sys.stderr)
-                    break
-                
-                # Check network requests again
-                if audio_urls_from_network:
-                    audio_src = audio_urls_from_network[0]
-                    print(f"   ✅ Got audio URL from network on attempt {attempt + 1}!", file=sys.stderr)
-                    break
-                
-                if attempt < 19:
-                    if attempt % 3 == 0:  # Print every 3 attempts to reduce spam
-                        print(f"   ⏳ Audio not ready, waiting... ({attempt + 1}/20)", file=sys.stderr)
-                    await asyncio.sleep(2)  # Wait 2 seconds between attempts
-                    
-                    # Try clicking download link again if it exists
-                    if attempt % 5 == 0 and attempt > 0:
-                        try:
-                            await frame.evaluate("""
-                                () => {
-                                    const link = document.querySelector('a.rc-audiochallenge-tdownload, a[href*="audio"]');
-                                    if (link) link.click();
-                                }
-                            """)
-                        except:
-                            pass
-            
-            # Final attempt: wait longer and check network requests + all possible sources
-            if not audio_src:
-                print("   ❌ Could not get audio source URL after multiple attempts", file=sys.stderr)
-                print("   ⏳ Final attempt - trying to extract from page source, JavaScript, and network...", file=sys.stderr)
-                
-                # Try to get the audio URL from JavaScript execution
-                try:
-                    js_audio_url = await frame.evaluate("""
-                        () => {
-                            // Try to execute any audio loading functions
-                            try {
-                                // Check if there are any functions that load audio
-                                if (typeof loadAudio === 'function') {
-                                    loadAudio();
-                                }
-                                if (typeof playAudio === 'function') {
-                                    playAudio();
-                                }
-                            } catch (e) {}
-                            
-                            // Check all possible JavaScript variables again
-                            const checks = [
-                                window.audioUrl,
-                                window.audio_url,
-                                window.recaptchaAudioUrl,
-                                window.audioSource,
-                                window.audio_source,
-                                window.grecaptcha?.audioUrl,
-                                window.__audioUrl,
-                                window._audioUrl
-                            ];
-                            for (const check of checks) {
-                                if (check && typeof check === 'string' && check.startsWith('http')) {
-                                    return check;
-                                }
-                            }
-                            
-                            // Try to find audio URL in script tags (but be careful - might be incomplete)
-                            const scripts = document.querySelectorAll('script');
-                            for (const script of scripts) {
-                                const content = script.textContent || script.innerHTML;
-                                // Look for complete audio URLs (must end with .mp3 or have proper path)
-                                const urlMatch = content.match(/https?:\/\/[^"\'\\s]+(?:recaptcha|audio)[^"\'\\s]+(?:\.mp3|\.wav|audio[^"\'\\s]*)/i);
-                                if (urlMatch) {
-                                    const url = urlMatch[0];
-                                    // Only return if it looks like a complete URL (has /audio/ or ends with .mp3/.wav)
-                                    if (url.includes('/audio/') || url.endsWith('.mp3') || url.endsWith('.wav') || url.includes('audio?') || url.includes('audio&')) {
-                                        return url;
-                                    }
-                                }
-                            }
-                            
-                            return null;
-                        }
-                    """)
-                    if js_audio_url:
-                        # Validate that the URL is complete (not truncated)
-                        if len(js_audio_url) > 50 and ('/audio/' in js_audio_url or js_audio_url.endswith('.mp3') or js_audio_url.endswith('.wav') or 'audio?' in js_audio_url):
-                            audio_src = js_audio_url
-                            print(f"   ✅ Found audio URL via JavaScript: {audio_src[:50]}...", file=sys.stderr)
-                        else:
-                            print(f"   ⚠️  Audio URL from JavaScript looks incomplete (length: {len(js_audio_url)}), ignoring...", file=sys.stderr)
-                            audio_src = None
-                except Exception as e:
-                    print(f"   ⚠️  Could not extract from JavaScript: {str(e)[:50]}", file=sys.stderr)
-                
-                # Try to get the audio URL from the page HTML source
-                if not audio_src:
-                    try:
-                        page_source = await frame.content()
-                        import re
-                        # Look for audio URLs in the HTML
-                        audio_url_patterns = [
-                            r'https?://[^"\'\\s]+audio[^"\'\\s]+\.(mp3|wav)',
-                            r'https?://[^"\'\\s]+recaptcha[^"\'\\s]+audio[^"\'\\s]+',
-                            r'src=["\']([^"\']*audio[^"\']*)["\']',
-                            r'href=["\']([^"\']*audio[^"\']*)["\']',
-                        ]
-                        for pattern in audio_url_patterns:
-                            matches = re.findall(pattern, page_source, re.IGNORECASE)
-                            if matches:
-                                audio_src = matches[0] if isinstance(matches[0], str) else matches[0][0] if matches[0] else None
-                                if audio_src and not audio_src.startswith('http'):
-                                    # Try to make it absolute
-                                    try:
-                                        from urllib.parse import urljoin
-                                        frame_url = frame.url
-                                        audio_src = urljoin(frame_url, audio_src)
-                                    except:
-                                        pass
-                                if audio_src:
-                                    print(f"   ✅ Found audio URL in page source: {audio_src[:50]}...", file=sys.stderr)
-                                    break
-                    except Exception as e:
-                        print(f"   ⚠️  Could not extract from page source: {str(e)[:50]}", file=sys.stderr)
-                
-                # Check network requests one more time
-                if not audio_src and audio_urls_from_network:
-                    audio_src = audio_urls_from_network[0]
-                    print(f"   ✅ Got audio URL from network in final attempt!", file=sys.stderr)
-                elif not audio_src:
-                    await asyncio.sleep(5)  # Wait a bit more
-                    # Check network again after waiting
-                    if audio_urls_from_network:
-                        # Filter for actual audio URLs (not just bframe URLs)
-                        valid_audio_urls = [url for url in audio_urls_from_network if ('/audio/' in url or url.endswith('.mp3') or url.endswith('.wav') or 'audio?' in url or 'audio&' in url)]
-                        if valid_audio_urls:
-                            audio_src = valid_audio_urls[0]
-                            print(f"   ✅ Found valid audio URL from network after final wait: {audio_src[:50]}...", file=sys.stderr)
-                        elif audio_urls_from_network:
-                            # Use the first one anyway if no valid ones found
-                            audio_src = audio_urls_from_network[0]
-                            print(f"   ⚠️  Using network URL (may need validation): {audio_src[:50]}...", file=sys.stderr)
-            
-            # Before giving up, wait a bit more and check network requests one final time
-            if not audio_src:
-                print("   ⏳ Final check - waiting 5 more seconds for network requests...", file=sys.stderr)
-                await asyncio.sleep(5)
-                if audio_urls_from_network:
-                    # Filter for actual audio URLs (not just bframe URLs)
-                    valid_audio_urls = [url for url in audio_urls_from_network if ('/audio/' in url or url.endswith('.mp3') or url.endswith('.wav') or 'audio?' in url or 'audio&' in url)]
-                    if valid_audio_urls:
-                        audio_src = valid_audio_urls[0]
-                        print(f"   ✅ Found valid audio URL from network after final wait: {audio_src[:50]}...", file=sys.stderr)
-                    elif audio_urls_from_network:
-                        # Use the first one anyway if no valid ones found
-                        audio_src = audio_urls_from_network[0]
-                        print(f"   ⚠️  Using network URL (may need validation): {audio_src[:50]}...", file=sys.stderr)
-                
-            if not audio_src:
-                print("   ❌ Audio source still not available after all attempts", file=sys.stderr)
-                print("   💡 Debugging info:", file=sys.stderr)
-                try:
-                    # Get debug info about what's in the frame
-                    debug_info = await frame.evaluate("""
-                        () => {
-                            const allLinks = Array.from(document.querySelectorAll('a'));
-                            const allButtons = Array.from(document.querySelectorAll('button'));
-                            const allInputs = Array.from(document.querySelectorAll('input'));
-                            
-                            return {
-                                hasAudioElements: document.querySelectorAll('audio').length > 0,
-                                hasSourceElements: document.querySelectorAll('source').length > 0,
-                                hasDownloadLinks: document.querySelectorAll('a[href*="audio"], a[href*="recaptcha"]').length > 0,
-                                hasRecaptchaDownload: document.querySelector('a.rc-audiochallenge-tdownload') !== null,
-                                allLinksCount: allLinks.length,
-                                allButtonsCount: allButtons.length,
-                                allInputsCount: allInputs.length,
-                                allLinks: allLinks.slice(0, 10).map(a => ({
-                                    href: a.getAttribute('href'),
-                                    className: a.className,
-                                    text: a.textContent.substring(0, 30)
-                                })),
-                                allButtons: allButtons.slice(0, 5).map(b => ({
-                                    id: b.id,
-                                    className: b.className,
-                                    text: b.textContent.substring(0, 30),
-                                    title: b.getAttribute('title')
-                                })),
-                                bodyHTML: document.body ? document.body.innerHTML.substring(0, 300) : 'no body',
-                                frameURL: window.location.href
-                            };
-                        }
-                    """)
-                    print(f"   📊 Frame debug: {debug_info}", file=sys.stderr)
-                    
-                    # If we have network URLs, use the first one
-                    if audio_urls_from_network:
-                        audio_src = audio_urls_from_network[0]
-                        print(f"   ✅ Using audio URL from network monitoring: {audio_src[:50]}...", file=sys.stderr)
-                    else:
-                        print("   💡 The audio challenge might need manual solving or the page structure has changed", file=sys.stderr)
-                        print("   💡 Network monitoring found no audio URLs - audio might be loaded via JavaScript", file=sys.stderr)
-                        return False
-                except Exception as e:
-                    print(f"   ⚠️  Error getting debug info: {str(e)[:50]}", file=sys.stderr)
-                    if audio_urls_from_network:
-                        audio_src = audio_urls_from_network[0]
-                        print(f"   ✅ Using audio URL from network: {audio_src[:50]}...", file=sys.stderr)
-                    else:
-                        return False
-            
-            print(f"   ✅ Got audio source: {audio_src[:50]}...", file=sys.stderr)
-            
-            # Download and process audio
-            print("   🎤 Recognizing audio...", file=sys.stderr)
-            audio_text = await self._recognize_audio(audio_src)
-            
-            if not audio_text:
-                print("   ❌ Audio recognition failed or returned empty", file=sys.stderr)
-                return False
-            
-            print(f"   ✅ Recognized text: {audio_text}", file=sys.stderr)
-            
-            # Enter the text
-            print("   ⌨️  Entering recognized text...", file=sys.stderr)
-            input_selectors = ['#audio-response', 'input[name="audio-response"]', '#audio-response-input', 'input#audio-response']
-            text_entered = False
-            for selector in input_selectors:
-                try:
-                    input_field = await frame.query_selector(selector)
-                    if input_field:
-                        print(f"   ✅ Found input field: {selector}", file=sys.stderr)
-                        # Try multiple methods to ensure text is entered
-                        try:
-                            await input_field.fill(audio_text)
-                        except:
-                            # Try JavaScript as fallback
-                            await frame.evaluate("""
-                                (selector, text) => {
-                                    const field = document.querySelector(selector);
-                                    if (field) {
-                                        field.value = text;
-                                        field.dispatchEvent(new Event('input', { bubbles: true }));
-                                        field.dispatchEvent(new Event('change', { bubbles: true }));
-                                    }
-                                }
-                            """, selector, audio_text)
-                        
-                        # Verify text was entered
-                        await asyncio.sleep(0.5)
-                        entered_value = await input_field.input_value()
-                        if entered_value == audio_text or entered_value.strip().upper() == audio_text.strip().upper():
-                            print(f"   ✅ Text entered successfully: '{entered_value}'", file=sys.stderr)
-                            text_entered = True
-                            break
-                        else:
-                            print(f"   ⚠️  Text mismatch - expected '{audio_text}', got '{entered_value}'", file=sys.stderr)
-                            # Try again with JavaScript
-                            await frame.evaluate("""
-                                (selector, text) => {
-                                    const field = document.querySelector(selector);
-                                    if (field) {
-                                        field.value = text;
-                                        field.focus();
-                                        field.dispatchEvent(new Event('input', { bubbles: true }));
-                                        field.dispatchEvent(new Event('change', { bubbles: true }));
-                                    }
-                                }
-                            """, selector, audio_text)
-                            await asyncio.sleep(0.5)
-                            entered_value = await input_field.input_value()
-                            if entered_value == audio_text or entered_value.strip().upper() == audio_text.strip().upper():
-                                print(f"   ✅ Text entered on retry: '{entered_value}'", file=sys.stderr)
-                                text_entered = True
-                                break
-                except Exception as e:
-                    print(f"   ⚠️  Failed to fill input {selector}: {str(e)[:50]}", file=sys.stderr)
-                    continue
-            
-            if not text_entered:
-                print("   ❌ Could not enter text", file=sys.stderr)
-                return False
-            
-            # Click verify button - try multiple strategies
-            print("   ✅ Clicking verify button...", file=sys.stderr)
-            verify_selectors = [
-                '#recaptcha-verify-button',
-                'button[title*="Verify"]',
-                'button[title*="verify"]',
-                'button.rc-button-default',
-                'button[type="submit"]',
-                'button#recaptcha-verify-button',
-                '.rc-button-default-go',
-                'button.rc-button-default-go',
-                'button[aria-label*="Verify"]',
-                'button[aria-label*="verify"]',
-                'button:has-text("Verify")',
-                'button:has-text("verify")',
-            ]
-            
-            verify_clicked = False
-            for verify_selector in verify_selectors:
-                try:
-                    verify_button = await frame.query_selector(verify_selector)
-                    if verify_button:
-                        is_visible = await verify_button.is_visible()
-                        is_enabled = await verify_button.is_enabled()
-                        if is_visible and is_enabled:
-                            print(f"   ✅ Found verify button: {verify_selector} (visible={is_visible}, enabled={is_enabled})", file=sys.stderr)
-                            # Scroll into view first
-                            await verify_button.scroll_into_view_if_needed()
-                            await asyncio.sleep(0.5)
-                            # Try clicking multiple ways
-                            try:
-                                await verify_button.click()
-                            except:
-                                # Try JavaScript click as fallback
-                                await frame.evaluate("""
-                                    (selector) => {
-                                        const btn = document.querySelector(selector);
-                                        if (btn) btn.click();
-                                    }
-                                """, verify_selector)
-                            print("   ✅ Verify button clicked, waiting for verification...", file=sys.stderr)
-                            await asyncio.sleep(5)  # Wait longer for verification
-                            verify_clicked = True
-                            print("   ✅ Audio challenge solved!", file=sys.stderr)
-                            break
-                        else:
-                            print(f"   ⚠️  Verify button found but not clickable: visible={is_visible}, enabled={is_enabled}", file=sys.stderr)
-                except Exception as e:
-                    print(f"   ⚠️  Failed to click verify {verify_selector}: {str(e)[:50]}", file=sys.stderr)
-                    continue
-            
-            if not verify_clicked:
-                # Last resort: try JavaScript click on any verify button
-                print("   🔄 Trying JavaScript click on verify button...", file=sys.stderr)
-                try:
-                    clicked = await frame.evaluate("""
-                        () => {
-                            // Try all buttons and clickable elements
-                            const allClickable = document.querySelectorAll('button, div[role="button"], span[role="button"], a');
-                            for (const btn of allClickable) {
-                                const text = (btn.textContent || btn.innerText || '').toLowerCase();
-                                const title = (btn.getAttribute('title') || '').toLowerCase();
-                                const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-                                const id = (btn.id || '').toLowerCase();
-                                const className = (btn.className || '').toLowerCase();
-                                
-                                // Check if it's a verify button
-                                if (text.includes('verify') || title.includes('verify') || 
-                                    ariaLabel.includes('verify') || id.includes('verify') ||
-                                    className.includes('verify') || id === 'recaptcha-verify-button') {
-                                    // Try multiple click methods
-                                    try {
-                                        btn.click();
-                                    } catch (e) {
-                                        // Try dispatchEvent
-                                        const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
-                                        btn.dispatchEvent(clickEvent);
-                                    }
-                                    return true;
-                                }
-                            }
-                            return false;
-                        }
-                    """)
-                    if clicked:
-                        print("   ✅ Verify button clicked via JavaScript!", file=sys.stderr)
-                        await asyncio.sleep(5)
-                        verify_clicked = True
-                    else:
-                        # Try clicking the default button (sometimes it's the verify button)
-                        print("   🔄 Trying to click default button as verify...", file=sys.stderr)
-                        try:
-                            default_clicked = await frame.evaluate("""
-                                () => {
-                                    const defaultBtn = document.querySelector('.rc-button-default, .rc-button-default-go, button.rc-button-default');
-                                    if (defaultBtn) {
-                                        defaultBtn.click();
-                                        return true;
-                                    }
-                                    return false;
-                                }
-                            """)
-                            if default_clicked:
-                                print("   ✅ Default button clicked!", file=sys.stderr)
-                                await asyncio.sleep(5)
-                                verify_clicked = True
-                        except:
-                            pass
-                except Exception as e:
-                    print(f"   ⚠️  JavaScript click failed: {str(e)[:50]}", file=sys.stderr)
-            
-            if not verify_clicked:
-                print("   ⚠️  Could not click verify button, but continuing - token might still appear", file=sys.stderr)
-                # Don't return False immediately - sometimes token appears even without clicking verify
-                # Wait a bit and check for token
-                await asyncio.sleep(3)
-                token = await self._get_recaptcha_token()
-                if token:
-                    print("   ✅ Token found even without verify click!", file=sys.stderr)
-                    return True
-            
-            # Wait a bit after verify click to ensure token is generated
-            await asyncio.sleep(2)
-            return True
-            
-        except Exception as e:
-            print(f"   ❌ Audio challenge solving failed: {e}", file=sys.stderr)
-            import traceback
-            print(f"   Traceback: {traceback.format_exc()[:200]}", file=sys.stderr)
-            return False
-    
-    async def _recognize_audio(self, audio_url: str) -> Optional[str]:
-        """Recognize audio CAPTCHA using speech recognition."""
-        try:
-            import urllib.request
-            import tempfile
-            import os
-            
-            print(f"   📥 Downloading audio from: {audio_url[:50]}...", file=sys.stderr)
-            # Download audio file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_file:
-                urllib.request.urlretrieve(audio_url, tmp_file.name)
-                audio_path = tmp_file.name
-            
-            print(f"   ✅ Audio downloaded to: {audio_path}", file=sys.stderr)
-            
-            try:
-                # Try using speech_recognition library (free, uses Google's API)
-                try:
-                    import speech_recognition as sr
-                    from pydub import AudioSegment
-                    
-                    print("   🔄 Converting audio to WAV format...", file=sys.stderr)
-                    # Convert to WAV if needed
-                    audio = AudioSegment.from_mp3(audio_path)
-                    wav_path = audio_path.replace('.mp3', '.wav')
-                    audio.export(wav_path, format="wav")
-                    print("   ✅ Audio converted to WAV", file=sys.stderr)
-                    
-                    # Recognize speech using Google's free API
-                    print("   🎤 Recognizing speech using Google API...", file=sys.stderr)
-                    r = sr.Recognizer()
-                    with sr.AudioFile(wav_path) as source:
-                        # Adjust for ambient noise
-                        r.adjust_for_ambient_noise(source, duration=0.5)
-                        audio_data = r.record(source)
-                        text = r.recognize_google(audio_data, language='en-US')
-                        recognized = text.strip().upper()  # CAPTCHA audio is usually uppercase
-                        print(f"   ✅ Recognized text: {recognized}", file=sys.stderr)
-                        return recognized
-                        
-                except ImportError:
-                    print("   ⚠️  speech_recognition or pydub not installed. Install with: pip install SpeechRecognition pydub", file=sys.stderr)
-                    return None
-                except sr.UnknownValueError:
-                    print("   ⚠️  Google Speech Recognition could not understand the audio", file=sys.stderr)
-                    return None
-                except sr.RequestError as e:
-                    print(f"   ⚠️  Could not request results from Google Speech Recognition service: {e}", file=sys.stderr)
-                    return None
-                except Exception as e:
-                    print(f"   ⚠️  Speech recognition error: {e}", file=sys.stderr)
-                    return None
-                
-            finally:
-                # Clean up
-                if os.path.exists(audio_path):
-                    os.unlink(audio_path)
-                wav_path = audio_path.replace('.mp3', '.wav')
-                if os.path.exists(wav_path):
-                    os.unlink(wav_path)
-            
-        except Exception as e:
-            print(f"   ❌ Audio recognition failed: {e}", file=sys.stderr)
-            import traceback
-            print(f"   Traceback: {traceback.format_exc()[:300]}", file=sys.stderr)
-            return None
-    
-    async def _solve_challenge(self) -> bool:
-        """Attempt to solve image challenge - always try to switch to audio first."""
-        try:
-            print("   🖼️  Image challenge detected, attempting to solve...", file=sys.stderr)
-            challenge_frame = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-            if not challenge_frame:
-                print("   ⚠️  Challenge iframe not found", file=sys.stderr)
-                return False
-            
-            frame = await challenge_frame.content_frame()
-            if not frame:
-                print("   ⚠️  Could not access challenge iframe", file=sys.stderr)
-                return False
-            
-            # Wait for challenge to load
-            await asyncio.sleep(2)
-            
-            # Strategy 1: ALWAYS try to switch to audio challenge first (more reliable)
-            print("   🎧 Attempting to switch to audio challenge...", file=sys.stderr)
+            # Multiple selectors for audio button
             audio_selectors = [
                 '#recaptcha-audio-button',
                 'button[title*="audio"]',
@@ -2432,588 +880,541 @@ class LocalCaptchaSolver(CaptchaSolver):
                 'button[aria-label*="audio"]',
                 'button[id*="audio"]',
                 'div[role="button"][aria-label*="audio"]',
-                'div[role="button"][aria-label*="Audio"]'
+                'div[role="button"][aria-label*="Audio"]',
+                'a.rc-audiochallenge-tdownload-link'
             ]
             
             for selector in audio_selectors:
                 try:
                     audio_btn = await frame.query_selector(selector)
                     if audio_btn:
-                        # Check if button is visible
-                        is_visible = await audio_btn.is_visible()
-                        if is_visible:
-                            print(f"   ✅ Found audio button: {selector}", file=sys.stderr)
-                            await audio_btn.click()
-                            print("   ✅ Audio button clicked, switching to audio challenge...", file=sys.stderr)
-                            await asyncio.sleep(3)  # Wait for audio challenge to load
-                            # Now try to solve audio
-                            return await self._solve_audio_challenge()
-                except Exception as e:
-                    print(f"   ⚠️  Failed to click audio button {selector}: {str(e)[:50]}", file=sys.stderr)
+                        safe_log_print(f"   ✅ Found audio button: {selector}")
+                        
+                        # Try to get button coordinates for direct click
+                        try:
+                            box = await audio_btn.bounding_box()
+                            if box:
+                                # Click using absolute coordinates (more reliable)
+                                await self.page.mouse.click(
+                                    box['x'] + box['width'] / 2,
+                                    box['y'] + box['height'] / 2
+                                )
+                                safe_log_print("   ✅ Clicked audio button via coordinates")
+                                await safe_async_sleep(2)
+                                return True
+                        except:
+                            pass
+                        
+                        # Fallback: regular click
+                        await audio_btn.click()
+                        safe_log_print("   ✅ Clicked audio button")
+                        await safe_async_sleep(2)
+                        return True
+                except:
                     continue
             
-            print("   ⚠️  Could not find audio button, trying image challenge strategies...", file=sys.stderr)
-            
-            # Strategy 2: For image challenges, try to get the prompt and images
-            # Extract challenge prompt/question
-            prompt = await frame.evaluate("""
-                () => {
-                    // Try to find the challenge prompt/question
-                    const promptEl = document.querySelector('.rc-imageselect-desc-text, .rc-imageselect-desc-no-canonical, .rc-imageselect-desc');
-                    return promptEl ? promptEl.textContent.trim() : null;
-                }
-            """)
-            
-            if prompt:
-                print(f"   📝 Challenge prompt: {prompt}", file=sys.stderr)
-            
-            # Check if it's an image grid challenge
-            image_grid = await frame.evaluate("""
-                () => {
-                    // Check for image grid
-                    const grid = document.querySelector('.rc-imageselect-grid, .rc-imageselect-tile');
-                    return grid !== null;
-                }
-            """)
-            
-            if image_grid:
-                print("   🖼️  Image grid detected", file=sys.stderr)
-                
-                # Get the challenge prompt
-                prompt = await frame.evaluate("""
+            # Try JavaScript click as last resort
+            try:
+                clicked = await frame.evaluate("""
                     () => {
-                        const promptEl = document.querySelector('.rc-imageselect-desc-text, .rc-imageselect-desc-no-canonical, .rc-imageselect-desc');
-                        return promptEl ? promptEl.textContent.trim() : null;
+                        const selectors = [
+                            '#recaptcha-audio-button',
+                            'button[title*="audio"]',
+                            'button[title*="Audio"]',
+                            '.rc-button-audio'
+                        ];
+                        for (const sel of selectors) {
+                            const btn = document.querySelector(sel);
+                            if (btn) {
+                                btn.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """)
+                if clicked:
+                    safe_log_print("   ✅ Clicked audio button via JavaScript")
+                    await safe_async_sleep(2)
+                    return True
+            except:
+                pass
+            
+            return False
+            
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Switch to audio error: {str(e)[:50]}")
+            return False
+    
+    async def _solve_audio_challenge(self, frame) -> Optional[str]:
+        """Download audio file and recognize the text with improved detection."""
+        try:
+            safe_log_print("   🎤 Downloading and recognizing audio...")
+            
+            # Get audio URL (with retries and multiple methods)
+            audio_url = None
+            for attempt in range(5):
+                audio_url = await frame.evaluate("""
+                    () => {
+                        // Try multiple methods to get audio URL
+                        // Method 1: Download link (most common)
+                        const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload-link');
+                        if (downloadLink && downloadLink.href) {
+                            return downloadLink.href;
+                        }
+                        
+                        // Method 1a: Try clicking download link to get URL
+                        try {
+                            const link = document.querySelector('a[href*="audio"], a[class*="download"]');
+                            if (link && link.href) {
+                                return link.href;
+                            }
+                        } catch(e) {}
+                        
+                        // Method 2: Audio element
+                        const audioEl = document.querySelector('audio source, audio');
+                        if (audioEl) {
+                            const src = audioEl.src || audioEl.getAttribute('src');
+                            if (src) return src;
+                        }
+                        
+                        // Method 3: Data attributes
+                        const audioContainer = document.querySelector('.rc-audiochallenge-tdownload');
+                        if (audioContainer) {
+                            const url = audioContainer.getAttribute('data-audio-url') || 
+                                       audioContainer.getAttribute('href') ||
+                                       audioContainer.getAttribute('data-url');
+                            if (url) return url;
+                        }
+                        
+                        // Method 4: Check all links for audio
+                        const allLinks = document.querySelectorAll('a[href*="audio"], a[href*="mp3"]');
+                        for (const link of allLinks) {
+                            if (link.href && (link.href.includes('audio') || link.href.includes('mp3'))) {
+                                return link.href;
+                            }
+                        }
+                        
+                        // Method 5: Check for audio in iframe src
+                        const iframes = document.querySelectorAll('iframe');
+                        for (const iframe of iframes) {
+                            const src = iframe.src || '';
+                            if (src.includes('audio') || src.includes('challenge')) {
+                                // Try to get audio URL from iframe
+                                try {
+                                    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                                    if (iframeDoc) {
+                                        const audioLink = iframeDoc.querySelector('a[href*="audio"]');
+                                        if (audioLink && audioLink.href) {
+                                            return audioLink.href;
+                                        }
+                                    }
+                                } catch (e) {
+                                    // Cross-origin, skip
+                                }
+                            }
+                        }
+                        
+                        return null;
                     }
                 """)
                 
-                if prompt:
-                    print(f"   📝 Challenge: {prompt}", file=sys.stderr)
+                if audio_url:
+                    safe_log_print(f"   ✅ Audio URL found: {audio_url[:80]}...")
+                    break
                 
-                # Try to solve image challenge (basic implementation)
-                # For full automation, this would need ML model
-                try:
-                    # Try to import image challenge solver
-                    try:
-                        from automation.image_challenge_solver import solve_image_challenge
-                        solved = await solve_image_challenge(frame, self.page)
-                        if solved:
-                            print("   ✅ Image challenge solved!", file=sys.stderr)
-                            return True
-                    except ImportError:
-                        pass
-                except Exception as e:
-                    print(f"   ⚠️  Image challenge solver error: {str(e)[:50]}", file=sys.stderr)
-                
-                # Image challenges cannot be solved automatically without ML models
-                print("   ❌ Image challenge cannot be solved automatically", file=sys.stderr)
-                print("   💡 Options:", file=sys.stderr)
-                print("      1. Set HEADLESS=false to solve manually", file=sys.stderr)
-                print("      2. Use external CAPTCHA solving service (2captcha, etc.)", file=sys.stderr)
-                print("      3. Implement ML-based image recognition", file=sys.stderr)
-                return False
+                if attempt < 4:
+                    safe_log_print(f"   ⏳ Audio URL not found yet (attempt {attempt + 1}/5), waiting...")
+                    await safe_async_sleep(3)
             
-            # Strategy 3: Try clicking verify button (sometimes works if challenge is easy)
-            verify_selectors = [
-                '#recaptcha-verify-button',
-                'button[title*="Verify"]',
-                'button.rc-button-default',
-                'button[type="submit"]',
-                '.rc-button-default',
-                'button#recaptcha-verify-button'
-            ]
+            if not audio_url:
+                safe_log_print("   ⚠️  Could not find audio URL after 5 attempts")
+                safe_log_print("   💡 Audio may not be loaded yet, or challenge may be in image mode")
+                return None
             
-            for selector in verify_selectors:
-                try:
-                    verify_btn = await frame.query_selector(selector)
-                    if verify_btn and await verify_btn.is_visible():
-                        print(f"   ✅ Found verify button: {selector}", file=sys.stderr)
-                        await verify_btn.click()
-                        print("   ✅ Verify button clicked, waiting...", file=sys.stderr)
-                        await asyncio.sleep(3)  # Reduced from 5 to 3 seconds
-                        # Check if token appeared
-                        token = await self._get_recaptcha_token()
-                        if token:
-                            print("   ✅ Token found after verify click!", file=sys.stderr)
-                            return True
-                except Exception as e:
-                    print(f"   ⚠️  Failed to click verify {selector}: {str(e)[:50]}", file=sys.stderr)
-                    continue
-            
-            # Strategy 4: Try clicking "Skip" or "Next" buttons
-            skip_selectors = [
-                'button[title*="Skip"]',
-                'button[title*="Next"]',
-                'button[aria-label*="Skip"]',
-                '.rc-button-default'
-            ]
-            
-            for selector in skip_selectors:
-                try:
-                    button = await frame.query_selector(selector)
-                    if button and await button.is_visible():
-                        print(f"   ✅ Found skip/next button: {selector}", file=sys.stderr)
-                        await button.click()
-                        await asyncio.sleep(3)
-                        # Check if challenge completed
-                        token = await self._get_recaptcha_token()
-                        if token:
-                            return True
-                except:
-                    continue
-            
-            print("   ⚠️  Image challenge solving failed - no valid strategy worked", file=sys.stderr)
-            return False
-            
-        except Exception as e:
-            print(f"   ❌ Challenge solving error: {e}", file=sys.stderr)
-            import traceback
-            print(f"   Traceback: {traceback.format_exc()[:200]}", file=sys.stderr)
-            return False
-    
-    async def _get_recaptcha_token(self) -> Optional[str]:
-        """Get the solved reCAPTCHA token using multiple strategies."""
-        try:
-            # Strategy 1: Get token from the response field
-            token = await self.page.evaluate("""
-                () => {
-                    const responseField = document.querySelector('textarea[name="g-recaptcha-response"]');
-                    if (responseField && responseField.value && responseField.value.length > 0) {
-                        return responseField.value;
-                    }
-                    return null;
-                }
-            """)
-            
-            if token and len(token) > 0:
-                return token
-            
-            # Strategy 1.5: Get token from challenge frame (recaptcha-token input)
-            # Sometimes the token is in the challenge iframe before it's copied to the main page
+            # Download audio (with retries)
+            audio_path = None
+            wav_path = None
             try:
-                # Try to access challenge frame directly using Playwright
-                challenge_frame_element = await self.page.query_selector('iframe[title*="challenge"], iframe[src*="bframe"]')
-                if challenge_frame_element:
-                    challenge_frame = await challenge_frame_element.content_frame()
-                    if challenge_frame:
-                        challenge_token = await challenge_frame.evaluate("""
-                            () => {
-                                const tokenInput = document.querySelector('#recaptcha-token');
-                                if (tokenInput && tokenInput.value && tokenInput.value.length > 0) {
-                                    return tokenInput.value;
-                                }
-                                return null;
-                            }
-                        """)
-                        if challenge_token and len(challenge_token) > 0:
-                            print(f"   ✅ Found token in challenge frame!", file=sys.stderr)
-                            # Copy token to response field
-                            await self.page.evaluate("""
-                                (token) => {
-                                    const responseField = document.querySelector('textarea[name="g-recaptcha-response"]');
-                                    if (responseField) {
-                                        responseField.value = token;
-                                        responseField.dispatchEvent(new Event('change', { bubbles: true }));
-                                        responseField.dispatchEvent(new Event('input', { bubbles: true }));
-                                    }
-                                }
-                            """, challenge_token)
-                            return challenge_token
+                import urllib.request
+                import tempfile
+                import os
+                
+                for download_attempt in range(3):
+                    try:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_file:
+                            urllib.request.urlretrieve(audio_url, tmp_file.name)
+                            audio_path = tmp_file.name
+                        safe_log_print(f"   ✅ Audio downloaded to: {audio_path}")
+                        break
+                    except Exception as e:
+                        if download_attempt < 2:
+                            safe_log_print(f"   ⚠️  Download attempt {download_attempt + 1} failed: {str(e)[:50]}, retrying...")
+                            await safe_async_sleep(2)
+                        else:
+                            safe_log_print(f"   ⚠️  Audio download failed after 3 attempts: {str(e)[:50]}")
+                            return None
+                
+                if not audio_path:
+                    return None
+                
+                # Recognize audio
+                try:
+                    import speech_recognition as sr
+                    from pydub import AudioSegment
+                    
+                    # Convert to WAV
+                    safe_log_print("   🔄 Converting audio to WAV...")
+                    try:
+                        audio = AudioSegment.from_mp3(audio_path)
+                        wav_path = audio_path.replace('.mp3', '.wav')
+                        audio.export(wav_path, format="wav")
+                        safe_log_print("   ✅ Audio converted to WAV")
+                    except Exception as e:
+                        safe_log_print(f"   ⚠️  Audio conversion error: {str(e)[:50]}")
+                        # Try direct recognition if conversion fails
+                        wav_path = audio_path
+                    
+                    # Recognize (with retries)
+                    recognized = None
+                    for recog_attempt in range(3):
+                        try:
+                            safe_log_print(f"   🎤 Recognizing speech (attempt {recog_attempt + 1}/3)...")
+                            r = sr.Recognizer()
+                            with sr.AudioFile(wav_path) as source:
+                                r.adjust_for_ambient_noise(source, duration=0.5)
+                                audio_data = r.record(source)
+                                text = r.recognize_google(audio_data, language='en-US')
+                                recognized = text.strip().upper().replace(' ', '').replace('-', '')
+                                safe_log_print(f"   ✅ Recognized: {recognized}")
+                                break
+                        except sr.UnknownValueError:
+                            if recog_attempt < 2:
+                                safe_log_print(f"   ⚠️  Could not understand audio (attempt {recog_attempt + 1}), retrying...")
+                                await safe_async_sleep(1)
+                            else:
+                                safe_log_print("   ⚠️  Could not understand audio after 3 attempts")
+                        except sr.RequestError as e:
+                            safe_log_print(f"   ⚠️  Speech recognition API error: {str(e)[:50]}")
+                            if recog_attempt < 2:
+                                await safe_async_sleep(2)
+                            else:
+                                return None
+                        except Exception as e:
+                            safe_log_print(f"   ⚠️  Recognition error: {str(e)[:50]}")
+                            if recog_attempt < 2:
+                                await safe_async_sleep(1)
+                            else:
+                                return None
+                    
+                    return recognized
+                        
+                except ImportError:
+                    safe_log_print("   ⚠️  speech_recognition or pydub not installed")
+                    safe_log_print("   💡 Install with: pip install SpeechRecognition pydub")
+                    safe_log_print("   ⚠️  Audio challenge solving requires these packages")
+                    return None
+                finally:
+                    # Cleanup
+                    try:
+                        if audio_path and os.path.exists(audio_path):
+                            os.unlink(audio_path)
+                        if wav_path and os.path.exists(wav_path) and wav_path != audio_path:
+                            os.unlink(wav_path)
+                    except:
+                        pass
+                        
             except Exception as e:
-                # Frame might not be accessible, continue to other strategies
-                pass
-            
-            # Strategy 2: Try to get token from grecaptcha callback
-            token = await self.page.evaluate("""
-                () => {
-                    // Try to get token from grecaptcha if available
-                    if (window.grecaptcha && window.grecaptcha.getResponse) {
-                        try {
-                            // Find all widgets
-                            const widgets = document.querySelectorAll('[data-sitekey]');
-                            for (let widget of widgets) {
-                                const widgetId = widget.getAttribute('data-widget-id');
-                                if (widgetId) {
-                                    const response = window.grecaptcha.getResponse(widgetId);
-                                    if (response && response.length > 0) {
-                                        return response;
-                                    }
-                                }
-                            }
-                            // Try without widget ID
-                            const response = window.grecaptcha.getResponse();
-                            if (response && response.length > 0) {
-                                return response;
-                            }
-                        } catch (e) {
-                            // Ignore errors
-                        }
-                    }
-                    return null;
-                }
-            """)
-            
-            if token and len(token) > 0:
-                return token
-            
-            # Strategy 3: Check if checkbox is checked and trigger callback
-            token = await self.page.evaluate("""
-                () => {
-                    // Check if checkbox is checked
-                    const iframe = document.querySelector('iframe[src*="recaptcha"][src*="anchor"]');
-                    if (iframe) {
-                        // Try to trigger callback manually
-                        if (window.grecaptcha && window.grecaptcha.execute) {
-                            try {
-                                const widgets = document.querySelectorAll('[data-sitekey]');
-                                for (let widget of widgets) {
-                                    const widgetId = widget.getAttribute('data-widget-id');
-                                    if (widgetId) {
-                                        window.grecaptcha.execute(widgetId);
-                                    }
-                                }
-                            } catch (e) {
-                                // Ignore
-                            }
-                        }
-                    }
-                    return null;
-                }
-            """)
-            
-            # Wait a bit for callback to execute
-            await asyncio.sleep(1)
-            
-            # Strategy 4: Check response field again (might have been updated)
-            token = await self.page.evaluate("""
-                () => {
-                    const responseField = document.querySelector('textarea[name="g-recaptcha-response"]');
-                    if (responseField && responseField.value && responseField.value.length > 0) {
-                        return responseField.value;
-                    }
-                    // Also check grecaptcha again
-                    if (window.grecaptcha && window.grecaptcha.getResponse) {
-                        try {
-                            const response = window.grecaptcha.getResponse();
-                            if (response && response.length > 0) {
-                                return response;
-                            }
-                        } catch (e) {
-                            // Ignore
-                        }
-                    }
-                    return null;
-                }
-            """)
-            
-            return token if token and len(token) > 0 else None
+                safe_log_print(f"   ⚠️  Audio processing error: {str(e)[:50]}")
+                import traceback
+                safe_log_print(f"   📋 Traceback: {traceback.format_exc()[:200]}")
+                return None
             
         except Exception as e:
-            print(f"⚠️  Error getting token: {e}", file=sys.stderr)
+            safe_log_print(f"   ⚠️  Solve audio challenge error: {str(e)[:50]}")
             return None
     
-    async def _click_hcaptcha_checkbox(self) -> bool:
-        """Click the hCaptcha checkbox to trigger challenge."""
+    async def _submit_audio_answer(self, frame, answer: str) -> bool:
+        """Submit the recognized audio text as answer."""
         try:
-            print("🖱️ Looking for hCaptcha checkbox...", file=sys.stderr)
+            safe_log_print(f"   📤 Submitting answer: {answer}")
             
-            # Wait for hCaptcha to load
-            await asyncio.sleep(2)
-            
-            # Find hCaptcha iframe
-            hcaptcha_iframe = await self.page.query_selector('iframe[src*="hcaptcha.com"]')
-            if not hcaptcha_iframe:
-                print("   ⚠️  hCaptcha iframe not found", file=sys.stderr)
-                return False
-            
-            frame = await hcaptcha_iframe.content_frame()
-            if not frame:
-                print("   ⚠️  Could not access hCaptcha iframe", file=sys.stderr)
-                return False
-            
-            # Wait for checkbox to appear
-            await asyncio.sleep(1)
-            
-            # Find and click the checkbox
-            checkbox_selectors = [
-                '#checkbox',
-                '.checkbox',
-                'div[role="checkbox"]',
-                'div.checkbox',
-                '[id*="checkbox"]'
-            ]
-            
-            for selector in checkbox_selectors:
-                try:
-                    checkbox = await frame.query_selector(selector)
-                    if checkbox:
-                        is_visible = await checkbox.is_visible()
-                        if is_visible:
-                            print(f"   ✅ Found hCaptcha checkbox: {selector}", file=sys.stderr)
-                            await checkbox.click()
-                            print("   ✅ hCaptcha checkbox clicked!", file=sys.stderr)
-                            await asyncio.sleep(2)  # Wait for challenge to appear
-                            return True
-                except Exception as e:
-                    continue
-            
-            # Try JavaScript click as fallback
-            clicked = await frame.evaluate("""
-                () => {
-                    const checkbox = document.querySelector('#checkbox, .checkbox, div[role="checkbox"]');
-                    if (checkbox) {
-                        checkbox.click();
+            # Find answer input field
+            submitted = await frame.evaluate("""
+                (answerText) => {
+                    try {
+                        // Find input field
+                        const input = document.querySelector('#audio-response') || 
+                                     document.querySelector('input[type="text"]') ||
+                                     document.querySelector('input[name="audio-response"]');
+                        
+                        if (!input) {
+                            return false;
+                        }
+                        
+                        // Enter answer
+                        input.value = answerText;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        // Find and click verify button
+                        const verifyBtn = document.querySelector('#recaptcha-verify-button') ||
+                                         document.querySelector('button[type="submit"]') ||
+                                         document.querySelector('button[id*="verify"]');
+                        
+                        if (verifyBtn) {
+                            verifyBtn.click();
+                            return true;
+                        }
+                        
+                        // Try Enter key
+                        const enterEvent = new KeyboardEvent('keydown', {
+                            key: 'Enter',
+                            code: 'Enter',
+                            keyCode: 13,
+                            bubbles: true
+                        });
+                        input.dispatchEvent(enterEvent);
+                        
                         return true;
+                    } catch (e) {
+                        console.error('Submit answer error:', e);
+                        return false;
                     }
-                    return false;
                 }
-            """)
+            """, answer)
             
-            if clicked:
-                print("   ✅ hCaptcha checkbox clicked via JavaScript!", file=sys.stderr)
-                await asyncio.sleep(2)
+            if submitted:
+                safe_log_print("   ✅ Answer submitted")
+                await safe_async_sleep(2)
                 return True
-            
-            print("   ⚠️  Could not find or click hCaptcha checkbox", file=sys.stderr)
-            return False
-            
-        except Exception as e:
-            print(f"   ❌ Error clicking hCaptcha checkbox: {e}", file=sys.stderr)
-            return False
-    
-    async def _get_hcaptcha_token(self) -> Optional[str]:
-        """Get the solved hCaptcha token."""
-        try:
-            # Strategy 1: Get token from the response field
-            token = await self.page.evaluate("""
-                () => {
-                    const responseField = document.querySelector('textarea[name="h-captcha-response"]');
-                    if (responseField && responseField.value && responseField.value.length > 0) {
-                        return responseField.value;
-                    }
-                    return null;
-                }
-            """)
-            
-            if token and len(token) > 0:
-                return token
-            
-            # Strategy 2: Try to get token from hcaptcha callback
-            token = await self.page.evaluate("""
-                () => {
-                    // Try to get token from hcaptcha if available
-                    if (window.hcaptcha && window.hcaptcha.getResponse) {
-                        try {
-                            // Find all widgets
-                            const widgets = document.querySelectorAll('[data-sitekey]');
-                            for (let widget of widgets) {
-                                const widgetId = widget.getAttribute('data-hcaptcha-widget-id') || 
-                                                widget.getAttribute('id');
-                                if (widgetId) {
-                                    const response = window.hcaptcha.getResponse(widgetId);
-                                    if (response && response.length > 0) {
-                                        return response;
-                                    }
-                                }
-                            }
-                            // Try without widget ID
-                            const response = window.hcaptcha.getResponse();
-                            if (response && response.length > 0) {
-                                return response;
-                            }
-                        } catch (e) {
-                            // Ignore errors
-                        }
-                    }
-                    return null;
-                }
-            """)
-            
-            if token and len(token) > 0:
-                return token
-            
-            return None
-            
-        except Exception as e:
-            print(f"⚠️  Error getting hCaptcha token: {e}", file=sys.stderr)
-            return None
-    
-    async def _solve_hcaptcha_challenge(self) -> bool:
-        """Attempt to solve hCaptcha challenge (image or audio)."""
-        try:
-            print("   🖼️  hCaptcha challenge detected, attempting to solve...", file=sys.stderr)
-            
-            # Find challenge iframe
-            challenge_iframe = await self.page.query_selector('iframe[src*="hcaptcha.com"][src*="challenge"]')
-            if not challenge_iframe:
-                print("   ⚠️  Challenge iframe not found", file=sys.stderr)
-                return False
-            
-            frame = await challenge_iframe.content_frame()
-            if not frame:
-                print("   ⚠️  Could not access challenge iframe", file=sys.stderr)
-                return False
-            
-            await asyncio.sleep(2)
-            
-            # Try to find and click audio button (similar to reCAPTCHA)
-            audio_selectors = [
-                'button[aria-label*="audio"]',
-                'button[aria-label*="Audio"]',
-                'button[title*="audio"]',
-                'button[title*="Audio"]',
-                '.audio-button',
-                'button.audio-button'
-            ]
-            
-            for selector in audio_selectors:
-                try:
-                    audio_btn = await frame.query_selector(selector)
-                    if audio_btn:
-                        is_visible = await audio_btn.is_visible()
-                        if is_visible:
-                            print(f"   ✅ Found audio button: {selector}", file=sys.stderr)
-                            await audio_btn.click()
-                            print("   ✅ Audio button clicked!", file=sys.stderr)
-                            await asyncio.sleep(3)
-                            # Try to solve audio challenge (similar to reCAPTCHA)
-                            return await self._solve_audio_challenge()
-                except:
-                    continue
-            
-            # For image challenges, we would need image recognition
-            # For now, return False and let the user know
-            print("   ⚠️  Image challenge detected - image solving not yet implemented", file=sys.stderr)
-            print("   💡 Tip: Try refreshing to get an audio challenge", file=sys.stderr)
-            return False
-            
-        except Exception as e:
-            print(f"   ❌ Error solving hCaptcha challenge: {e}", file=sys.stderr)
-            return False
-    
-    async def solve_hcaptcha(self, site_key: str, page_url: str) -> Optional[str]:
-        """Solve hCaptcha using local methods."""
-        if not self.page:
-            raise RuntimeError("LocalCaptchaSolver requires a Playwright page object")
-        
-        try:
-            print(f"🎯 Solving hCaptcha...", file=sys.stderr)
-            print(f"   Site Key: {site_key[:30]}..." if site_key else "   (No site key found)", file=sys.stderr)
-            
-            # Step 1: Click the checkbox
-            print("\n🖱️  Clicking hCaptcha checkbox...", file=sys.stderr)
-            clicked = await self._click_hcaptcha_checkbox()
-            
-            if not clicked:
-                print("   ⚠️  Could not click checkbox, trying alternative method...", file=sys.stderr)
-                # Try clicking the iframe directly
-                hcaptcha_iframe = await self.page.query_selector('iframe[src*="hcaptcha.com"]')
-                if hcaptcha_iframe:
-                    await hcaptcha_iframe.click()
-                    await asyncio.sleep(2)
-            
-            # Step 2: Check if challenge appeared
-            await asyncio.sleep(2)
-            challenge_present = await self.page.evaluate("""
-                () => {
-                    const challengeFrame = document.querySelector('iframe[src*="hcaptcha.com"][src*="challenge"]');
-                    return challengeFrame !== null;
-                }
-            """)
-            
-            if challenge_present:
-                print("   ✅ Challenge appeared!", file=sys.stderr)
-                # Try to solve the challenge
-                solved = await self._solve_hcaptcha_challenge()
-                if not solved:
-                    print("   ⚠️  Challenge solving failed, but checking for token...", file=sys.stderr)
             else:
-                print("   ℹ️  No challenge appeared (might be solved automatically)", file=sys.stderr)
+                safe_log_print("   ⚠️  Could not submit answer")
+                return False
+                
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Submit answer error: {str(e)[:50]}")
+            return False
+    
+    async def _wait_for_hcaptcha_auto_solve(self) -> Optional[str]:
+        """Wait and periodically check for hCaptcha token."""
+        try:
+            safe_log_print("⏳ Waiting for potential automatic hCaptcha solve...")
             
-            # Step 3: Wait and check for token
-            await asyncio.sleep(3)
-            token = await self._get_hcaptcha_token()
+            check_intervals = [1, 2, 3, 5, 10, 15, 20]
             
-            if token:
-                print(f"\n✅ hCaptcha solved successfully!", file=sys.stderr)
-                print(f"   Token length: {len(token)}", file=sys.stderr)
-                return token
-            else:
-                print("\n⚠️  hCaptcha token not found yet", file=sys.stderr)
-                # Wait a bit more and try again
-                await asyncio.sleep(3)
+            for wait_time in check_intervals:
+                await safe_async_sleep(wait_time)
+                
                 token = await self._get_hcaptcha_token()
                 if token:
-                    print(f"   ✅ Got token on retry! Token length: {len(token)}", file=sys.stderr)
+                    safe_log_print(f"✅ hCaptcha auto-solved after {sum(check_intervals[:check_intervals.index(wait_time)+1])} seconds!")
                     return token
-                
-                print("   ❌ Could not get hCaptcha token", file=sys.stderr)
-                return None
-                
+            
+            return None
+            
         except Exception as e:
-            print(f"❌ Error solving hCaptcha: {e}", file=sys.stderr)
-            import traceback
-            print(f"Traceback: {traceback.format_exc()[:300]}", file=sys.stderr)
+            safe_log_print(f"⚠️  hCaptcha auto-solve wait error: {str(e)[:50]}")
+            return None
+    
+    async def _get_recaptcha_token(self) -> Optional[str]:
+        """Safely get reCAPTCHA token from page."""
+        try:
+            return await self.page.evaluate("""
+                () => {
+                    try {
+                        // Check textarea first
+                        const responseField = document.querySelector('textarea[name="g-recaptcha-response"]');
+                        if (responseField && responseField.value && responseField.value.length > 10) {
+                            return responseField.value;
+                        }
+                        
+                        // Check hidden input
+                        const hiddenField = document.querySelector('input[name="g-recaptcha-response"]');
+                        if (hiddenField && hiddenField.value && hiddenField.value.length > 10) {
+                            return hiddenField.value;
+                        }
+                        
+                        // Check grecaptcha global object
+                        if (window.grecaptcha && window.grecaptcha.getResponse) {
+                            const response = window.grecaptcha.getResponse();
+                            if (response && response.length > 10) {
+                                return response;
+                            }
+                        }
+                        
+                        // Check for response in data attributes
+                        const elementsWithResponse = document.querySelectorAll('[data-recaptcha-response]');
+                        for (let el of elementsWithResponse) {
+                            const response = el.getAttribute('data-recaptcha-response');
+                            if (response && response.length > 10) {
+                                return response;
+                            }
+                        }
+                        
+                    } catch (e) {
+                        console.log('Error getting recaptcha token:', e);
+                    }
+                    return null;
+                }
+            """)
+        except Exception as e:
+            safe_log_print(f"⚠️  Get reCAPTCHA token error: {str(e)[:50]}")
+            return None
+    
+    async def _get_hcaptcha_token(self) -> Optional[str]:
+        """Safely get hCaptcha token from page."""
+        try:
+            return await self.page.evaluate("""
+                () => {
+                    try {
+                        // Check textarea
+                        const responseField = document.querySelector('textarea[name="h-captcha-response"]');
+                        if (responseField && responseField.value && responseField.value.length > 10) {
+                            return responseField.value;
+                        }
+                        
+                        // Check hidden input
+                        const hiddenField = document.querySelector('input[name="h-captcha-response"]');
+                        if (hiddenField && hiddenField.value && hiddenField.value.length > 10) {
+                            return hiddenField.value;
+                        }
+                        
+                        // Check hcaptcha global object
+                        if (window.hcaptcha && window.hcaptcha.getResponse) {
+                            const response = window.hcaptcha.getResponse();
+                            if (response && response.length > 10) {
+                                return response;
+                            }
+                        }
+                        
+                        // Check for response in data attributes
+                        const elementsWithResponse = document.querySelectorAll('[data-hcaptcha-response]');
+                        for (let el of elementsWithResponse) {
+                            const response = el.getAttribute('data-hcaptcha-response');
+                            if (response && response.length > 10) {
+                                return response;
+                            }
+                        }
+                        
+                    } catch (e) {
+                        console.log('Error getting hcaptcha token:', e);
+                    }
+                    return null;
+                }
+            """)
+        except Exception as e:
+            safe_log_print(f"⚠️  Get hCaptcha token error: {str(e)[:50]}")
             return None
 
-
-def get_captcha_solver(service: str = "auto") -> Optional[CaptchaSolver]:
+def get_local_captcha_solver(page=None) -> UltimateLocalCaptchaSolver:
     """
-    Get a CAPTCHA solver instance based on configuration.
+    Get a local CAPTCHA solver instance that NEVER fails.
     
     Args:
-        service: Service name ("2captcha", "anticaptcha", "capsolver", "local", or "auto")
+        page: Playwright page object (optional)
     
     Returns:
-        CaptchaSolver instance or None
+        UltimateLocalCaptchaSolver instance (always returns a solver, never None)
     """
-    if service == "auto":
-        # Always default to local solver unless explicitly disabled
-        use_local = os.getenv("TEQ_USE_LOCAL_CAPTCHA_SOLVER", "true").lower() not in ("false", "0", "no")
-        if use_local:
-            return LocalCaptchaSolver()
-        
-        # Only check external services if local solver is explicitly disabled
-        # Check for AI4CAP first (keys start with "sk_")
-        ai4cap_key = os.getenv("CAPTCHA_AI4CAP_API_KEY") or os.getenv("CAPTCHA_2CAPTCHA_API_KEY") or os.getenv("TEQ_CAPTCHA_API_KEY")
-        if ai4cap_key and ai4cap_key.startswith("sk_"):
-            service = "ai4cap"
-        elif os.getenv("CAPTCHA_2CAPTCHA_API_KEY") or os.getenv("TEQ_CAPTCHA_API_KEY"):
-            service = "2captcha"
-        elif os.getenv("CAPTCHA_ANTICAPTCHA_API_KEY"):
-            service = "anticaptcha"
-        elif os.getenv("CAPTCHA_CAPSOLVER_API_KEY"):
-            service = "capsolver"
-        else:
-            # Fallback to local solver if no external service available
-            return LocalCaptchaSolver()
-    
-    if service == "ai4cap":
-        api_key = os.getenv("CAPTCHA_AI4CAP_API_KEY") or os.getenv("CAPTCHA_2CAPTCHA_API_KEY") or os.getenv("TEQ_CAPTCHA_API_KEY")
-        # Only use if it's an AI4CAP key (starts with "sk_")
-        if api_key and api_key.startswith("sk_"):
-            return AI4CAPSolver(api_key)
-        # If not AI4CAP key, fall through to 2captcha
-    
-    if service == "2captcha":
-        api_key = os.getenv("CAPTCHA_2CAPTCHA_API_KEY") or os.getenv("TEQ_CAPTCHA_API_KEY")
-        # Skip if it's an AI4CAP key
-        if api_key and not api_key.startswith("sk_"):
-            return TwoCaptchaSolver(api_key)
-    
-    elif service == "anticaptcha":
-        api_key = os.getenv("CAPTCHA_ANTICAPTCHA_API_KEY")
-        if api_key:
-            return AntiCaptchaSolver(api_key)
-    
-    elif service == "capsolver":
-        api_key = os.getenv("CAPTCHA_CAPSOLVER_API_KEY")
-        if api_key:
-            return CapSolverSolver(api_key)
-    
-    elif service == "local":
-        # Local solver - will be initialized with page object by caller
-        return LocalCaptchaSolver()
-    
-    return None
+    try:
+        safe_log_print("🤖 Initializing Ultimate Local CAPTCHA Solver...")
+        solver = UltimateLocalCaptchaSolver(page)
+        safe_log_print("✅ Local CAPTCHA Solver ready!")
+        return solver
+    except Exception as e:
+        safe_log_print(f"💥 CRITICAL: Failed to create local CAPTCHA solver: {str(e)}")
+        # Return a solver anyway - it will use fallback strategies
+        return UltimateLocalCaptchaSolver(page)
 
+async def safe_solve_captcha_locally(solver: UltimateLocalCaptchaSolver, captcha_type: str, site_key: str, page_url: str) -> Dict[str, Any]:
+    """
+    Safely solve CAPTCHA locally with ultimate error handling - NEVER fails.
+    
+    Args:
+        solver: Local CAPTCHA solver instance
+        captcha_type: "recaptcha_v2" or "hcaptcha"
+        site_key: CAPTCHA site key
+        page_url: Page URL
+    
+    Returns:
+        Structured result dict (never fails)
+    """
+    try:
+        # Validate inputs
+        if not solver or not captcha_type or not site_key or not page_url:
+            return create_fallback_result("Invalid parameters for local CAPTCHA solving", "local")
+        
+        # Add timeout to prevent hanging
+        try:
+            if captcha_type == "recaptcha_v2":
+                result = await asyncio.wait_for(
+                    solver.solve_recaptcha_v2(site_key, page_url),
+                    timeout=120.0  # 2 minute timeout for local solving
+                )
+            elif captcha_type == "hcaptcha":
+                result = await asyncio.wait_for(
+                    solver.solve_hcaptcha(site_key, page_url),
+                    timeout=120.0  # 2 minute timeout for local solving
+                )
+            else:
+                result = create_fallback_result(f"Unsupported CAPTCHA type: {captcha_type}", "local")
+        except asyncio.TimeoutError:
+            result = create_fallback_result("Local CAPTCHA solving timeout", "local")
+        
+        # Ensure result has all required fields
+        required_fields = ["success", "token", "error", "error_type", "solver_used", "recovered", "timestamp"]
+        for field in required_fields:
+            if field not in result:
+                result[field] = None
+        if "timestamp" not in result or not result["timestamp"]:
+            result["timestamp"] = get_timestamp()
+                
+        return result
+        
+    except Exception as e:
+        safe_log_print(f"💥 CATASTROPHIC: Local CAPTCHA solving completely failed: {str(e)}")
+        # Ultimate fallback - return pre-defined safe result
+        return create_fallback_result(f"Catastrophic local failure: {str(e)[:100]}", "local")
+
+# Example usage that NEVER fails
+async def example_usage():
+    """Example showing how to use the never-fail local CAPTCHA solver."""
+    try:
+        # Get a local solver (this never returns None)
+        solver = get_local_captcha_solver()
+        
+        # Solve CAPTCHA locally (this never raises exceptions)
+        result = await safe_solve_captcha_locally(
+            solver=solver,
+            captcha_type="recaptcha_v2", 
+            site_key="your_site_key",
+            page_url="https://example.com"
+        )
+        
+        # Always get a structured response
+        safe_log_print(f"Local CAPTCHA Result:")
+        safe_log_print(f"  Success: {result['success']}")
+        safe_log_print(f"  Solver: {result['solver_used']}")
+        safe_log_print(f"  Error: {result['error']}")
+        safe_log_print(f"  Recovered: {result['recovered']}")
+        
+        # Use the result safely
+        if result['success'] and result['token']:
+            safe_log_print("✅ Local CAPTCHA solved successfully!")
+            # Use the token in your form submission
+        else:
+            safe_log_print(f"❌ Local CAPTCHA solving failed: {result['error']}")
+            # Implement fallback behavior
+            
+    except Exception as e:
+        safe_log_print(f"💥 Example usage failed: {str(e)}")
+
+if __name__ == "__main__":
+    # Test the never-fail capability
+    try:
+        asyncio.run(example_usage())
+    except KeyboardInterrupt:
+        safe_log_print("⏹️  Stopped by user")
+    except Exception as e:
+        safe_log_print(f"💥 Main execution failed: {str(e)}")

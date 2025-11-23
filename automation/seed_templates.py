@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Seed templates to the database via the Next.js API.
 """
 
 import json
 import sys
+import os
 from pathlib import Path
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import requests
 
-API_BASE_URL = "https://teqsmartsubmit.xcelanceweb.com/api/templates"
+API_BASE_URL = "http://localhost:3000/api/templates"
 
 # Universal template that works with auto-detection for all domains
 UNIVERSAL_TEMPLATE = {
