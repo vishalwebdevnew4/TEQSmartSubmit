@@ -233,34 +233,29 @@ export async function POST(req: NextRequest) {
         let processStartTime = Date.now();
         let hasReceivedAnyOutput = false;
 
-        python.stdout.on("data", (chunk) => {
+        // Handle stdout
+        python.stdout.on("data", async (chunk) => {
           stdout += chunk;
           hasReceivedAnyOutput = true;
         });
 
+        // Handle stderr - update database immediately for EVERY chunk (no delay)
         python.stderr.on("data", async (chunk) => {
           stderr += chunk;
           hasReceivedAnyOutput = true;
           
-          // Update database immediately with stderr logs (no delay for first chunk)
-          const now = Date.now();
-          const timeSinceStart = now - processStartTime;
-          const shouldUpdate = (now - lastLogUpdate > LOG_UPDATE_INTERVAL) || (timeSinceStart < 5000 && stderr.length < 1000);
-          
-          if (shouldUpdate) {
-            lastLogUpdate = now;
-            try {
-              // Store complete stderr logs (no truncation) for real-time viewing
-              await prisma.submissionLog.update({
-                where: { id: submission.id },
-                data: {
-                  message: stderr || "Automation in progress...",
-                },
-              });
-            } catch (updateError) {
-              // Ignore update errors to avoid breaking the main flow
-              console.error("Failed to update log:", updateError);
-            }
+          // Update database immediately for EVERY chunk
+          try {
+            await prisma.submissionLog.update({
+              where: { id: submission.id },
+              data: {
+                message: stderr || "Automation in progress...",
+              },
+            });
+            lastLogUpdate = Date.now();
+          } catch (updateError) {
+            // Ignore update errors to avoid breaking the main flow
+            console.error("Failed to update log:", updateError);
           }
         });
 

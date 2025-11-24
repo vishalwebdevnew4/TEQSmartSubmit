@@ -9,34 +9,67 @@ from __future__ import annotations
 
 # CRITICAL: Print to stderr immediately so route.ts can capture it
 import sys
-# Force unbuffered output
-sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
-sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+import os
 
+# Force unbuffered output - multiple methods for maximum compatibility
+os.environ['PYTHONUNBUFFERED'] = '1'
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(line_buffering=True)
+    except:
+        pass
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except:
+        pass
+
+# Write startup message using multiple methods to ensure it gets through
 try:
-    # Print startup message immediately
+    # Method 1: Direct write with flush
     sys.stderr.write("=" * 80 + "\n")
     sys.stderr.write("🚀 PYTHON SCRIPT STARTING\n")
     sys.stderr.write("=" * 80 + "\n")
     sys.stderr.flush()
     
+    # Method 2: Also try print with flush
+    print("=" * 80, file=sys.stderr, flush=True)
+    print("🚀 PYTHON SCRIPT STARTING", file=sys.stderr, flush=True)
+    print("=" * 80, file=sys.stderr, flush=True)
+    
     sys.stderr.write(f"Python version: {sys.version}\n")
     sys.stderr.flush()
+    print(f"Python version: {sys.version}", file=sys.stderr, flush=True)
     
     try:
-        sys.stderr.write(f"Script path: {__file__}\n")
+        script_path = __file__
+        sys.stderr.write(f"Script path: {script_path}\n")
+        sys.stderr.flush()
+        print(f"Script path: {script_path}", file=sys.stderr, flush=True)
     except:
         sys.stderr.write("Script path: (unknown)\n")
-    sys.stderr.flush()
+        sys.stderr.flush()
     
     sys.stderr.write("\n")
     sys.stderr.write("🔄 Starting imports...\n")
     sys.stderr.flush()
+    print("\n🔄 Starting imports...", file=sys.stderr, flush=True)
+    
+    # Write to file as backup
+    try:
+        with open('/tmp/python_script_started.txt', 'w') as f:
+            f.write(f"Script started at {__import__('time').time()}\n")
+            f.write(f"Path: {__file__}\n")
+    except:
+        pass
+        
 except Exception as e:
     # Last resort - write to a file if stderr fails
     try:
         with open('/tmp/python_startup_error.txt', 'w') as f:
             f.write(f"Failed to print to stderr: {e}\n")
+            import traceback
+            f.write(traceback.format_exc())
     except:
         pass
 
