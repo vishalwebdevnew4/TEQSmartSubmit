@@ -7,91 +7,124 @@ Designed to NEVER fail catastrophically and ALWAYS return valid JSON.
 
 from __future__ import annotations
 
-# CRITICAL: Print to stderr immediately so route.ts can capture it
+# CRITICAL: Write to file FIRST as heartbeat, then try stderr
 import sys
 import os
+import time
 
-# Force unbuffered output - multiple methods for maximum compatibility
+# Force unbuffered output
 os.environ['PYTHONUNBUFFERED'] = '1'
-if hasattr(sys.stderr, 'reconfigure'):
-    try:
-        sys.stderr.reconfigure(line_buffering=True)
-    except:
-        pass
-if hasattr(sys.stdout, 'reconfigure'):
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except:
-        pass
 
-# Write startup message using multiple methods to ensure it gets through
+# HEARTBEAT: Write to file immediately to confirm script is running
 try:
-    # Method 1: Direct write with flush
-    sys.stderr.write("=" * 80 + "\n")
-    sys.stderr.write("🚀 PYTHON SCRIPT STARTING\n")
-    sys.stderr.write("=" * 80 + "\n")
+    heartbeat_file = f'/tmp/python_script_heartbeat_{os.getpid()}.txt'
+    with open(heartbeat_file, 'w') as f:
+        f.write(f"Script started at {time.time()}\n")
+        f.write(f"PID: {os.getpid()}\n")
+        try:
+            f.write(f"Path: {__file__}\n")
+        except:
+            f.write("Path: unknown\n")
+        f.write(f"Python: {sys.version}\n")
+        f.flush()
+        os.fsync(f.fileno())  # Force write to disk
+except Exception as e:
+    # Even if file write fails, continue
+    pass
+
+# Now try to write to stderr
+try:
+    # Force line buffering
+    if hasattr(sys.stderr, 'reconfigure'):
+        try:
+            sys.stderr.reconfigure(line_buffering=True)
+        except:
+            pass
+    
+    # Write startup message - use multiple methods
+    msg1 = "=" * 80 + "\n"
+    msg2 = "🚀 PYTHON SCRIPT STARTING\n"
+    msg3 = "=" * 80 + "\n"
+    
+    sys.stderr.write(msg1)
+    sys.stderr.flush()
+    sys.stderr.write(msg2)
+    sys.stderr.flush()
+    sys.stderr.write(msg3)
     sys.stderr.flush()
     
-    # Method 2: Also try print with flush
+    # Also use print
     print("=" * 80, file=sys.stderr, flush=True)
     print("🚀 PYTHON SCRIPT STARTING", file=sys.stderr, flush=True)
     print("=" * 80, file=sys.stderr, flush=True)
     
     sys.stderr.write(f"Python version: {sys.version}\n")
     sys.stderr.flush()
-    print(f"Python version: {sys.version}", file=sys.stderr, flush=True)
     
     try:
         script_path = __file__
         sys.stderr.write(f"Script path: {script_path}\n")
         sys.stderr.flush()
-        print(f"Script path: {script_path}", file=sys.stderr, flush=True)
     except:
         sys.stderr.write("Script path: (unknown)\n")
         sys.stderr.flush()
     
-    sys.stderr.write("\n")
-    sys.stderr.write("🔄 Starting imports...\n")
+    sys.stderr.write("\n🔄 Starting imports...\n")
     sys.stderr.flush()
-    print("\n🔄 Starting imports...", file=sys.stderr, flush=True)
     
-    # Write to file as backup
+    # Update heartbeat file
     try:
-        with open('/tmp/python_script_started.txt', 'w') as f:
-            f.write(f"Script started at {__import__('time').time()}\n")
-            f.write(f"Path: {__file__}\n")
+        with open(heartbeat_file, 'a') as f:
+            f.write("Startup messages sent to stderr\n")
+            f.flush()
+            os.fsync(f.fileno())
     except:
         pass
         
 except Exception as e:
-    # Last resort - write to a file if stderr fails
+    # Write error to file
     try:
         with open('/tmp/python_startup_error.txt', 'w') as f:
             f.write(f"Failed to print to stderr: {e}\n")
             import traceback
             f.write(traceback.format_exc())
+            f.flush()
+            os.fsync(f.fileno())
     except:
         pass
 
+# Update heartbeat after each import
 try:
     import argparse
     sys.stderr.write("✅ argparse imported\n")
     sys.stderr.flush()
+    try:
+        with open(heartbeat_file, 'a') as f:
+            f.write("argparse imported\n")
+            f.flush()
+    except:
+        pass
+    
     import asyncio
     sys.stderr.write("✅ asyncio imported\n")
     sys.stderr.flush()
+    
     import json
     sys.stderr.write("✅ json imported\n")
     sys.stderr.flush()
+    
     import os
     sys.stderr.write("✅ os imported\n")
     sys.stderr.flush()
+    
     import time
     sys.stderr.write("✅ time imported\n")
     sys.stderr.flush()
+    
     import traceback
     sys.stderr.write("✅ traceback imported\n")
     sys.stderr.flush()
+    
     import random
     import base64
     import hashlib
@@ -100,18 +133,45 @@ try:
     from pathlib import Path
     from typing import Any, Dict, List, Optional, Union
     from urllib.parse import urlparse
+    
     sys.stderr.write("✅ All basic imports successful\n")
     sys.stderr.flush()
+    
+    # Final heartbeat update
+    try:
+        with open(heartbeat_file, 'a') as f:
+            f.write("All imports successful\n")
+            f.write(f"Ready to start automation\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except:
+        pass
+        
 except ImportError as e:
-    sys.stderr.write(f"❌ IMPORT ERROR: {str(e)}\n")
+    error_msg = f"❌ IMPORT ERROR: {str(e)}\n"
+    sys.stderr.write(error_msg)
     sys.stderr.flush()
+    try:
+        with open('/tmp/python_import_error.txt', 'w') as f:
+            f.write(error_msg)
+            import traceback
+            f.write(traceback.format_exc())
+    except:
+        pass
     sys.exit(1)
 except Exception as e:
-    sys.stderr.write(f"❌ ERROR during imports: {str(e)}\n")
+    error_msg = f"❌ ERROR during imports: {str(e)}\n"
+    sys.stderr.write(error_msg)
     sys.stderr.flush()
     import traceback
     traceback.print_exc(file=sys.stderr)
     sys.stderr.flush()
+    try:
+        with open('/tmp/python_import_error.txt', 'w') as f:
+            f.write(error_msg)
+            f.write(traceback.format_exc())
+    except:
+        pass
     sys.exit(1)
 
 # ULTRA-RESILIENT ENVIRONMENT SETUP
