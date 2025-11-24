@@ -87,33 +87,68 @@ def test_xvfb_start():
         print("❌ Xvfb not found - cannot test")
         return None, None
     
-    # Try to start Xvfb on display :99
-    display = ":99"
-    print(f"🔄 Attempting to start Xvfb on {display}...")
+    # Try multiple display numbers (99-110)
+    for display_num in range(99, 111):
+        display = f":{display_num}"
+        print(f"🔄 Attempting to start Xvfb on {display}...")
+        
+        # Check if lock file exists and try to clean it up
+        lock_file = f"/tmp/.X{display_num}-lock"
+        if os.path.exists(lock_file):
+            print(f"   ⚠️  Lock file exists: {lock_file}")
+            # Check if process is actually running
+            try:
+                # Try to read the PID from lock file
+                with open(lock_file, 'r') as f:
+                    lock_content = f.read()
+                # Try to kill the process if it exists
+                try:
+                    import signal
+                    pid = int(lock_content.strip().split()[0])
+                    os.kill(pid, 0)  # Check if process exists
+                    print(f"   ℹ️  Process {pid} is running - trying next display")
+                    continue
+                except (ValueError, ProcessLookupError, OSError):
+                    # Process doesn't exist, remove lock file
+                    print(f"   🗑️  Removing stale lock file...")
+                    os.remove(lock_file)
+            except:
+                # Can't read lock file, try to remove it anyway
+                try:
+                    os.remove(lock_file)
+                    print(f"   🗑️  Removed lock file")
+                except:
+                    pass
+        
+        try:
+            process = subprocess.Popen(
+                [xvfb_path, display, '-screen', '0', '1280x720x24', '-ac', '+extension', 'GLX'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid
+            )
+            
+            # Wait a moment
+            time.sleep(1)
+            
+            if process.poll() is None:  # Still running
+                print(f"✅ Xvfb started successfully on {display}")
+                print(f"   Process PID: {process.pid}")
+                return process, display
+            else:
+                stderr = process.stderr.read().decode() if process.stderr else ""
+                if "already active" in stderr or "already in use" in stderr:
+                    print(f"   ⚠️  Display {display} already in use, trying next...")
+                    continue
+                else:
+                    print(f"   ⚠️  Xvfb failed: {stderr[:100]}")
+                    continue
+        except Exception as e:
+            print(f"   ⚠️  Error starting Xvfb on {display}: {str(e)[:50]}")
+            continue
     
-    try:
-        process = subprocess.Popen(
-            [xvfb_path, display, '-screen', '0', '1280x720x24', '-ac', '+extension', 'GLX'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            preexec_fn=os.setsid
-        )
-        
-        # Wait a moment
-        time.sleep(1)
-        
-        if process.poll() is None:  # Still running
-            print(f"✅ Xvfb started successfully on {display}")
-            print(f"   Process PID: {process.pid}")
-            return process, display
-        else:
-            stderr = process.stderr.read().decode() if process.stderr else ""
-            print(f"❌ Xvfb failed to start")
-            print(f"   Error: {stderr[:200]}")
-            return None, None
-    except Exception as e:
-        print(f"❌ Error starting Xvfb: {str(e)}")
-        return None, None
+    print("❌ Could not start Xvfb on any display (tried 99-110)")
+    return None, None
 
 def test_display_environment(display):
     """Test setting DISPLAY environment variable."""
