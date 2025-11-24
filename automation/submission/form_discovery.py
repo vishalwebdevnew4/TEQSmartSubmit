@@ -767,6 +767,7 @@ class UltimatePlaywrightManager:
             
             # Try to launch browser with multiple strategies
             browsers_to_try = ['chromium', 'firefox']
+            browser_errors = []
             for browser_type in browsers_to_try:
                 try:
                     browser_launcher = getattr(self.playwright, browser_type).launch
@@ -778,11 +779,51 @@ class UltimatePlaywrightManager:
                     ultra_safe_log_print(f"✅ Browser launched: {browser_type}")
                     break
                 except Exception as e:
-                    ultra_safe_log_print(f"⚠️  Failed to launch {browser_type}: {str(e)[:50]}")
+                    error_msg = str(e)
+                    browser_errors.append(f"{browser_type}: {error_msg}")
+                    ultra_safe_log_print(f"⚠️  Failed to launch {browser_type}: {error_msg[:100]}")
                     continue
             
             if not self.browser:
-                ultra_safe_log_print("❌ All browser launch attempts failed")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("=" * 80)
+                ultra_safe_log_print("❌ ALL BROWSER LAUNCH ATTEMPTS FAILED")
+                ultra_safe_log_print("=" * 80)
+                ultra_safe_log_print("")
+                ultra_safe_log_print("📋 Error Details:")
+                for err in browser_errors:
+                    ultra_safe_log_print(f"   • {err}")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("🔧 SOLUTION: Install Playwright browsers on your server")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("Run these commands on your remote server:")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("   # Install Playwright Python package (if not already installed)")
+                ultra_safe_log_print("   pip install playwright")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("   # Install browser binaries (REQUIRED)")
+                ultra_safe_log_print("   playwright install chromium")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("   # Or install all browsers")
+                ultra_safe_log_print("   playwright install")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("   # If using system Python, you might need:")
+                ultra_safe_log_print("   python3 -m playwright install chromium")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("   # For headless mode on Linux servers, also install dependencies:")
+                ultra_safe_log_print("   # Ubuntu/Debian:")
+                ultra_safe_log_print("   sudo apt-get update")
+                ultra_safe_log_print("   sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 \\")
+                ultra_safe_log_print("     libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \\")
+                ultra_safe_log_print("     libxfixes3 libxrandr2 libgbm1 libasound2")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("   # CentOS/RHEL:")
+                ultra_safe_log_print("   sudo yum install -y nss atk at-spi2-atk cups-libs \\")
+                ultra_safe_log_print("     libdrm libxkbcommon libXcomposite libXdamage libXfixes \\")
+                ultra_safe_log_print("     libXrandr mesa-libgbm alsa-lib")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("=" * 80)
+                ultra_safe_log_print("")
                 return False
             
             # Create context
