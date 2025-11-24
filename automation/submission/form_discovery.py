@@ -9,27 +9,55 @@ from __future__ import annotations
 
 # CRITICAL: Print to stderr immediately so route.ts can capture it
 import sys
-print("=" * 80, file=sys.stderr, flush=True)
-print("🚀 PYTHON SCRIPT STARTING", file=sys.stderr, flush=True)
-print("=" * 80, file=sys.stderr, flush=True)
-print(f"Python version: {sys.version}", file=sys.stderr, flush=True)
-print(f"Script path: {__file__}", file=sys.stderr, flush=True)
-print("", file=sys.stderr, flush=True)
+try:
+    print("=" * 80, file=sys.stderr, flush=True)
+    print("🚀 PYTHON SCRIPT STARTING", file=sys.stderr, flush=True)
+    print("=" * 80, file=sys.stderr, flush=True)
+    print(f"Python version: {sys.version}", file=sys.stderr, flush=True)
+    try:
+        print(f"Script path: {__file__}", file=sys.stderr, flush=True)
+    except:
+        print("Script path: (unknown)", file=sys.stderr, flush=True)
+    print("", file=sys.stderr, flush=True)
+    print("🔄 Starting imports...", file=sys.stderr, flush=True)
+except Exception as e:
+    # Last resort - write to a file if stderr fails
+    try:
+        with open('/tmp/python_startup_error.txt', 'w') as f:
+            f.write(f"Failed to print to stderr: {e}\n")
+    except:
+        pass
 
-import argparse
-import asyncio
-import json
-import os
-import time
-import traceback
-import random
-import base64
-import hashlib
-import subprocess
-import signal
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urlparse
+try:
+    import argparse
+    print("✅ argparse imported", file=sys.stderr, flush=True)
+    import asyncio
+    print("✅ asyncio imported", file=sys.stderr, flush=True)
+    import json
+    print("✅ json imported", file=sys.stderr, flush=True)
+    import os
+    print("✅ os imported", file=sys.stderr, flush=True)
+    import time
+    print("✅ time imported", file=sys.stderr, flush=True)
+    import traceback
+    print("✅ traceback imported", file=sys.stderr, flush=True)
+    import random
+    import base64
+    import hashlib
+    import subprocess
+    import signal
+    from pathlib import Path
+    from typing import Any, Dict, List, Optional, Union
+    from urllib.parse import urlparse
+    print("✅ All basic imports successful", file=sys.stderr, flush=True)
+except ImportError as e:
+    print(f"❌ IMPORT ERROR: {str(e)}", file=sys.stderr, flush=True)
+    sys.exit(1)
+except Exception as e:
+    print(f"❌ ERROR during imports: {str(e)}", file=sys.stderr, flush=True)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
 
 # ULTRA-RESILIENT ENVIRONMENT SETUP
 def setup_ultra_resilient_environment():
@@ -827,8 +855,9 @@ class UltimatePlaywrightManager:
             
             ultra_safe_log_print(f"   ✅ Found Xvfb at: {xvfb_path}")
             
-            # Find available display number
-            for display_num in range(99, 200):
+            # Find available display number (reduced range for faster startup)
+            ultra_safe_log_print("   🔄 Finding available display number (trying 99-110)...")
+            for display_num in range(99, 111):  # Reduced from 200 to 111 for speed
                 display = f":{display_num}"
                 test_cmd = [xvfb_path, display, '-screen', '0', '1280x720x24', '-ac', '+extension', 'GLX']
                 try:
@@ -838,29 +867,15 @@ class UltimatePlaywrightManager:
                         stderr=subprocess.PIPE,
                         preexec_fn=os.setsid
                     )
-                    # Give it a moment to start
-                    time.sleep(2)  # Increased wait time
-                    if process.poll() is None:  # Still running
-                        # Verify display is actually working
-                        try:
-                            test_result = subprocess.run(
-                                ['xdpyinfo', '-display', display],
-                                capture_output=True,
-                                timeout=3
-                            )
-                            if test_result.returncode == 0:
-                                os.environ['DISPLAY'] = display
-                                self.xvfb_process = process
-                                ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
-                                ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
-                                return True
-                        except:
-                            # xdpyinfo not available, but process is running, assume it's working
-                            os.environ['DISPLAY'] = display
-                            self.xvfb_process = process
-                            ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
-                            ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
-                            return True
+                    # Minimal wait - just check if process started
+                    time.sleep(0.2)  # Very short wait
+                    if process.poll() is None:  # Still running = success
+                        # Process is running, set DISPLAY immediately
+                        os.environ['DISPLAY'] = display
+                        self.xvfb_process = process
+                        ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
+                        ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
+                        return True
                     else:
                         # Process died, try next display
                         stderr = process.stderr.read().decode() if process.stderr else ""
@@ -965,6 +980,10 @@ class UltimatePlaywrightManager:
                 ultra_safe_log_print("📋 Error Details:")
                 for err in browser_errors:
                     ultra_safe_log_print(f"   • {err}")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("🔍 Current Environment:")
+                ultra_safe_log_print(f"   DISPLAY: {os.environ.get('DISPLAY', 'NOT SET')}")
+                ultra_safe_log_print(f"   Xvfb process: {'Running' if self.xvfb_process and self.xvfb_process.poll() is None else 'Not running'}")
                 ultra_safe_log_print("")
                 ultra_safe_log_print("🔧 SOLUTION: Install Playwright browsers on your server")
                 ultra_safe_log_print("")
@@ -3468,7 +3487,25 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         playwright_ready = await playwright_manager.start()
         
         if not playwright_ready:
-            error_msg = "Browser initialization failed"
+            # Get detailed error information
+            current_display = os.environ.get('DISPLAY', 'NOT SET')
+            xvfb_available = subprocess.run(['which', 'Xvfb'], capture_output=True).returncode == 0
+            error_details = []
+            error_details.append("❌ Browser initialization failed")
+            error_details.append("")
+            error_details.append("Diagnostic Information:")
+            error_details.append(f"  DISPLAY: {current_display}")
+            error_details.append(f"  Xvfb available: {'Yes' if xvfb_available else 'No'}")
+            error_details.append("")
+            error_details.append("Common causes:")
+            error_details.append("  1. Missing DISPLAY environment variable")
+            error_details.append("  2. Xvfb not installed or not working")
+            error_details.append("  3. Browser binaries not installed")
+            error_details.append("  4. System dependencies missing")
+            error_details.append("")
+            error_details.append("Check the logs above for specific error messages.")
+            
+            error_msg = "\n".join(error_details)
             ultra_safe_log_print(f"❌ {error_msg}")
             result.update({
                 "status": "error",
