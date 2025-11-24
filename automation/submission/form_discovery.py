@@ -818,11 +818,10 @@ class UltimatePlaywrightManager:
             
             if xvfb_run_path:
                 ultra_safe_log_print(f"   ✅ Found xvfb-run wrapper at: {xvfb_run_path}")
-                ultra_safe_log_print("   ℹ️  Note: xvfb-run will be used automatically by Playwright")
-                ultra_safe_log_print("   ℹ️  Browser will run in visible mode via virtual display")
-                # xvfb-run will handle DISPLAY automatically, but we can set a hint
-                # Playwright should detect and use xvfb-run if needed
-                return True
+                ultra_safe_log_print("   ℹ️  Note: xvfb-run is available, but we'll start Xvfb directly")
+                ultra_safe_log_print("   ℹ️  This ensures DISPLAY is set before Playwright starts")
+                # Continue to start Xvfb directly - don't rely on xvfb-run wrapper
+                # because Playwright needs DISPLAY set in the environment
             
             # Try to start Xvfb directly (requires Xvfb binary)
             ultra_safe_log_print("🔄 xvfb-run not found - trying to start Xvfb directly...")
@@ -932,7 +931,7 @@ class UltimatePlaywrightManager:
                     ultra_safe_log_print(f"   ⚠️  Failed to start Xvfb on {display}: {str(e)[:50]}")
                     continue
             
-            ultra_safe_log_print("   ❌ Could not find available display number (tried 99-199)")
+            ultra_safe_log_print("   ❌ Could not find available display number (tried 99-110)")
             return False
             
         except Exception as e:
