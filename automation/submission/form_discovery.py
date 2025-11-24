@@ -860,6 +860,33 @@ class UltimatePlaywrightManager:
             for display_num in range(99, 111):  # Reduced from 200 to 111 for speed
                 display = f":{display_num}"
                 ultra_safe_log_print(f"   🔄 Attempting to start Xvfb on {display}...")
+                
+                # Check if lock file exists and clean it up if stale
+                lock_file = f"/tmp/.X{display_num}-lock"
+                if os.path.exists(lock_file):
+                    ultra_safe_log_print(f"   ⚠️  Lock file exists: {lock_file}")
+                    try:
+                        # Try to read PID from lock file
+                        with open(lock_file, 'r') as f:
+                            lock_content = f.read().strip()
+                        # Check if process is actually running
+                        try:
+                            pid = int(lock_content.split()[0])
+                            os.kill(pid, 0)  # Check if process exists (doesn't kill, just checks)
+                            ultra_safe_log_print(f"   ℹ️  Process {pid} is running - trying next display")
+                            continue
+                        except (ValueError, ProcessLookupError, OSError):
+                            # Process doesn't exist, remove stale lock file
+                            ultra_safe_log_print(f"   🗑️  Removing stale lock file...")
+                            os.remove(lock_file)
+                    except Exception:
+                        # Can't read lock file, try to remove it anyway
+                        try:
+                            os.remove(lock_file)
+                            ultra_safe_log_print(f"   🗑️  Removed lock file")
+                        except:
+                            pass
+                
                 test_cmd = [xvfb_path, display, '-screen', '0', '1280x720x24', '-ac', '+extension', 'GLX']
                 try:
                     process = subprocess.Popen(
@@ -892,7 +919,10 @@ class UltimatePlaywrightManager:
                         ultra_safe_log_print(f"   ⚠️  Xvfb on {display} exited immediately (code: {exit_code})")
                         if stderr_output:
                             ultra_safe_log_print(f"      Error: {stderr_output[:100]}")
-                        # Try next display (whether already in use or other error)
+                        # Check if display is already in use
+                        if "already active" in stderr_output.lower() or "already in use" in stderr_output.lower():
+                            ultra_safe_log_print(f"   ℹ️  Display {display} already in use, trying next...")
+                        # Try next display
                         continue
                 except FileNotFoundError:
                     # Xvfb command not found - shouldn't happen if we checked earlier
