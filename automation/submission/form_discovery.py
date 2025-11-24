@@ -859,6 +859,7 @@ class UltimatePlaywrightManager:
             ultra_safe_log_print("   🔄 Finding available display number (trying 99-110)...")
             for display_num in range(99, 111):  # Reduced from 200 to 111 for speed
                 display = f":{display_num}"
+                ultra_safe_log_print(f"   🔄 Attempting to start Xvfb on {display}...")
                 test_cmd = [xvfb_path, display, '-screen', '0', '1280x720x24', '-ac', '+extension', 'GLX']
                 try:
                     process = subprocess.Popen(
@@ -867,28 +868,36 @@ class UltimatePlaywrightManager:
                         stderr=subprocess.PIPE,
                         preexec_fn=os.setsid
                     )
-                    # Minimal wait - just check if process started
-                    time.sleep(0.2)  # Very short wait
+                    # Wait a bit longer to ensure process starts
+                    time.sleep(0.5)  # Increased from 0.2 to 0.5
+                    
+                    # Check if process is still running
                     if process.poll() is None:  # Still running = success
                         # Process is running, set DISPLAY immediately
                         os.environ['DISPLAY'] = display
                         self.xvfb_process = process
                         ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
                         ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
+                        # Double-check DISPLAY is set
+                        verify_display = os.environ.get('DISPLAY')
+                        if verify_display == display:
+                            ultra_safe_log_print(f"   ✅ Verified: DISPLAY environment variable set correctly")
+                        else:
+                            ultra_safe_log_print(f"   ⚠️  WARNING: DISPLAY mismatch! Expected {display}, got {verify_display}")
                         return True
                     else:
-                        # Process died, try next display
-                        stderr = process.stderr.read().decode() if process.stderr else ""
-                        if "already in use" not in stderr.lower():
-                            continue
+                        # Process died - get error message
+                        stderr_output = process.stderr.read().decode() if process.stderr else ""
+                        exit_code = process.returncode
+                        ultra_safe_log_print(f"   ⚠️  Xvfb on {display} exited immediately (code: {exit_code})")
+                        if stderr_output:
+                            ultra_safe_log_print(f"      Error: {stderr_output[:100]}")
+                        # Try next display (whether already in use or other error)
+                        continue
                 except FileNotFoundError:
-                    # xdpyinfo not found, but that's okay
-                    if process.poll() is None:
-                        os.environ['DISPLAY'] = display
-                        self.xvfb_process = process
-                        ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
-                        ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
-                        return True
+                    # Xvfb command not found - shouldn't happen if we checked earlier
+                    ultra_safe_log_print(f"   ❌ Xvfb command not found")
+                    continue
                 except Exception as e:
                     ultra_safe_log_print(f"   ⚠️  Failed to start Xvfb on {display}: {str(e)[:50]}")
                     continue
@@ -913,18 +922,39 @@ class UltimatePlaywrightManager:
                 ultra_safe_log_print("")
                 ultra_safe_log_print("🔄 No DISPLAY environment variable detected")
                 ultra_safe_log_print("   Setting up virtual display (Xvfb) for visible browser mode...")
+                ultra_safe_log_print("   🔍 Checking Xvfb availability...")
+                
+                # Verify Xvfb is actually available before trying
+                xvfb_check = subprocess.run(['which', 'Xvfb'], capture_output=True, text=True, timeout=5)
+                if xvfb_check.returncode == 0:
+                    ultra_safe_log_print(f"   ✅ Xvfb found at: {xvfb_check.stdout.strip()}")
+                else:
+                    ultra_safe_log_print("   ❌ Xvfb not found in PATH")
+                
                 display_setup_success = self._setup_virtual_display()
                 if display_setup_success:
                     new_display = os.environ.get('DISPLAY')
                     ultra_safe_log_print(f"   ✅ Virtual display setup complete: DISPLAY={new_display}")
+                    # Verify DISPLAY is actually set
+                    if new_display:
+                        ultra_safe_log_print(f"   ✅ Verified: DISPLAY environment variable is now set")
+                    else:
+                        ultra_safe_log_print("   ⚠️  WARNING: Setup returned success but DISPLAY is still not set!")
                 else:
                     ultra_safe_log_print("")
-                    ultra_safe_log_print("   ❌ Xvfb setup FAILED - browser will fail to launch!")
-                    ultra_safe_log_print("   💡 SOLUTION: Install Xvfb on your server:")
-                    ultra_safe_log_print("      sudo apt-get install xvfb")
-                    ultra_safe_log_print("      # OR")
-                    ultra_safe_log_print("      sudo yum install xorg-x11-server-Xvfb")
+                    ultra_safe_log_print("   ❌ Xvfb setup FAILED!")
+                    ultra_safe_log_print("   🔍 Debugging information:")
+                    ultra_safe_log_print(f"      Current DISPLAY: {os.environ.get('DISPLAY', 'NOT SET')}")
+                    # Try to get more info about why it failed
+                    try:
+                        test_xvfb = subprocess.run(['Xvfb', ':99', '-screen', '0', '1280x720x24', '-ac'], 
+                                                  capture_output=True, timeout=2)
+                        if test_xvfb.returncode != 0:
+                            ultra_safe_log_print(f"      Xvfb test error: {test_xvfb.stderr.decode()[:100]}")
+                    except Exception as e:
+                        ultra_safe_log_print(f"      Xvfb test exception: {str(e)[:100]}")
                     ultra_safe_log_print("")
+                    ultra_safe_log_print("   💡 SOLUTION: Check Xvfb installation and permissions")
             else:
                 ultra_safe_log_print(f"✅ DISPLAY already set: {current_display}")
             
