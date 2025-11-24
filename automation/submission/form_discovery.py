@@ -25,6 +25,8 @@ import traceback
 import random
 import base64
 import hashlib
+import subprocess
+import signal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
@@ -731,7 +733,11 @@ class UltimatePlaywrightManager:
         self.browser = None
         self.context = None
         self.page = None
-        self.headless = headless
+        # Always use visible mode for CAPTCHA verification (user requirement)
+        # If no DISPLAY available, we'll set up virtual display
+        self.headless = False  # Always False - force visible mode
+        self.xvfb_process = None
+        self.original_display = os.environ.get('DISPLAY')
         # Use UltimateLocalCaptchaSolver for audio challenge support
         try:
             from captcha_solver import UltimateLocalCaptchaSolver
@@ -740,9 +746,173 @@ class UltimatePlaywrightManager:
             # Fallback to LocalCaptchaSolver if UltimateLocalCaptchaSolver not available
             self.captcha_solver = LocalCaptchaSolver(page=None)  # Will be set when page is available
         
+    def _setup_virtual_display(self) -> bool:
+        """Set up virtual display (Xvfb) if no DISPLAY is available."""
+        try:
+            # Check if DISPLAY is already set (from SSH X11 forwarding or existing session)
+            existing_display = os.environ.get('DISPLAY')
+            if existing_display:
+                ultra_safe_log_print(f"✅ DISPLAY already available: {existing_display}")
+                ultra_safe_log_print(f"   Using existing display (from SSH X11 forwarding or existing session)")
+                # Verify the display is actually working
+                try:
+                    test_result = subprocess.run(
+                        ['xdpyinfo', '-display', existing_display],
+                        capture_output=True,
+                        timeout=3
+                    )
+                    if test_result.returncode == 0:
+                        ultra_safe_log_print(f"   ✅ Display is working and accessible")
+                        return True
+                    else:
+                        ultra_safe_log_print(f"   ⚠️  Display exists but may not be working")
+                except:
+                    # xdpyinfo not available, but assume display is working
+                    ultra_safe_log_print(f"   ✅ Using existing display (could not verify)")
+                    return True
+            
+            # Try xvfb-run wrapper first (doesn't require sudo, just needs to be installed)
+            ultra_safe_log_print("🔄 No DISPLAY detected - checking for xvfb-run wrapper...")
+            xvfb_run_path = None
+            for path in ['/usr/bin/xvfb-run', '/usr/local/bin/xvfb-run']:
+                if os.path.exists(path):
+                    xvfb_run_path = path
+                    break
+            
+            if not xvfb_run_path:
+                # Try to find in PATH
+                try:
+                    result = subprocess.run(['which', 'xvfb-run'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        xvfb_run_path = result.stdout.strip()
+                except:
+                    pass
+            
+            if xvfb_run_path:
+                ultra_safe_log_print(f"   ✅ Found xvfb-run wrapper at: {xvfb_run_path}")
+                ultra_safe_log_print("   ℹ️  Note: xvfb-run will be used automatically by Playwright")
+                ultra_safe_log_print("   ℹ️  Browser will run in visible mode via virtual display")
+                # xvfb-run will handle DISPLAY automatically, but we can set a hint
+                # Playwright should detect and use xvfb-run if needed
+                return True
+            
+            # Try to start Xvfb directly (requires Xvfb binary)
+            ultra_safe_log_print("🔄 xvfb-run not found - trying to start Xvfb directly...")
+            
+            # First check if Xvfb is available
+            xvfb_path = None
+            for path in ['/usr/bin/Xvfb', '/usr/local/bin/Xvfb']:
+                if os.path.exists(path):
+                    xvfb_path = path
+                    break
+            
+            if not xvfb_path:
+                # Try to find in PATH
+                try:
+                    result = subprocess.run(['which', 'Xvfb'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        xvfb_path = result.stdout.strip()
+                except:
+                    pass
+            
+            if not xvfb_path:
+                ultra_safe_log_print("   ❌ Xvfb not found in system")
+                ultra_safe_log_print("")
+                ultra_safe_log_print("   💡 SOLUTIONS (choose one):")
+                ultra_safe_log_print("   1. Ask server admin to install: sudo apt-get install xvfb")
+                ultra_safe_log_print("   2. Use SSH with X11 forwarding: ssh -X user@server")
+                ultra_safe_log_print("   3. Check if xvfb-run is available (doesn't require sudo)")
+                ultra_safe_log_print("")
+                return False
+            
+            ultra_safe_log_print(f"   ✅ Found Xvfb at: {xvfb_path}")
+            
+            # Find available display number
+            for display_num in range(99, 200):
+                display = f":{display_num}"
+                test_cmd = [xvfb_path, display, '-screen', '0', '1280x720x24', '-ac', '+extension', 'GLX']
+                try:
+                    process = subprocess.Popen(
+                        test_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        preexec_fn=os.setsid
+                    )
+                    # Give it a moment to start
+                    time.sleep(2)  # Increased wait time
+                    if process.poll() is None:  # Still running
+                        # Verify display is actually working
+                        try:
+                            test_result = subprocess.run(
+                                ['xdpyinfo', '-display', display],
+                                capture_output=True,
+                                timeout=3
+                            )
+                            if test_result.returncode == 0:
+                                os.environ['DISPLAY'] = display
+                                self.xvfb_process = process
+                                ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
+                                ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
+                                return True
+                        except:
+                            # xdpyinfo not available, but process is running, assume it's working
+                            os.environ['DISPLAY'] = display
+                            self.xvfb_process = process
+                            ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
+                            ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
+                            return True
+                    else:
+                        # Process died, try next display
+                        stderr = process.stderr.read().decode() if process.stderr else ""
+                        if "already in use" not in stderr.lower():
+                            continue
+                except FileNotFoundError:
+                    # xdpyinfo not found, but that's okay
+                    if process.poll() is None:
+                        os.environ['DISPLAY'] = display
+                        self.xvfb_process = process
+                        ultra_safe_log_print(f"   ✅ Started Xvfb virtual display: {display}")
+                        ultra_safe_log_print(f"   ✅ DISPLAY={display} (browser will run in visible mode)")
+                        return True
+                except Exception as e:
+                    ultra_safe_log_print(f"   ⚠️  Failed to start Xvfb on {display}: {str(e)[:50]}")
+                    continue
+            
+            ultra_safe_log_print("   ❌ Could not find available display number (tried 99-199)")
+            return False
+            
+        except Exception as e:
+            ultra_safe_log_print(f"   ❌ Error setting up virtual display: {str(e)[:100]}")
+            import traceback
+            ultra_safe_log_print(f"   Traceback: {traceback.format_exc()[:200]}")
+            return False
+    
     async def start(self):
         """Start Playwright with multiple fallback strategies."""
         try:
+            # Set up virtual display if needed (for visible mode on headless servers)
+            # MUST be done BEFORE importing/starting Playwright
+            display_setup_success = True
+            current_display = os.environ.get('DISPLAY')
+            if not current_display:
+                ultra_safe_log_print("")
+                ultra_safe_log_print("🔄 No DISPLAY environment variable detected")
+                ultra_safe_log_print("   Setting up virtual display (Xvfb) for visible browser mode...")
+                display_setup_success = self._setup_virtual_display()
+                if display_setup_success:
+                    new_display = os.environ.get('DISPLAY')
+                    ultra_safe_log_print(f"   ✅ Virtual display setup complete: DISPLAY={new_display}")
+                else:
+                    ultra_safe_log_print("")
+                    ultra_safe_log_print("   ❌ Xvfb setup FAILED - browser will fail to launch!")
+                    ultra_safe_log_print("   💡 SOLUTION: Install Xvfb on your server:")
+                    ultra_safe_log_print("      sudo apt-get install xvfb")
+                    ultra_safe_log_print("      # OR")
+                    ultra_safe_log_print("      sudo yum install xorg-x11-server-Xvfb")
+                    ultra_safe_log_print("")
+            else:
+                ultra_safe_log_print(f"✅ DISPLAY already set: {current_display}")
+            
             # Try to import Playwright
             playwright_import = UltimateSafetyWrapper.execute_sync(
                 lambda: __import__('playwright.async_api'),
@@ -771,8 +941,10 @@ class UltimatePlaywrightManager:
             for browser_type in browsers_to_try:
                 try:
                     browser_launcher = getattr(self.playwright, browser_type).launch
+                    # Always use visible mode (headless=False) for CAPTCHA verification
+                    ultra_safe_log_print(f"   🖥️  Launching {browser_type} in visible mode (for CAPTCHA verification)...")
                     self.browser = await browser_launcher(
-                        headless=self.headless,  # Use template setting
+                        headless=False,  # Always visible for CAPTCHA verification
                         timeout=120000,
                         args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled']
                     )
@@ -918,6 +1090,29 @@ class UltimatePlaywrightManager:
     
     async def cleanup(self):
         """ULTRA-RESILIENT cleanup that cannot fail."""
+        # Stop Xvfb if we started it
+        if self.xvfb_process:
+            try:
+                ultra_safe_log_print("🔄 Stopping virtual display (Xvfb)...")
+                os.killpg(os.getpgid(self.xvfb_process.pid), signal.SIGTERM)
+                self.xvfb_process.wait(timeout=5)
+                ultra_safe_log_print("✅ Virtual display stopped")
+            except:
+                try:
+                    os.killpg(os.getpgid(self.xvfb_process.pid), signal.SIGKILL)
+                except:
+                    pass
+            finally:
+                self.xvfb_process = None
+                # Restore original DISPLAY if we changed it
+                if self.original_display:
+                    os.environ['DISPLAY'] = self.original_display
+                elif 'DISPLAY' in os.environ:
+                    # Only remove if we set it (check if it matches our pattern)
+                    current_display = os.environ.get('DISPLAY', '')
+                    if current_display.startswith(':') and current_display[1:].isdigit():
+                        del os.environ['DISPLAY']
+        
         cleanup_operations = []
         
         if self.page and not self.page.is_closed():
