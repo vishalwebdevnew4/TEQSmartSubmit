@@ -11,16 +11,34 @@ from __future__ import annotations
 import sys
 import os
 import time
+from pathlib import Path
 
 # Force unbuffered output
 os.environ['PYTHONUNBUFFERED'] = '1'
 
 # HEARTBEAT: Write to file immediately to confirm script is running
+# Use custom tmp directory if available, otherwise use /tmp
 try:
-    heartbeat_file = f'/tmp/python_script_heartbeat_{os.getpid()}.txt'
+    # Try to use project-specific tmp directory first
+    project_tmp = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp')
+    if project_tmp.exists() and os.access(project_tmp, os.W_OK):
+        heartbeat_dir = project_tmp
+    else:
+        # Try to create it
+        try:
+            project_tmp.mkdir(parents=True, exist_ok=True)
+            if os.access(project_tmp, os.W_OK):
+                heartbeat_dir = project_tmp
+            else:
+                heartbeat_dir = Path('/tmp')
+        except:
+            heartbeat_dir = Path('/tmp')
+    
+    heartbeat_file = heartbeat_dir / f'python_script_heartbeat_{os.getpid()}.txt'
     with open(heartbeat_file, 'w') as f:
         f.write(f"Script started at {time.time()}\n")
         f.write(f"PID: {os.getpid()}\n")
+        f.write(f"Heartbeat location: {heartbeat_file}\n")
         try:
             f.write(f"Path: {__file__}\n")
         except:
@@ -30,7 +48,18 @@ try:
         os.fsync(f.fileno())  # Force write to disk
 except Exception as e:
     # Even if file write fails, continue
-    pass
+    # Try fallback to /tmp
+    try:
+        heartbeat_file = f'/tmp/python_script_heartbeat_{os.getpid()}.txt'
+        with open(heartbeat_file, 'w') as f:
+            f.write(f"Script started at {time.time()}\n")
+            f.write(f"PID: {os.getpid()}\n")
+            f.write(f"Fallback location: {heartbeat_file}\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except:
+        heartbeat_file = None
+        pass
 
 # Now try to write to stderr
 try:
@@ -74,22 +103,49 @@ try:
     
     # Update heartbeat file
     try:
-        with open(heartbeat_file, 'a') as f:
-            f.write("Startup messages sent to stderr\n")
-            f.flush()
-            os.fsync(f.fileno())
+        if heartbeat_file:
+            # Handle both Path objects and strings
+            if isinstance(heartbeat_file, Path):
+                if heartbeat_file.exists():
+                    with open(heartbeat_file, 'a') as f:
+                        f.write("Startup messages sent to stderr\n")
+                        f.flush()
+                        os.fsync(f.fileno())
+            else:
+                # String path
+                if os.path.exists(str(heartbeat_file)):
+                    with open(heartbeat_file, 'a') as f:
+                        f.write("Startup messages sent to stderr\n")
+                        f.flush()
+                        os.fsync(f.fileno())
     except:
         pass
         
 except Exception as e:
     # Write error to file
     try:
-        with open('/tmp/python_startup_error.txt', 'w') as f:
-            f.write(f"Failed to print to stderr: {e}\n")
-            import traceback
-            f.write(traceback.format_exc())
-            f.flush()
-            os.fsync(f.fileno())
+        # Try project tmp directory first
+        error_file = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_startup_error.txt')
+        try:
+            error_file.parent.mkdir(parents=True, exist_ok=True)
+        except:
+            pass
+        
+        if error_file.parent.exists() and os.access(error_file.parent, os.W_OK):
+            with open(error_file, 'w') as f:
+                f.write(f"Failed to print to stderr: {e}\n")
+                import traceback
+                f.write(traceback.format_exc())
+                f.flush()
+                os.fsync(f.fileno())
+        else:
+            # Fallback to /tmp
+            with open('/tmp/python_startup_error.txt', 'w') as f:
+                f.write(f"Failed to print to stderr: {e}\n")
+                import traceback
+                f.write(traceback.format_exc())
+                f.flush()
+                os.fsync(f.fileno())
     except:
         pass
 
@@ -99,9 +155,19 @@ try:
     sys.stderr.write("✅ argparse imported\n")
     sys.stderr.flush()
     try:
-        with open(heartbeat_file, 'a') as f:
-            f.write("argparse imported\n")
-            f.flush()
+        if heartbeat_file:
+            # Handle both Path objects and strings
+            if isinstance(heartbeat_file, Path):
+                if heartbeat_file.exists():
+                    with open(heartbeat_file, 'a') as f:
+                        f.write("argparse imported\n")
+                        f.flush()
+            else:
+                # String path
+                if os.path.exists(str(heartbeat_file)):
+                    with open(heartbeat_file, 'a') as f:
+                        f.write("argparse imported\n")
+                        f.flush()
     except:
         pass
     
@@ -139,11 +205,23 @@ try:
     
     # Final heartbeat update
     try:
-        with open(heartbeat_file, 'a') as f:
-            f.write("All imports successful\n")
-            f.write(f"Ready to start automation\n")
-            f.flush()
-            os.fsync(f.fileno())
+        if heartbeat_file:
+            # Handle both Path objects and strings
+            if isinstance(heartbeat_file, Path):
+                if heartbeat_file.exists():
+                    with open(heartbeat_file, 'a') as f:
+                        f.write("All imports successful\n")
+                        f.write(f"Ready to start automation\n")
+                        f.flush()
+                        os.fsync(f.fileno())
+            else:
+                # String path
+                if os.path.exists(str(heartbeat_file)):
+                    with open(heartbeat_file, 'a') as f:
+                        f.write("All imports successful\n")
+                        f.write(f"Ready to start automation\n")
+                        f.flush()
+                        os.fsync(f.fileno())
     except:
         pass
         
@@ -152,10 +230,24 @@ except ImportError as e:
     sys.stderr.write(error_msg)
     sys.stderr.flush()
     try:
-        with open('/tmp/python_import_error.txt', 'w') as f:
-            f.write(error_msg)
-            import traceback
-            f.write(traceback.format_exc())
+        # Try project tmp directory first
+        error_file = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_import_error.txt')
+        try:
+            error_file.parent.mkdir(parents=True, exist_ok=True)
+        except:
+            pass
+        
+        if error_file.parent.exists() and os.access(error_file.parent, os.W_OK):
+            with open(error_file, 'w') as f:
+                f.write(error_msg)
+                import traceback
+                f.write(traceback.format_exc())
+        else:
+            # Fallback to /tmp
+            with open('/tmp/python_import_error.txt', 'w') as f:
+                f.write(error_msg)
+                import traceback
+                f.write(traceback.format_exc())
     except:
         pass
     sys.exit(1)
@@ -167,9 +259,22 @@ except Exception as e:
     traceback.print_exc(file=sys.stderr)
     sys.stderr.flush()
     try:
-        with open('/tmp/python_import_error.txt', 'w') as f:
-            f.write(error_msg)
-            f.write(traceback.format_exc())
+        # Try project tmp directory first
+        error_file = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_import_error.txt')
+        try:
+            error_file.parent.mkdir(parents=True, exist_ok=True)
+        except:
+            pass
+        
+        if error_file.parent.exists() and os.access(error_file.parent, os.W_OK):
+            with open(error_file, 'w') as f:
+                f.write(error_msg)
+                f.write(traceback.format_exc())
+        else:
+            # Fallback to /tmp
+            with open('/tmp/python_import_error.txt', 'w') as f:
+                f.write(error_msg)
+                f.write(traceback.format_exc())
     except:
         pass
     sys.exit(1)

@@ -60,6 +60,7 @@ echo "📋 STEP 2: Checking for heartbeat files..."
 echo ""
 
 HEARTBEAT_PATTERNS=(
+    "/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_*.txt"
     "/tmp/python_script_heartbeat_*.txt"
     "/tmp/python_script_started.txt"
     "$HOME/python_script_heartbeat_*.txt"
@@ -101,6 +102,7 @@ echo "📋 STEP 3: Checking for error files..."
 echo ""
 
 ERROR_PATTERNS=(
+    "/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_*error*.txt"
     "/tmp/python_startup_error.txt"
     "/tmp/python_import_error.txt"
     "/tmp/python_*error*.txt"
@@ -147,11 +149,18 @@ if [ -n "$PYTHON_PROCS" ]; then
     PIDS=$(echo "$PYTHON_PROCS" | awk '{print $2}')
     echo "   Checking for heartbeat files for these PIDs:"
     for pid in $PIDS; do
-        HEARTBEAT_FILE="/tmp/python_script_heartbeat_${pid}.txt"
+        # Check custom location first
+        HEARTBEAT_FILE="/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_${pid}.txt"
         if [ -f "$HEARTBEAT_FILE" ]; then
             echo -e "   ${GREEN}✅ Found heartbeat for PID $pid: $HEARTBEAT_FILE${NC}"
         else
-            echo -e "   ${YELLOW}⚠️  No heartbeat file for PID $pid${NC}"
+            # Check fallback location
+            HEARTBEAT_FILE="/tmp/python_script_heartbeat_${pid}.txt"
+            if [ -f "$HEARTBEAT_FILE" ]; then
+                echo -e "   ${GREEN}✅ Found heartbeat for PID $pid (fallback): $HEARTBEAT_FILE${NC}"
+            else
+                echo -e "   ${YELLOW}⚠️  No heartbeat file for PID $pid${NC}"
+            fi
         fi
     done
 else
@@ -224,7 +233,12 @@ EOF
     
     # Check for new heartbeat file
     sleep 1
-    LATEST_HEARTBEAT=$(ls -t /tmp/python_script_heartbeat_*.txt 2>/dev/null | head -1)
+    # Check custom location first
+    LATEST_HEARTBEAT=$(ls -t /var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_*.txt 2>/dev/null | head -1)
+    if [ -z "$LATEST_HEARTBEAT" ]; then
+        # Check fallback location
+        LATEST_HEARTBEAT=$(ls -t /tmp/python_script_heartbeat_*.txt 2>/dev/null | head -1)
+    fi
     if [ -n "$LATEST_HEARTBEAT" ]; then
         echo ""
         echo -e "${GREEN}✅ New heartbeat file created: $LATEST_HEARTBEAT${NC}"
