@@ -1058,10 +1058,16 @@ class UltimatePlaywrightManager:
     async def start(self):
         """Start Playwright with multiple fallback strategies."""
         try:
+            ultra_safe_log_print("📍 [start()] Method called")
+            sys.stderr.flush()
+            
             # Set up virtual display if needed (for visible mode on headless servers)
             # MUST be done BEFORE importing/starting Playwright
             display_setup_success = True
             current_display = os.environ.get('DISPLAY')
+            ultra_safe_log_print(f"📍 [start()] Current DISPLAY: {current_display}")
+            sys.stderr.flush()
+            
             if not current_display:
                 ultra_safe_log_print("")
                 ultra_safe_log_print("🔄 No DISPLAY environment variable detected")
@@ -1103,41 +1109,69 @@ class UltimatePlaywrightManager:
                 ultra_safe_log_print(f"✅ DISPLAY already set: {current_display}")
             
             # Try to import Playwright
+            ultra_safe_log_print("📍 [start()] About to import Playwright...")
+            sys.stderr.flush()
+            
             playwright_import = UltimateSafetyWrapper.execute_sync(
                 lambda: __import__('playwright.async_api'),
                 default_return=None
             )
             
+            ultra_safe_log_print(f"📍 [start()] Playwright import result: {playwright_import is not None}")
+            sys.stderr.flush()
+            
             if not playwright_import:
                 ultra_safe_log_print("❌ Playwright not available")
+                sys.stderr.flush()
                 return False
             
+            ultra_safe_log_print("📍 [start()] Importing async_playwright...")
+            sys.stderr.flush()
             from playwright.async_api import async_playwright
+            ultra_safe_log_print("📍 [start()] async_playwright imported")
+            sys.stderr.flush()
             
             # Try to start Playwright
+            ultra_safe_log_print("📍 [start()] About to call async_playwright().start()...")
+            sys.stderr.flush()
+            
             self.playwright = await UltimateSafetyWrapper.execute_async(
                 async_playwright().start,
                 default_return=None
             )
             
+            ultra_safe_log_print(f"📍 [start()] async_playwright().start() returned: {self.playwright is not None}")
+            sys.stderr.flush()
+            
             if not self.playwright:
                 ultra_safe_log_print("❌ Failed to start Playwright")
+                sys.stderr.flush()
                 return False
             
             # Try to launch browser with multiple strategies
+            ultra_safe_log_print("📍 [start()] About to launch browser...")
+            sys.stderr.flush()
+            
             browsers_to_try = ['chromium', 'firefox']
             browser_errors = []
             for browser_type in browsers_to_try:
                 try:
+                    ultra_safe_log_print(f"📍 [start()] Trying {browser_type}...")
+                    sys.stderr.flush()
+                    
                     browser_launcher = getattr(self.playwright, browser_type).launch
                     # Always use visible mode (headless=False) for CAPTCHA verification
                     ultra_safe_log_print(f"   🖥️  Launching {browser_type} in visible mode (for CAPTCHA verification)...")
+                    sys.stderr.flush()
+                    
                     self.browser = await browser_launcher(
                         headless=False,  # Always visible for CAPTCHA verification
                         timeout=120000,
                         args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled']
                     )
+                    
                     ultra_safe_log_print(f"✅ Browser launched: {browser_type}")
+                    sys.stderr.flush()
                     break
                 except Exception as e:
                     error_msg = str(e)
@@ -3653,12 +3687,20 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     else:
         ultra_safe_log_print("🖥️  Running in visible browser mode (better for CAPTCHA solving)")
     
+    ultra_safe_log_print(f"🔧 Creating PlaywrightManager instance...")
     playwright_manager = UltimatePlaywrightManager(headless=headless_mode)
+    ultra_safe_log_print(f"✅ PlaywrightManager created")
     
     try:
         # Step 2: Initialize Playwright (cannot fail)
         ultra_safe_log_print(f"🚀 Initializing browser (headless={headless_mode})...")
+        ultra_safe_log_print(f"   📍 About to call playwright_manager.start()...")
+        sys.stderr.flush()
+        
         playwright_ready = await playwright_manager.start()
+        
+        ultra_safe_log_print(f"   📍 playwright_manager.start() returned: {playwright_ready}")
+        sys.stderr.flush()
         
         if not playwright_ready:
             # Get detailed error information
