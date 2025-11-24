@@ -20,6 +20,7 @@ export default function DomainsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showBulkEnableModal, setShowBulkEnableModal] = useState(false);
+  const [showBulkDisableModal, setShowBulkDisableModal] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [formData, setFormData] = useState({
@@ -279,6 +280,41 @@ https://example3.com,marketing`;
     }
   };
 
+  const handleBulkDisable = async () => {
+    if (selectedIds.length === 0) {
+      alert("Please select at least one domain");
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const response = await fetch("/api/domains", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: selectedIds,
+          isActive: false,
+        }),
+  });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(`Updated ${result.count} domain(s)`);
+        setShowBulkDisableModal(false);
+        setSelectedIds([]);
+        fetchDomains();
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to bulk disable domains");
+      }
+    } catch (error) {
+      console.error("Failed to bulk disable:", error);
+      alert("Failed to bulk disable domains");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const toggleSelect = (id: number) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
   };
@@ -328,6 +364,12 @@ https://example3.com,marketing`;
           className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
         >
           Bulk Enable
+        </button>
+        <button
+          onClick={() => setShowBulkDisableModal(true)}
+          className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
+        >
+          Bulk Disable
         </button>
       </div>
 
@@ -675,6 +717,38 @@ https://example3.com,marketing`;
                 className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400 disabled:opacity-50"
               >
                 {processing ? "Enabling..." : "Enable Selected"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Disable Modal */}
+      {showBulkDisableModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <h3 className="text-xl font-semibold text-white mb-4">Bulk Disable</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              {selectedIds.length > 0
+                ? `Disable ${selectedIds.length} selected domain(s)?`
+                : "Select domains from the table using checkboxes, then click this button to disable them all."}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowBulkDisableModal(false);
+                  setSelectedIds([]);
+                }}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDisable}
+                disabled={processing || selectedIds.length === 0}
+                className="rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white hover:bg-rose-400 disabled:opacity-50"
+              >
+                {processing ? "Disabling..." : "Disable Selected"}
               </button>
             </div>
           </div>

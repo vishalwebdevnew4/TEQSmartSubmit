@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
     const hasDisplay = process.env.DISPLAY !== undefined && process.env.DISPLAY !== '';
     const forceHeadless = process.env.TEQ_FORCE_HEADLESS === 'true';
     
-    // If template explicitly sets headless, use that; otherwise auto-detect
-    // For sites with CAPTCHA issues, prefer visible browser (headless=false)
+    // If template explicitly sets headless, use that; otherwise default to non-headless
+    // For sites with CAPTCHA (especially audio challenges), prefer visible browser (headless=false)
     const templateHeadless = template.headless ?? template.Headless;
     let shouldUseHeadless: boolean;
     
@@ -62,13 +62,10 @@ export async function POST(req: NextRequest) {
     } else if (forceHeadless) {
       // Environment forces headless
       shouldUseHeadless = true;
-    } else if (isTest) {
-      // Test mode - always use visible browser
-      shouldUseHeadless = false;
     } else {
-      // Auto-detect: prefer visible browser for better CAPTCHA solving
-      // Use headless only if no display available
-      shouldUseHeadless = !hasDisplay;
+      // Default to non-headless for better CAPTCHA solving (especially audio challenges)
+      // Test mode and normal mode both use visible browser by default
+      shouldUseHeadless = false;
     }
     
     // Enable virtual display for better CAPTCHA solving when headless
@@ -105,7 +102,24 @@ export async function POST(req: NextRequest) {
     const templatePath = path.join(tempDir, "template.json");
     await writeFile(templatePath, JSON.stringify(enhancedTemplate, null, 2), "utf8");
 
-    const scriptPath = path.join(process.cwd(), "automation", "run_submission.py");
+    // Use the correct script - form_discovery.py is the main automation script
+    const scriptPath = path.join(process.cwd(), "automation", "submission", "form_discovery.py");
+    
+    // Verify script exists
+    const fs = require('fs');
+    if (!fs.existsSync(scriptPath)) {
+      return NextResponse.json(
+        { 
+          status: "error", 
+          message: `Python script not found at: ${scriptPath}. Please verify the file exists.` 
+        },
+        { status: 500 }
+      );
+    }
+    
+    // Log the script path being used
+    console.log(`[AUTOMATION] Using script path: ${scriptPath}`);
+    console.log(`[AUTOMATION] Script exists: ${fs.existsSync(scriptPath)}`);
 
     const submission = await prisma.submissionLog.create({
       data: {
@@ -125,6 +139,43 @@ export async function POST(req: NextRequest) {
     // This prevents the API from timing out while automation is running
     (async () => {
       try {
+        // Verify script exists
+        const fs = require('fs');
+        if (!fs.existsSync(scriptPath)) {
+          const errorMsg = `❌ CRITICAL ERROR: Python script not found!\n` +
+            `Expected path: ${scriptPath}\n` +
+            `Current working directory: ${process.cwd()}\n` +
+            `Please verify the script exists at the correct location.`;
+          
+          await prisma.submissionLog.update({
+            where: { id: submission.id },
+            data: {
+              status: "failed",
+              message: errorMsg,
+              finishedAt: new Date(),
+            },
+          });
+          return; // Exit early
+        }
+
+        // Log that we're starting the process with full details
+        const startupMessage = `🚀 Starting Python automation script...\n\n` +
+          `Script Path: ${scriptPath}\n` +
+          `Script Exists: ✅ Yes\n` +
+          `Python Command: ${pythonCommand}\n` +
+          `Target URL: ${url}\n` +
+          `Template Path: ${templatePath}\n` +
+          `Working Directory: ${process.cwd()}\n` +
+          `Timestamp: ${new Date().toISOString()}\n\n` +
+          `Waiting for Python process to start and produce output...`;
+        
+        await prisma.submissionLog.update({
+          where: { id: submission.id },
+          data: {
+            message: startupMessage,
+          },
+        });
+
         const python = spawn(pythonCommand, [scriptPath, "--url", url, "--template", templatePath], {
           cwd: process.cwd(),
           env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
@@ -136,21 +187,28 @@ export async function POST(req: NextRequest) {
         let stdout = "";
         let stderr = "";
         let lastLogUpdate = Date.now();
-        const LOG_UPDATE_INTERVAL = 2000; // Update database every 2 seconds with logs
+        const LOG_UPDATE_INTERVAL = 1000; // Update database every 1 second with logs (more frequent)
+        let processStartTime = Date.now();
+        let hasReceivedAnyOutput = false;
 
         python.stdout.on("data", (chunk) => {
           stdout += chunk;
+          hasReceivedAnyOutput = true;
         });
 
         python.stderr.on("data", async (chunk) => {
           stderr += chunk;
-          // Update database periodically with stderr logs so they appear in real-time
+          hasReceivedAnyOutput = true;
+          
+          // Update database immediately with stderr logs (no delay for first chunk)
           const now = Date.now();
-          if (now - lastLogUpdate > LOG_UPDATE_INTERVAL) {
+          const timeSinceStart = now - processStartTime;
+          const shouldUpdate = (now - lastLogUpdate > LOG_UPDATE_INTERVAL) || (timeSinceStart < 5000 && stderr.length < 1000);
+          
+          if (shouldUpdate) {
             lastLogUpdate = now;
             try {
               // Store complete stderr logs (no truncation) for real-time viewing
-              // Database Text field can handle large logs
               await prisma.submissionLog.update({
                 where: { id: submission.id },
                 data: {
@@ -162,6 +220,30 @@ export async function POST(req: NextRequest) {
               console.error("Failed to update log:", updateError);
             }
           }
+        });
+
+        // Handle process errors (script not found, permission denied, etc.)
+        python.on("error", async (error) => {
+          const err = error as NodeJS.ErrnoException;
+          const errorMsg = `❌ CRITICAL ERROR: Failed to start Python process!\n\n` +
+            `Error: ${error.message}\n` +
+            `Error Code: ${err.code || 'N/A'}\n` +
+            `Command: ${pythonCommand} ${scriptPath} --url ${url} --template ${templatePath}\n\n` +
+            `Possible causes:\n` +
+            `1. Python not installed or not in PATH\n` +
+            `2. Script file permissions issue\n` +
+            `3. Script path is incorrect\n` +
+            `4. Missing dependencies\n\n` +
+            `Please check server logs for more details.`;
+          
+          await prisma.submissionLog.update({
+            where: { id: submission.id },
+            data: {
+              status: "failed",
+              message: errorMsg,
+              finishedAt: new Date(),
+            },
+          });
         });
 
         // Add timeout (5 minutes for automation to complete)
@@ -181,8 +263,53 @@ export async function POST(req: NextRequest) {
             clearTimeout(timeoutId);
             reject(error);
           });
-          python.on("close", (code) => {
+          python.on("close", async (code) => {
             clearTimeout(timeoutId);
+            const duration = Date.now() - processStartTime;
+            
+            // If process completed too quickly (< 5 seconds) and we got no output, it likely failed
+            if (duration < 5000 && !hasReceivedAnyOutput && (stdout.trim().length === 0 && stderr.trim().length === 0)) {
+              const errorMsg = `❌ CRITICAL ERROR: Process exited too quickly with NO output!\n\n` +
+                `Duration: ${duration}ms (expected: 30+ seconds)\n` +
+                `Exit Code: ${code}\n` +
+                `Script Path: ${scriptPath}\n` +
+                `Python Command: ${pythonCommand}\n` +
+                `URL: ${url}\n\n` +
+                `This usually means:\n` +
+                `1. ❌ Python script has a syntax error or import error\n` +
+                `2. ❌ Script path is incorrect\n` +
+                `3. ❌ Python command not found or wrong version\n` +
+                `4. ❌ Script exited immediately without running\n` +
+                `5. ❌ Missing required dependencies (playwright, etc.)\n\n` +
+                `STDOUT captured: ${stdout.length > 0 ? stdout.substring(0, 500) : '(empty)'}\n` +
+                `STDERR captured: ${stderr.length > 0 ? stderr.substring(0, 500) : '(empty)'}\n\n` +
+                `Please check:\n` +
+                `- Run manually: ${pythonCommand} ${scriptPath} --url "${url}" --template "${templatePath}"\n` +
+                `- Check server console logs for Python errors\n` +
+                `- Verify Python and dependencies are installed`;
+              
+              await prisma.submissionLog.update({
+                where: { id: submission.id },
+                data: {
+                  status: "failed",
+                  message: errorMsg,
+                  finishedAt: new Date(),
+                },
+              });
+            } else if (duration < 5000 && (stdout.trim().length > 0 || stderr.trim().length > 0)) {
+              // Got some output but still too fast - log what we got
+              const partialMsg = `⚠️  Process completed very quickly (${duration}ms) but got some output:\n\n` +
+                `STDOUT (first 1000 chars):\n${stdout.substring(0, 1000)}\n\n` +
+                `STDERR (first 1000 chars):\n${stderr.substring(0, 1000)}`;
+              
+              await prisma.submissionLog.update({
+                where: { id: submission.id },
+                data: {
+                  message: partialMsg,
+                },
+              });
+            }
+            
             resolve(code ?? 0);
           });
         });
@@ -227,10 +354,34 @@ export async function POST(req: NextRequest) {
     // If we found valid JSON, use it regardless of exit code
     if (parsed && typeof parsed === "object") {
       const finalStatus = parsed.status === "success" ? "success" : parsed.status || (exitCode === 0 ? "success" : "failed");
-      // Include complete stderr logs in the final message (no truncation)
-      // Combine stderr (main logs) with stdout (JSON output) for complete log
-      const completeLogs = stderr.trim() || stdoutTrimmed || "";
-      const finalMessage = completeLogs || parsed.message || null;
+      
+      // Build complete logs: prioritize parsed.message, then combine with stderr
+      let completeLogs = "";
+      
+      // First, get the detailed message from parsed result
+      if (parsed.message && parsed.message.trim().length > 0) {
+        completeLogs = parsed.message.trim();
+      }
+      
+      // Add stderr logs if they exist and aren't already in the message
+      if (stderr.trim().length > 0) {
+        if (completeLogs && !completeLogs.includes(stderr.trim().substring(0, 100))) {
+          // Append stderr if it's not already included
+          completeLogs += "\n\n" + "=".repeat(80) + "\n";
+          completeLogs += "REAL-TIME LOGS FROM STDERR\n";
+          completeLogs += "=".repeat(80) + "\n";
+          completeLogs += stderr.trim();
+        } else if (!completeLogs) {
+          completeLogs = stderr.trim();
+        }
+      }
+      
+      // Fallback if still empty
+      if (!completeLogs || completeLogs.trim().length === 0) {
+        completeLogs = stdoutTrimmed || "No logs available - process may have completed too quickly";
+      }
+      
+      const finalMessage = completeLogs.trim();
       
       await prisma.submissionLog.update({
         where: { id: submission.id },
@@ -266,12 +417,13 @@ export async function POST(req: NextRequest) {
       parsed = JSON.parse(stdoutTrimmed || "{}");
       if (parsed && typeof parsed === "object") {
       // Include complete logs (stderr + stdout) for successful submissions
-      const completeLogs = (stderr.trim() || stdoutTrimmed || parsed.message || "").trim();
+      // Prioritize parsed.message which contains detailed execution logs
+      const completeLogs = (parsed.message || stderr.trim() || stdoutTrimmed || "").trim();
       await prisma.submissionLog.update({
         where: { id: submission.id },
         data: {
           status: parsed.status === "success" ? "success" : parsed.status ?? "success",
-          message: completeLogs || null,
+          message: completeLogs || "No logs available",
           finishedAt: new Date(),
         },
       });

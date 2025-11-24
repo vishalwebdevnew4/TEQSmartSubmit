@@ -1,0 +1,99 @@
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+✅ Found reCAPTCHA element with selector: iframe[src*="recaptcha/api2/anchor"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe detected after checkbox click! (attempt 1)
+   🎧 Attempting to solve audio challenge...
+🎧 Starting audio challenge solving...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found, attempting audio challenge...
+   ⏳ Waiting for challenge to fully load...
+   🔄 Ensuring we're in audio challenge mode...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button via JavaScript
+   ✅ Successfully switched to audio mode! (attempt 1)
+   ⏳ Waiting for audio challenge to fully load...
+   🎤 Downloading and recognizing audio...
+   ✅ Audio URL found: https://www.google.com/recaptcha/api2/payload/audio.mp3?p=06AFcWeA6KjCACujJ4_MQL...
+   ✅ Audio downloaded to: /tmp/tmpox8w3gj_.mp3
+   🔄 Converting audio to WAV...
+   ✅ Audio converted to WAV
+   🎤 Recognizing speech (attempt 1/3)...
+   ✅ Recognized: SO
+   ✅ Recognized audio text: SO
+   📤 Submitting answer: SO
+   ✅ Answer submitted
+   ⏳ Waiting for CAPTCHA token after audio challenge...
+   ✅ Audio challenge solved successfully! Real token received (after 1 checks)
+   ✅ Audio challenge solved!
+✅ LocalCaptchaSolver: reCAPTCHA v2 solved successfully! (token verified in page)
+✅ LocalCaptchaSolver: reCAPTCHA v2 solved! Token length: 846
+================================================================================
+🤖 FINAL RECAPTCHA AUDIO CHALLENGE SOLVER
+================================================================================
+
+📍 URL: https://interiordesign.xcelanceweb.com/contact
+🖥️  Headless: False (Visible Browser)
+
+================================================================================
+
+⏳ Navigating...
+✅ Page loaded
+
+STEP 0: Handling cookie banner...
+   ✅ Cookie banner handled
+
+STEP 1: Solving reCAPTCHA with audio challenge...
+   Site Key: Not found
+   Using UltimateLocalCaptchaSolver...
+
+
+================================================================================
+RESULTS
+================================================================================
+✅ SUCCESS! reCAPTCHA solved!
+   Token: 0cAFcWeA4aVoxzDgdsNHwTIk_gSVUu2BQeUKvMmBEPFJy8kjSk...
+   Token Length: 846 characters
+   Solver: LocalCaptchaSolver
+   ✅ Token verified in page!
+   Token matches: True
+
+📸 Screenshot saved: recaptcha_solved.png
+
+⏸️  Browser open for 60 seconds for inspection...
+
+✅ TEST SUCCESSFUL!

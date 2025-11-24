@@ -1,0 +1,26 @@
+{
+  "total_instances": 2,
+  "successful": 0,
+  "failed": 2,
+  "total_duration": 509.813992,
+  "results": [
+    {
+      "instance_id": 1,
+      "success": false,
+      "error": "Local solver could not solve reCAPTCHA",
+      "duration": 224.923657,
+      "fields_filled": 4,
+      "captcha_solved": false,
+      "form_submitted": false
+    },
+    {
+      "instance_id": 2,
+      "success": false,
+      "error": "Local reCAPTCHA solving timeout after 300s",
+      "duration": 504.580084,
+      "fields_filled": 4,
+      "captcha_solved": false,
+      "form_submitted": false
+    }
+  ]
+}

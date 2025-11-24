@@ -266,15 +266,73 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
               message: payload?.message ?? "Automation run failed."
             });
           } else {
-            results.push({
-              domain: currentDomain.url,
-              success: true,
-              message: payload?.message ?? "Run completed successfully."
-            });
+            // Wait for this automation to complete before starting the next one
+            const submissionId = payload.submissionId;
+            if (submissionId) {
+              setMessage(`Waiting for ${currentDomain.url} to complete (${processedCount}/${domainsWithTemplates.length})...`);
+              
+              // Poll for completion (check every 2 seconds, max 10 minutes per domain)
+              let completed = false;
+              const maxWaitTime = 10 * 60 * 1000; // 10 minutes
+              const startTime = Date.now();
+              const pollInterval = 2000; // 2 seconds
+              
+              while (!completed && (Date.now() - startTime) < maxWaitTime) {
+                try {
+                  const logResponse = await fetch(`/api/logs?limit=100`);
+                  if (logResponse.ok) {
+                    const logData = await logResponse.json();
+                    const submission = logData.logs?.find((log: any) => log.id === submissionId);
+                    
+                    if (submission) {
+                      if (submission.status === "success" || submission.status === "failed" || submission.status === "completed") {
+                        completed = true;
+                        results.push({
+                          domain: currentDomain.url,
+                          success: submission.status === "success",
+                          message: submission.message || `Run ${submission.status}`
+                        });
+                        break;
+                      }
+                      // Still running, update message
+                      if (submission.message) {
+                        const lines = submission.message.split("\n");
+                        const lastLine = lines[lines.length - 1] || lines[0] || "";
+                        if (lastLine.trim()) {
+                          setMessage(`${currentDomain.url} (${processedCount}/${domainsWithTemplates.length}): ${lastLine.substring(0, 80)}...`);
+                        }
+                      }
+                    }
+                  }
+                  
+                  // Wait before next poll
+                  await new Promise(resolve => setTimeout(resolve, pollInterval));
+                } catch (pollError) {
+                  console.error("Error polling for completion:", pollError);
+                  // Continue polling
+                  await new Promise(resolve => setTimeout(resolve, pollInterval));
+                }
+              }
+              
+              if (!completed) {
+                results.push({
+                  domain: currentDomain.url,
+                  success: false,
+                  message: "Automation timed out (waited 10 minutes)"
+                });
+              }
+            } else {
+              results.push({
+                domain: currentDomain.url,
+                success: true,
+                message: payload?.message ?? "Run started successfully."
+              });
+            }
           }
 
-          // Add delay between domains to avoid rate limiting
+          // Add delay between domains to avoid rate limiting (only if not the last domain)
           if (i < domainsToRun.length - 1) {
+            setMessage(`Waiting ${delaySeconds} seconds before next domain...`);
             await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
           }
         } catch (error) {

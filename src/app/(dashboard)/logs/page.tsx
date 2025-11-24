@@ -180,6 +180,37 @@ export default function LogsPage() {
     return message ? message.length > 150 : false;
   };
 
+  const handleCopyLog = async (log: SubmissionLog) => {
+    try {
+      const logText = `Submission Log #${log.id}\n` +
+        `URL: ${log.domain?.url || log.url}\n` +
+        `Template: ${log.template?.name || 'N/A'}\n` +
+        `Status: ${log.status}\n` +
+        `Created: ${new Date(log.createdAt).toLocaleString()}\n` +
+        `${log.finishedAt ? `Finished: ${new Date(log.finishedAt).toLocaleString()}\n` : ''}` +
+        `${log.finishedAt && log.createdAt ? `Duration: ${Math.round((new Date(log.finishedAt).getTime() - new Date(log.createdAt).getTime()) / 1000)}s\n` : ''}` +
+        `\n${'='.repeat(80)}\n` +
+        `LOG MESSAGE:\n` +
+        `${'='.repeat(80)}\n` +
+        `${log.message || 'No log message available'}`;
+      
+      await navigator.clipboard.writeText(logText);
+      
+      // Show temporary success message
+      const button = document.activeElement as HTMLElement;
+      const originalText = button.textContent;
+      button.textContent = '✅ Copied!';
+      button.classList.add('text-emerald-400');
+      setTimeout(() => {
+        button.textContent = originalText;
+        button.classList.remove('text-emerald-400');
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to copy log:', error);
+      alert('Failed to copy log to clipboard');
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -281,7 +312,7 @@ export default function LogsPage() {
             className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm shadow-sm hover:border-slate-700"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
+              <div className="flex-1">
                   <p className="font-medium text-slate-200">{log.domain?.url || log.url}</p>
                   {log.template && (
                     <p className="text-xs text-slate-400 mt-1">Template: {log.template.name}</p>
@@ -290,13 +321,20 @@ export default function LogsPage() {
                     {new Date(log.createdAt).toLocaleString()}
                   </p>
                 </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusColor(log.status)}`}>
-                  {log.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusColor(log.status)}`}>
+                    {log.status}
+                  </span>
+                  {log.message && (
+                    <span className="text-xs text-slate-500" title="Logs available">
+                      📋
+                    </span>
+                  )}
+                </div>
               </div>
-              {log.message && (
-                <div className="mt-3">
-                  {isLongMessage(log.message) && !expandedLogs.has(log.id) ? (
+              <div className="mt-3">
+                {log.message ? (
+                  isLongMessage(log.message) && !expandedLogs.has(log.id) ? (
                     <>
                       <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-3 font-mono text-xs text-slate-300 whitespace-pre-wrap break-words">
                         {getMessagePreview(log.message)}
@@ -367,20 +405,42 @@ export default function LogsPage() {
                         );
                       })}
                     </div>
+                  )
+                ) : (
+                  <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-xs text-slate-400 italic">
+                    {log.status === "success" 
+                      ? "✅ Submission completed successfully. No detailed logs available." 
+                      : log.status === "running" || log.status === "pending"
+                      ? "⏳ Automation in progress..."
+                      : "No log message available."}
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 flex items-center justify-between">
+                <div className="flex gap-4 text-xs text-slate-500">
+                  <span>Log ID: {log.id}</span>
+                  {log.finishedAt && (
+                    <span>
+                      Finished: {new Date(log.finishedAt).toLocaleString()}
+                    </span>
+                  )}
+                  {log.finishedAt && log.createdAt && (
+                    <span>
+                      Duration: {Math.round((new Date(log.finishedAt).getTime() - new Date(log.createdAt).getTime()) / 1000)}s
+                    </span>
                   )}
                 </div>
-              )}
-              <div className="mt-3 flex gap-4 text-xs text-slate-500">
-                <span>Log ID: {log.id}</span>
-                {log.finishedAt && (
-                  <span>
-                    Finished: {new Date(log.finishedAt).toLocaleString()}
-                  </span>
-                )}
-                {log.finishedAt && log.createdAt && (
-                  <span>
-                    Duration: {Math.round((new Date(log.finishedAt).getTime() - new Date(log.createdAt).getTime()) / 1000)}s
-              </span>
+                {log.message && (
+                  <button
+                    onClick={() => handleCopyLog(log)}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:border-indigo-500 hover:text-indigo-300 transition-colors flex items-center gap-1.5"
+                    title="Copy full log to clipboard"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Copy Log
+                  </button>
                 )}
               </div>
             </div>

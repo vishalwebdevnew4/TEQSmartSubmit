@@ -1,0 +1,27 @@
+================================================================================
+🤖 SIMPLE RECAPTCHA AUDIO CHALLENGE SOLVER
+================================================================================
+
+📍 URL: https://interiordesign.xcelanceweb.com/contact
+🖥️  Headless: False (Visible Browser)
+
+================================================================================
+
+⏳ Navigating...
+✅ Page loaded
+
+STEP 0: Handling cookie banner...
+   ✅ Clicked cookie banner: button:has-text("Accept")
+   ✅ Cookie banner handled
+
+STEP 1: Clicking reCAPTCHA checkbox...
+   ✅ Clicked checkbox (method 1: direct click)
+✅ Checkbox click attempted
+   ⏳ Waiting for response...
+
+STEP 2: Checking for challenge or token...
+   🔍 Looking for challenge iframe...
+❌ No challenge iframe detected and no token found
+   Taking screenshot for debugging...
+   📸 Screenshot saved: recaptcha_no_challenge.png
+   Checkbox state: {'checked': 'false', 'className': 'recaptcha-checkbox goog-inline-block recaptcha-checkbox-unchecked rc-anchor-checkbox'}

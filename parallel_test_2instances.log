@@ -1,0 +1,185 @@
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+✅ Found reCAPTCHA element with selector: iframe[src*="recaptcha/api2/anchor"]
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+✅ Found reCAPTCHA element with selector: iframe[src*="recaptcha/api2/anchor"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Clicked reCAPTCHA checkbox
+✅ Found reCAPTCHA element with selector: iframe[src*="google.com/recaptcha"]
+✅ Found reCAPTCHA element with selector: iframe[src*="google.com/recaptcha"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe detected after checkbox click! (attempt 1)
+   🎧 Attempting to solve audio challenge...
+🎧 Starting audio challenge solving...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found, attempting audio challenge...
+   ⏳ Waiting for challenge to fully load...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe detected after checkbox click! (attempt 1)
+   🎧 Attempting to solve audio challenge...
+🎧 Starting audio challenge solving...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found, attempting audio challenge...
+   ⏳ Waiting for challenge to fully load...
+   🔄 Ensuring we're in audio challenge mode...
+   🔄 Clicking audio challenge button...
+   🔄 Ensuring we're in audio challenge mode...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button via JavaScript
+   ✅ Clicked audio button via JavaScript
+   ✅ Successfully switched to audio mode! (attempt 1)
+   ⏳ Waiting for audio challenge to fully load...
+   ✅ Successfully switched to audio mode! (attempt 1)
+   ⏳ Waiting for audio challenge to fully load...
+   🎤 Downloading and recognizing audio...
+   🎤 Downloading and recognizing audio...
+   ✅ Audio URL found: https://www.google.com/recaptcha/api2/payload/audio.mp3?p=06AFcWeA4edd9b4SGaV_t_...
+   ✅ Audio downloaded to: /tmp/tmp3zyavkwu.mp3
+   🔄 Converting audio to WAV...
+   ✅ Audio converted to WAV
+   🎤 Recognizing speech (attempt 1/3)...
+   ✅ Recognized: MUSHROOMFACTORY
+   ✅ Recognized audio text: MUSHROOMFACTORY
+   📤 Submitting answer: MUSHROOMFACTORY
+   ✅ Audio URL found: https://www.google.com/recaptcha/api2/payload/audio.mp3?p=06AFcWeA4G9KisgzboZaH0...
+   ✅ Audio downloaded to: /tmp/tmprmdvn2iz.mp3
+   🔄 Converting audio to WAV...
+   ✅ Audio converted to WAV
+   🎤 Recognizing speech (attempt 1/3)...
+   ✅ Recognized: WITHCONNECTINGWITHYOU
+   ✅ Recognized audio text: WITHCONNECTINGWITHYOU
+   📤 Submitting answer: WITHCONNECTINGWITHYOU
+   ✅ Answer submitted
+   ✅ Answer submitted
+   ⏳ Waiting for CAPTCHA token after audio challenge...
+   ⏳ Waiting for CAPTCHA token after audio challenge...
+   ✅ Audio challenge solved successfully! Real token received (after 1 checks)
+   ✅ Audio challenge solved!
+✅ LocalCaptchaSolver: reCAPTCHA v2 solved successfully! (token verified in page)
+✅ LocalCaptchaSolver: reCAPTCHA v2 solved! Token length: 846
+   ✅ Audio challenge solved successfully! Real token received (after 1 checks)
+   ✅ Audio challenge solved!
+✅ LocalCaptchaSolver: reCAPTCHA v2 solved successfully! (token verified in page)
+✅ LocalCaptchaSolver: reCAPTCHA v2 solved! Token length: 868
+================================================================================
+🚀 PARALLEL RECAPTCHA AUDIO CHALLENGE SOLVER
+================================================================================
+
+📍 URL: https://interiordesign.xcelanceweb.com/contact
+🔢 Instances: 2
+🖥️  Headless: False
+⚡ Running in parallel for maximum speed!
+
+================================================================================
+
+🚀 Launching 2 parallel instances...
+
+[Instance 2] ⏳ Starting...
+[Instance 1] ⏳ Starting...
+[Instance 1] ✅ Filled 4 fields
+[Instance 1] 🔐 Solving CAPTCHA...
+[Instance 2] ✅ Filled 4 fields
+[Instance 2] 🔐 Solving CAPTCHA...
+[Instance 2] ✅ CAPTCHA solved!
+[Instance 1] ✅ CAPTCHA solved!
+[Instance 2] ✅ Form submitted!
+[Instance 1] ✅ Form submitted!
+
+================================================================================
+📊 RESULTS SUMMARY
+================================================================================
+
+[Instance 1] ✅ SUCCESS
+   Duration: 97.54s
+   Fields filled: 4
+   CAPTCHA solved: Yes
+   Form submitted: Yes
+
+[Instance 2] ✅ SUCCESS
+   Duration: 97.51s
+   Fields filled: 4
+   CAPTCHA solved: Yes
+   Form submitted: Yes
+
+================================================================================
+📈 STATISTICS
+================================================================================
+✅ Successful: 2/2
+❌ Failed: 0/2
+⏱️  Total time: 97.80s
+⚡ Average time per instance: 48.90s
+🚀 Speed improvement: ~2x faster than sequential
+================================================================================
+
+💾 Results saved to: parallel_results_20251124_124925.json
+
+✅ ALL INSTANCES SUCCESSFUL!

@@ -1,0 +1,26 @@
+{
+  "total_instances": 2,
+  "successful": 2,
+  "failed": 0,
+  "total_duration": 216.916333,
+  "results": [
+    {
+      "instance_id": 1,
+      "success": true,
+      "error": null,
+      "duration": 212.730239,
+      "fields_filled": 4,
+      "captcha_solved": true,
+      "form_submitted": true
+    },
+    {
+      "instance_id": 2,
+      "success": true,
+      "error": null,
+      "duration": 206.712525,
+      "fields_filled": 4,
+      "captcha_solved": true,
+      "form_submitted": true
+    }
+  ]
+}

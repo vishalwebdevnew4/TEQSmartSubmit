@@ -250,6 +250,16 @@ class UltimateLocalCaptchaSolver:
             challenge_iframe = None
             for check_attempt in range(5):
                 await safe_async_sleep(3)
+                
+                # Check if checkbox expired while waiting
+                if await self._check_checkbox_expired():
+                    safe_log_print(f"   ⚠️  Checkbox expired while waiting for challenge (attempt {check_attempt + 1}), clicking again...")
+                    clicked = await self._click_recaptcha_checkbox_again()
+                    if clicked:
+                        # Reset the check counter and continue
+                        await safe_async_sleep(3)
+                        continue
+                
                 challenge_iframe = await self._check_for_challenge_iframe()
                 if challenge_iframe:
                     safe_log_print(f"   ✅ Challenge iframe detected after checkbox click! (attempt {check_attempt + 1})")
@@ -259,11 +269,15 @@ class UltimateLocalCaptchaSolver:
             
             if challenge_iframe:
                 safe_log_print("   🎧 Attempting to solve audio challenge...")
+                # Mark that we're in challenge mode
+                await self.page.evaluate("() => { window.__recaptchaInChallenge = true; }")
                 token = await self._handle_audio_challenge()
                 if token:
+                    await self.page.evaluate("() => { window.__recaptchaInChallenge = false; }")
                     safe_log_print("   ✅ Audio challenge solved!")
                     return token
                 else:
+                    await self.page.evaluate("() => { window.__recaptchaInChallenge = false; }")
                     safe_log_print("   ⚠️  Audio challenge solving failed, continuing with other strategies...")
             
             # Strategy 2: Find and interact with reCAPTCHA iframe
@@ -275,12 +289,23 @@ class UltimateLocalCaptchaSolver:
             # Check for challenge after iframe interaction
             safe_log_print("   2a. Checking for challenge after iframe interaction...")
             await safe_async_sleep(3)
+            
+            # Check if checkbox expired
+            if await self._check_checkbox_expired():
+                safe_log_print("   ⚠️  Checkbox expired after iframe interaction, clicking again...")
+                await self._click_recaptcha_checkbox_again()
+                await safe_async_sleep(3)
+            
             challenge_iframe = await self._check_for_challenge_iframe()
             if challenge_iframe:
                 safe_log_print("   ✅ Challenge iframe detected after iframe interaction!")
+                # Mark that we're in challenge mode
+                await self.page.evaluate("() => { window.__recaptchaInChallenge = true; }")
                 token = await self._handle_audio_challenge()
                 if token:
+                    await self.page.evaluate("() => { window.__recaptchaInChallenge = false; }")
                     return token
+                await self.page.evaluate("() => { window.__recaptchaInChallenge = false; }")
             
             # Strategy 3: Execute JavaScript to trigger CAPTCHA
             safe_log_print("3. Executing JavaScript triggers...")
@@ -731,6 +756,148 @@ class UltimateLocalCaptchaSolver:
             safe_log_print(f"   ⚠️  Challenge detection error: {str(e)[:50]}")
             return None
     
+    async def _check_checkbox_expired(self) -> bool:
+        """Check if reCAPTCHA checkbox has expired and needs to be clicked again."""
+        try:
+            expired = await self.page.evaluate("""
+                () => {
+                    // Method 1: Check for expiration indicators in the main page
+                    // Look for rc-anchor-error class or recaptcha-checkbox-expired class
+                    const errorContainer = document.querySelector('.rc-anchor-error, .rc-anchor.rc-anchor-error');
+                    if (errorContainer) {
+                        // Check for expired checkbox class
+                        const expiredCheckbox = errorContainer.querySelector('.recaptcha-checkbox-expired, .recaptcha-checkbox-unchecked');
+                        if (expiredCheckbox) {
+                            // Verify it's actually expired by checking aria-checked
+                            const ariaChecked = expiredCheckbox.getAttribute('aria-checked');
+                            if (ariaChecked === 'false') {
+                                return true;
+                            }
+                        }
+                        
+                        // Check for error message text
+                        const errorMsg = errorContainer.querySelector('.rc-anchor-error-msg, .rc-anchor-aria-status');
+                        if (errorMsg) {
+                            const text = errorMsg.textContent.toLowerCase();
+                            if (text.includes('expired') || text.includes('verification challenge expired') || 
+                                text.includes('check the checkbox again')) {
+                                return true;
+                            }
+                        }
+                    }
+                    
+                    // Method 2: Check inside the checkbox iframe
+                    const checkboxIframe = document.querySelector('iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"]');
+                    if (checkboxIframe) {
+                        try {
+                            const iframeDoc = checkboxIframe.contentDocument || checkboxIframe.contentWindow.document;
+                            if (iframeDoc) {
+                                // Check for expired classes
+                                const expiredEl = iframeDoc.querySelector('.rc-anchor-error, .recaptcha-checkbox-expired');
+                                if (expiredEl) {
+                                    // Check for unchecked state
+                                    const checkbox = iframeDoc.querySelector('#recaptcha-anchor');
+                                    if (checkbox) {
+                                        const ariaChecked = checkbox.getAttribute('aria-checked');
+                                        const hasExpiredClass = checkbox.classList.contains('recaptcha-checkbox-expired');
+                                        const hasUncheckedClass = checkbox.classList.contains('recaptcha-checkbox-unchecked');
+                                        
+                                        if ((ariaChecked === 'false' && hasExpiredClass) || 
+                                            (hasExpiredClass && hasUncheckedClass)) {
+                                            return true;
+                                        }
+                                    }
+                                    
+                                    // Check for error message
+                                    const errorMsg = iframeDoc.querySelector('.rc-anchor-error-msg, .rc-anchor-aria-status');
+                                    if (errorMsg) {
+                                        const text = errorMsg.textContent.toLowerCase();
+                                        if (text.includes('expired') || text.includes('verification challenge expired') || 
+                                            text.includes('check the checkbox again')) {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Cross-origin or other iframe access error, continue with other checks
+                        }
+                    }
+                    
+                    // Method 3: Check if checkbox is unchecked (expired) and token is missing
+                    const recaptchaResponse = document.querySelector('#g-recaptcha-response');
+                    if (recaptchaResponse && !recaptchaResponse.value) {
+                        // Check if there's an error message in the page
+                        const errorElements = document.querySelectorAll('[class*="error"], [class*="expired"], [id*="error"]');
+                        for (const el of errorElements) {
+                            const text = el.textContent.toLowerCase();
+                            if (text.includes('expired') || text.includes('timeout') || 
+                                text.includes('try again') || text.includes('verification challenge expired')) {
+                                return true;
+                            }
+                        }
+                    }
+                    
+                    // Method 4: Check if challenge iframe disappeared (checkbox reset)
+                    const challengeIframes = document.querySelectorAll('iframe[src*="bframe"], iframe[title*="challenge"]');
+                    const wasInChallenge = window.__recaptchaInChallenge || false;
+                    if (wasInChallenge && challengeIframes.length === 0) {
+                        // Challenge disappeared, checkbox likely expired
+                        // Double-check by looking for expired indicators
+                        const expiredIndicator = document.querySelector('.rc-anchor-error, .recaptcha-checkbox-expired');
+                        if (expiredIndicator) {
+                            return true;
+                        }
+                    }
+                    
+                    return false;
+                }
+            """)
+            return expired or False
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Error checking checkbox expiration: {str(e)[:50]}")
+            return False
+    
+    async def _click_recaptcha_checkbox_again(self) -> bool:
+        """Click the reCAPTCHA checkbox again if it expired."""
+        try:
+            safe_log_print("   🔄 Checkbox expired, clicking again to restart...")
+            
+            # Find and click the checkbox iframe again
+            recaptcha_selectors = [
+                'iframe[src*="recaptcha/api2/anchor"]',
+                'iframe[src*="recaptcha/enterprise/anchor"]',
+                'iframe[src*="google.com/recaptcha"]',
+                '.g-recaptcha iframe',
+                'iframe[title*="recaptcha"]'
+            ]
+            
+            for selector in recaptcha_selectors:
+                try:
+                    element = await self.page.query_selector(selector)
+                    if element:
+                        # Scroll into view
+                        await element.scroll_into_view_if_needed()
+                        await safe_async_sleep(0.5)
+                        
+                        # Click the checkbox
+                        box = await element.bounding_box()
+                        if box:
+                            await self.page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+                        else:
+                            await element.click()
+                        
+                        safe_log_print("   ✅ Clicked checkbox again to restart")
+                        await safe_async_sleep(3)
+                        return True
+                except:
+                    continue
+            
+            return False
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Failed to click checkbox again: {str(e)[:30]}")
+            return False
+
     async def _handle_audio_challenge(self) -> Optional[str]:
         """Handle reCAPTCHA audio challenge - download, recognize, and solve with retries."""
         try:
@@ -742,6 +909,13 @@ class UltimateLocalCaptchaSolver:
                 challenge_iframe = await self._check_for_challenge_iframe()
                 if challenge_iframe:
                     break
+                
+                # Check if checkbox expired while waiting
+                if await self._check_checkbox_expired():
+                    safe_log_print("   ⚠️  Checkbox expired while waiting for challenge, clicking again...")
+                    await self._click_recaptcha_checkbox_again()
+                    await safe_async_sleep(3)
+                
                 await safe_async_sleep(2)
             
             if not challenge_iframe:
@@ -768,35 +942,38 @@ class UltimateLocalCaptchaSolver:
             safe_log_print("   ⏳ Waiting for challenge to fully load...")
             await safe_async_sleep(5)
             
-            # Check if we're already in audio mode or need to switch
-            is_audio_mode = await frame.evaluate("""
-                () => {
-                    // Check for audio elements or audio button visibility
-                    const audioEl = document.querySelector('audio');
-                    const audioBtn = document.querySelector('#recaptcha-audio-button, button[title*="audio"]');
-                    return audioEl !== null || (audioBtn && audioBtn.offsetParent !== null);
-                }
-            """)
+            # Always try to switch to audio mode (even if it seems already in audio mode)
+            # This ensures we're definitely in audio mode
+            safe_log_print("   🔄 Ensuring we're in audio challenge mode...")
+            audio_switched = False
+            for attempt in range(5):
+                audio_switched = await self._switch_to_audio_challenge(frame)
+                if audio_switched:
+                    safe_log_print(f"   ✅ Successfully switched to audio mode! (attempt {attempt + 1})")
+                    break
+                if attempt < 4:
+                    safe_log_print(f"   ⚠️  Audio switch attempt {attempt + 1} failed, retrying...")
+                    await safe_async_sleep(3)
             
-            if is_audio_mode:
-                safe_log_print("   ✅ Already in audio mode!")
-            else:
-                # Step 1: Switch to audio challenge (with retries)
-                safe_log_print("   🔄 Switching to audio challenge...")
-                audio_switched = False
-                for attempt in range(5):
-                    audio_switched = await self._switch_to_audio_challenge(frame)
-                    if audio_switched:
-                        break
-                    if attempt < 4:
-                        safe_log_print(f"   ⚠️  Audio switch attempt {attempt + 1} failed, retrying...")
-                        await safe_async_sleep(3)
-                
-                if not audio_switched:
+            if not audio_switched:
+                # Check if already in audio mode
+                is_audio_mode = await frame.evaluate("""
+                    () => {
+                        const audioEl = document.querySelector('audio');
+                        const audioBtn = document.querySelector('#recaptcha-audio-button, button[title*="audio"]');
+                        const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload-link');
+                        return audioEl !== null || downloadLink !== null || (audioBtn && audioBtn.offsetParent !== null);
+                    }
+                """)
+                if is_audio_mode:
+                    safe_log_print("   ✅ Already in audio mode (button click may not have been needed)")
+                else:
                     safe_log_print("   ⚠️  Could not switch to audio challenge after 5 attempts")
                     return None
             
-            await safe_async_sleep(5)  # Wait longer for audio to load
+            # Wait longer for audio to fully load after switching
+            safe_log_print("   ⏳ Waiting for audio challenge to fully load...")
+            await safe_async_sleep(8)
             
             # Step 2: Download and recognize audio (with retries)
             audio_text = None
@@ -838,6 +1015,31 @@ class UltimateLocalCaptchaSolver:
             safe_log_print("   ⏳ Waiting for CAPTCHA token after audio challenge...")
             for check_attempt in range(15):
                 await safe_async_sleep(3)  # Wait 3 seconds between checks
+                
+                # Check if checkbox expired during wait
+                if await self._check_checkbox_expired():
+                    safe_log_print(f"   ⚠️  Checkbox expired during wait (check {check_attempt + 1}), clicking again...")
+                    clicked = await self._click_recaptcha_checkbox_again()
+                    if clicked:
+                        # Wait a bit and check if challenge appeared again
+                        await safe_async_sleep(5)
+                        challenge_iframe = await self._check_for_challenge_iframe()
+                        if challenge_iframe:
+                            safe_log_print("   🔄 Challenge appeared again, restarting audio challenge...")
+                            # Restart the audio challenge process
+                            frame = await challenge_iframe.content_frame()
+                            if frame:
+                                audio_switched = await self._switch_to_audio_challenge(frame)
+                                if audio_switched:
+                                    await safe_async_sleep(5)
+                                    # Retry audio solving
+                                    audio_text = await self._solve_audio_challenge(frame)
+                                    if audio_text:
+                                        submitted = await self._submit_audio_answer(frame, audio_text)
+                                        if submitted:
+                                            safe_log_print("   ✅ Audio challenge restarted and solved after checkbox re-click")
+                                            # Continue waiting for token
+                
                 token = await self._get_recaptcha_token()
                 if token:
                     # Verify it's not a fake token
@@ -868,52 +1070,148 @@ class UltimateLocalCaptchaSolver:
     async def _switch_to_audio_challenge(self, frame) -> bool:
         """Switch from image challenge to audio challenge."""
         try:
-            safe_log_print("   🔄 Switching to audio challenge...")
+            # First, check if we're already in audio mode
+            already_audio = await frame.evaluate("""
+                () => {
+                    const audioEl = document.querySelector('audio');
+                    const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload-link');
+                    return audioEl !== null || downloadLink !== null;
+                }
+            """)
             
-            # Multiple selectors for audio button
+            if already_audio:
+                safe_log_print("   ℹ️  Already in audio mode")
+                return True
+            
+            safe_log_print("   🔄 Clicking audio challenge button...")
+            
+            # Multiple selectors for audio button (in order of preference)
             audio_selectors = [
                 '#recaptcha-audio-button',
                 'button[title*="audio"]',
                 'button[title*="Audio"]',
+                'button[aria-label*="audio"]',
+                'button[aria-label*="Audio"]',
                 '.rc-button-audio',
                 'button.rc-button-audio',
-                'button[aria-label*="audio"]',
                 'button[id*="audio"]',
                 'div[role="button"][aria-label*="audio"]',
                 'div[role="button"][aria-label*="Audio"]',
-                'a.rc-audiochallenge-tdownload-link'
+                '[class*="audio-button"]',
+                '[id*="audio-button"]'
             ]
             
+            # Method 1: Try direct element click with coordinates
             for selector in audio_selectors:
                 try:
                     audio_btn = await frame.query_selector(selector)
                     if audio_btn:
-                        safe_log_print(f"   ✅ Found audio button: {selector}")
-                        
-                        # Try to get button coordinates for direct click
-                        try:
-                            box = await audio_btn.bounding_box()
-                            if box:
-                                # Click using absolute coordinates (more reliable)
-                                await self.page.mouse.click(
-                                    box['x'] + box['width'] / 2,
-                                    box['y'] + box['height'] / 2
-                                )
-                                safe_log_print("   ✅ Clicked audio button via coordinates")
-                                await safe_async_sleep(2)
-                                return True
-                        except:
-                            pass
-                        
-                        # Fallback: regular click
-                        await audio_btn.click()
-                        safe_log_print("   ✅ Clicked audio button")
-                        await safe_async_sleep(2)
-                        return True
+                        is_visible = await audio_btn.is_visible()
+                        if is_visible:
+                            safe_log_print(f"   ✅ Found visible audio button: {selector}")
+                            
+                            # CRITICAL: Scroll element into view to ensure it's clickable
+                            try:
+                                await audio_btn.scroll_into_view_if_needed()
+                                safe_log_print("   📜 Scrolled audio button into view")
+                                await safe_async_sleep(0.5)
+                                
+                                # Also try scrolling the iframe into view
+                                challenge_iframe = await self._check_for_challenge_iframe()
+                                if challenge_iframe:
+                                    await challenge_iframe.scroll_into_view_if_needed()
+                                    safe_log_print("   📜 Scrolled challenge iframe into view")
+                                    await safe_async_sleep(0.5)
+                            except Exception as e:
+                                safe_log_print(f"   ⚠️  Scroll into view failed: {str(e)[:30]}")
+                            
+                            # Try clicking using coordinates (most reliable)
+                            try:
+                                box = await audio_btn.bounding_box()
+                                if box:
+                                    # Get iframe position
+                                    challenge_iframe = await self._check_for_challenge_iframe()
+                                    if challenge_iframe:
+                                        iframe_box = await challenge_iframe.bounding_box()
+                                        if iframe_box:
+                                            # Calculate absolute coordinates
+                                            abs_x = iframe_box['x'] + box['x'] + box['width'] / 2
+                                            abs_y = iframe_box['y'] + box['y'] + box['height'] / 2
+                                            
+                                            # Ensure coordinates are within viewport, adjust if needed
+                                            viewport = self.page.viewport_size
+                                            if viewport:
+                                                # If button is outside viewport, scroll page
+                                                if abs_y < 0 or abs_y > viewport['height'] or abs_x < 0 or abs_x > viewport['width']:
+                                                    safe_log_print(f"   📜 Audio button outside viewport, scrolling page...")
+                                                    await self.page.evaluate(f"window.scrollTo(0, {abs_y - viewport['height'] / 2})")
+                                                    await safe_async_sleep(0.5)
+                                                    # Recalculate after scroll
+                                                    iframe_box = await challenge_iframe.bounding_box()
+                                                    if iframe_box:
+                                                        abs_x = iframe_box['x'] + box['x'] + box['width'] / 2
+                                                        abs_y = iframe_box['y'] + box['y'] + box['height'] / 2
+                                            
+                                            await self.page.mouse.click(abs_x, abs_y)
+                                            safe_log_print("   ✅ Clicked audio button via absolute coordinates")
+                                            await safe_async_sleep(3)
+                                            
+                                            # Verify we're now in audio mode
+                                            is_audio = await frame.evaluate("""
+                                                () => {
+                                                    const audioEl = document.querySelector('audio');
+                                                    const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload-link');
+                                                    return audioEl !== null || downloadLink !== null;
+                                                }
+                                            """)
+                                            if is_audio:
+                                                return True
+                            except Exception as e:
+                                safe_log_print(f"   ⚠️  Coordinate click failed: {str(e)[:30]}")
+                            
+                            # Fallback: regular click (with viewport check)
+                            try:
+                                # Ensure element is in viewport before clicking
+                                box = await audio_btn.bounding_box()
+                                if box:
+                                    viewport = self.page.viewport_size
+                                    if viewport:
+                                        # Check if element is visible in viewport
+                                        challenge_iframe = await self._check_for_challenge_iframe()
+                                        if challenge_iframe:
+                                            iframe_box = await challenge_iframe.bounding_box()
+                                            if iframe_box:
+                                                element_top = iframe_box['y'] + box['y']
+                                                element_bottom = element_top + box['height']
+                                                viewport_bottom = viewport['height']
+                                                
+                                                # If element is below viewport, scroll down
+                                                if element_bottom > viewport_bottom:
+                                                    scroll_y = element_top - (viewport['height'] / 2)
+                                                    await self.page.evaluate(f"window.scrollTo(0, {scroll_y})")
+                                                    safe_log_print("   📜 Scrolled page to bring audio button into view")
+                                                    await safe_async_sleep(0.5)
+                                                
+                                await audio_btn.click(timeout=5000)
+                                safe_log_print("   ✅ Clicked audio button (regular click)")
+                                await safe_async_sleep(3)
+                                
+                                # Verify
+                                is_audio = await frame.evaluate("""
+                                    () => {
+                                        const audioEl = document.querySelector('audio');
+                                        const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload-link');
+                                        return audioEl !== null || downloadLink !== null;
+                                    }
+                                """)
+                                if is_audio:
+                                    return True
+                            except Exception as e:
+                                safe_log_print(f"   ⚠️  Regular click failed: {str(e)[:30]}")
                 except:
                     continue
             
-            # Try JavaScript click as last resort
+            # Method 2: Try JavaScript click (more reliable for iframes) with viewport adjustment
             try:
                 clicked = await frame.evaluate("""
                     () => {
@@ -921,12 +1219,37 @@ class UltimateLocalCaptchaSolver:
                             '#recaptcha-audio-button',
                             'button[title*="audio"]',
                             'button[title*="Audio"]',
-                            '.rc-button-audio'
+                            'button[aria-label*="audio"]',
+                            'button[aria-label*="Audio"]',
+                            '.rc-button-audio',
+                            'button.rc-button-audio',
+                            '[class*="audio-button"]'
                         ];
                         for (const sel of selectors) {
                             const btn = document.querySelector(sel);
-                            if (btn) {
-                                btn.click();
+                            if (btn && btn.offsetParent !== null) { // Visible
+                                // Scroll button into view first
+                                try {
+                                    btn.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+                                } catch (e) {
+                                    btn.scrollIntoView({ block: 'center' });
+                                }
+                                
+                                // Also try to scroll the iframe if it exists
+                                try {
+                                    const iframe = btn.closest('iframe') || window.frameElement;
+                                    if (iframe && iframe.scrollIntoView) {
+                                        iframe.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    }
+                                } catch (e) {
+                                    // Iframe scroll failed, continue
+                                }
+                                
+                                // Small delay to ensure scroll completes
+                                setTimeout(() => {
+                                    btn.click();
+                                }, 300);
+                                
                                 return true;
                             }
                         }
@@ -934,11 +1257,21 @@ class UltimateLocalCaptchaSolver:
                     }
                 """)
                 if clicked:
-                    safe_log_print("   ✅ Clicked audio button via JavaScript")
-                    await safe_async_sleep(2)
-                    return True
-            except:
-                pass
+                    safe_log_print("   ✅ Clicked audio button via JavaScript (with viewport adjustment)")
+                    await safe_async_sleep(3)
+                    
+                    # Verify
+                    is_audio = await frame.evaluate("""
+                        () => {
+                            const audioEl = document.querySelector('audio');
+                            const downloadLink = document.querySelector('a.rc-audiochallenge-tdownload-link');
+                            return audioEl !== null || downloadLink !== null;
+                        }
+                    """)
+                    if is_audio:
+                        return True
+            except Exception as e:
+                safe_log_print(f"   ⚠️  JavaScript click failed: {str(e)[:30]}")
             
             return False
             
@@ -1025,7 +1358,7 @@ class UltimateLocalCaptchaSolver:
                 
                 if attempt < 4:
                     safe_log_print(f"   ⏳ Audio URL not found yet (attempt {attempt + 1}/5), waiting...")
-                    await safe_async_sleep(3)
+                    await safe_async_sleep(5)  # Wait longer between attempts
             
             if not audio_url:
                 safe_log_print("   ⚠️  Could not find audio URL after 5 attempts")

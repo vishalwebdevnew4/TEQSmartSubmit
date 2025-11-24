@@ -1,0 +1,69 @@
+Traceback (most recent call last):
+  File "test_single_domain.py", line 558, in test_single_domain
+    captcha_result = await solve_captcha_with_retry(page, url, max_retries=5)
+  File "test_single_domain.py", line 271, in solve_captcha_with_retry
+    site_key = await page.evaluate("""
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/async_api/_generated.py", line 8491, in evaluate
+    await self._impl_obj.evaluate(
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/_impl/_page.py", line 469, in evaluate
+    return await self._main_frame.evaluate(expression, arg)
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/_impl/_frame.py", line 278, in evaluate
+    await self._channel.send(
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/_impl/_connection.py", line 59, in send
+    return await self._connection.wrap_api_call(
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/_impl/_connection.py", line 520, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TargetClosedError: Page.evaluate: Target page, context or browser has been closed
+Traceback (most recent call last):
+  File "test_single_domain.py", line 657, in <module>
+    asyncio.run(main())
+  File "/usr/lib/python3.8/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/usr/lib/python3.8/asyncio/base_events.py", line 616, in run_until_complete
+    return future.result()
+  File "test_single_domain.py", line 645, in main
+    success = await test_single_domain(url, headless=False)
+  File "test_single_domain.py", line 632, in test_single_domain
+    await page.screenshot(path="test_error.png")
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/async_api/_generated.py", line 9712, in screenshot
+    await self._impl_obj.screenshot(
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/_impl/_page.py", line 790, in screenshot
+    encoded_binary = await self._channel.send("screenshot", params)
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/_impl/_connection.py", line 59, in send
+    return await self._connection.wrap_api_call(
+  File "/home/teqtop/.local/lib/python3.8/site-packages/playwright/_impl/_connection.py", line 520, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TargetClosedError: Page.screenshot: Target page, context or browser has been closed
+================================================================================
+🌐 SINGLE DOMAIN TEST - UNIVERSAL FORM SOLVER
+================================================================================
+
+📍 URL: https://petpointmedia.com/contact-us/
+🖥️  Headless: False
+🔧 Features:
+   - Auto-detects and fills ALL form fields
+   - Handles Google automation detection (refresh & retry)
+   - Retries CAPTCHA on timeout
+
+================================================================================
+
+⏳ Navigating...
+⚠️  Google error detected on page load, refreshing...
+⚠️  Google error detected on page load, refreshing...
+⚠️  Google error persists after 3 attempts
+✅ Page loaded
+🔍 Checking for popups/banners...
+   ✅ Closed popup/banner: [class*="subscribe"] button
+   📝 Auto-detecting and filling all form fields...
+      ✅ Filled text: wpforms[fields][5] = GCPsvpdx6euimI...
+   ✅ Filled 1 field(s)
+
+🔐 Solving CAPTCHA...
+   ⚠️  Error (attempt 1): Page.evaluate: Target page, context or browser has
+   ⚠️  Error (attempt 2): Page.evaluate: Target page, context or browser has
+   ⚠️  Error (attempt 3): Page.evaluate: Target page, context or browser has
+   ⚠️  Error (attempt 4): Page.evaluate: Target page, context or browser has
+
+❌ Error: Page.evaluate: Target page, context or browser has been closed
+
+❌ Error: Page.screenshot: Target page, context or browser has been closed

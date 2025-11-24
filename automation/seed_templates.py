@@ -33,7 +33,7 @@ UNIVERSAL_TEMPLATE = {
         "use_local_captcha_solver": True,
         "use_hybrid_captcha_solver": False,
         "captcha_service": "local",
-        "headless": True,
+        "headless": False,  # Non-headless for better CAPTCHA solving (especially audio challenges)
         "wait_until": "load",
         "test_data": {
             "name": "TEQ QA User",
@@ -66,7 +66,7 @@ INTERIOR_DESIGN_TEMPLATE = {
         "use_local_captcha_solver": True,
         "use_hybrid_captcha_solver": False,
         "captcha_service": "local",
-        "headless": True,
+        "headless": False,  # Non-headless for better CAPTCHA solving (especially audio challenges)
         "wait_until": "load",
         "test_data": {
             "name": "TEQ QA User",

@@ -7,11 +7,19 @@ Designed to NEVER fail catastrophically and ALWAYS return valid JSON.
 
 from __future__ import annotations
 
+# CRITICAL: Print to stderr immediately so route.ts can capture it
+import sys
+print("=" * 80, file=sys.stderr, flush=True)
+print("🚀 PYTHON SCRIPT STARTING", file=sys.stderr, flush=True)
+print("=" * 80, file=sys.stderr, flush=True)
+print(f"Python version: {sys.version}", file=sys.stderr, flush=True)
+print(f"Script path: {__file__}", file=sys.stderr, flush=True)
+print("", file=sys.stderr, flush=True)
+
 import argparse
 import asyncio
 import json
 import os
-import sys
 import time
 import traceback
 import random
@@ -99,7 +107,7 @@ def ultra_safe_log_print(*args, **kwargs):
     
     for attempt in range(MAX_ATTEMPTS):
         try:
-            # Safely get output stream
+            # Safely get output stream - ALWAYS use stderr for logs so they're captured
             output_file = None
             for stream in [sys.stderr, sys.stdout]:
                 try:
@@ -128,13 +136,12 @@ def ultra_safe_log_print(*args, **kwargs):
                 except:
                     safe_args.append("[unprintable]")
             
-            # Safely print
-            print(*safe_args, **{**kwargs, 'file': output_file})
+            # Safely print to stderr (for logs) - this ensures logs are captured by route.ts
+            print(*safe_args, **{**kwargs, 'file': sys.stderr})
             
-            # Safely flush
+            # ALWAYS flush stderr to ensure logs are captured immediately
             try:
-                if hasattr(output_file, 'flush') and output_file != sys.stderr and output_file != sys.stdout:
-                    output_file.flush()
+                sys.stderr.flush()
             except:
                 pass
                 
@@ -719,12 +726,19 @@ async def ultra_safe_page_operation(page, operation_name: str, operation, *args,
 class UltimatePlaywrightManager:
     """Manage Playwright lifecycle with ultimate resilience."""
     
-    def __init__(self):
+    def __init__(self, headless: bool = False):
         self.playwright = None
         self.browser = None
         self.context = None
         self.page = None
-        self.captcha_solver = LocalCaptchaSolver(page=None)  # Will be set when page is available
+        self.headless = headless
+        # Use UltimateLocalCaptchaSolver for audio challenge support
+        try:
+            from captcha_solver import UltimateLocalCaptchaSolver
+            self.captcha_solver = UltimateLocalCaptchaSolver(page=None)  # Will be set when page is available
+        except:
+            # Fallback to LocalCaptchaSolver if UltimateLocalCaptchaSolver not available
+            self.captcha_solver = LocalCaptchaSolver(page=None)  # Will be set when page is available
         
     async def start(self):
         """Start Playwright with multiple fallback strategies."""
@@ -757,9 +771,9 @@ class UltimatePlaywrightManager:
                 try:
                     browser_launcher = getattr(self.playwright, browser_type).launch
                     self.browser = await browser_launcher(
-                        headless=True,
+                        headless=self.headless,  # Use template setting
                         timeout=120000,
-                        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+                        args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-blink-features=AutomationControlled']
                     )
                     ultra_safe_log_print(f"✅ Browser launched: {browser_type}")
                     break
@@ -894,7 +908,7 @@ async def ultra_safe_template_load(template_path: Path) -> Dict[str, Any]:
             "message": "Test message"
         },
         "max_timeout_seconds": 600,
-        "headless": True
+        "headless": False  # Default to non-headless for better CAPTCHA solving
     }
     
     # Try to load template file
@@ -919,6 +933,170 @@ async def ultra_safe_template_load(template_path: Path) -> Dict[str, Any]:
         ultra_safe_log_print("⚠️  Using default template (JSON parse failed)")
     
     return template
+
+async def handle_banners_and_popups(page) -> int:
+    """ULTRA-RESILIENT banner/popup handler - closes cookie banners, newsletter popups, welcome modals, etc."""
+    banners_closed = 0
+    
+    if not page or page.is_closed():
+        return banners_closed
+    
+    try:
+        # Wait a bit for banners to appear
+        await asyncio.sleep(1)
+        
+        # Comprehensive banner/popup detection and closing
+        closed_count = await page.evaluate("""
+            () => {
+                let closed = 0;
+                
+                // Common selectors for banners, popups, modals, overlays
+                const selectors = [
+                    // Cookie consent banners
+                    '[id*="cookie"]', '[class*="cookie"]', '[id*="Cookie"]', '[class*="Cookie"]',
+                    '[id*="consent"]', '[class*="consent"]', '[id*="Consent"]', '[class*="Consent"]',
+                    '[id*="gdpr"]', '[class*="gdpr"]', '[id*="GDPR"]', '[class*="GDPR"]',
+                    '#cookie-notice', '.cookie-notice', '#cookieNotice', '.cookieNotice',
+                    '#cookieConsent', '.cookieConsent', '#cookie-consent', '.cookie-consent',
+                    
+                    // Newsletter/subscribe popups
+                    '[id*="newsletter"]', '[class*="newsletter"]', '[id*="Newsletter"]', '[class*="Newsletter"]',
+                    '[id*="subscribe"]', '[class*="subscribe"]', '[id*="Subscribe"]', '[class*="Subscribe"]',
+                    '[id*="mailing"]', '[class*="mailing"]', '#newsletter-popup', '.newsletter-popup',
+                    
+                    // Welcome/modals/overlays
+                    '[id*="welcome"]', '[class*="welcome"]', '[id*="Welcome"]', '[class*="Welcome"]',
+                    '[id*="modal"]', '[class*="modal"]', '[id*="Modal"]', '[class*="Modal"]',
+                    '[id*="overlay"]', '[class*="overlay"]', '[id*="Overlay"]', '[class*="Overlay"]',
+                    '[id*="popup"]', '[class*="popup"]', '[id*="Popup"]', '[class*="Popup"]',
+                    '.modal', '#modal', '.overlay', '#overlay', '.popup', '#popup',
+                    
+                    // Common banner classes
+                    '.banner', '#banner', '[class*="banner"]', '[id*="banner"]',
+                    '.notification', '#notification', '[class*="notification"]',
+                    '.alert-banner', '.promo-banner', '.sticky-banner',
+                    
+                    // Specific common IDs
+                    '#onetrust-consent-sdk', '#CybotCookieDialog', '#cookie-law-info-bar',
+                    '#cookie-bar', '.cookie-bar', '#cc-window', '.cc-window',
+                    '#eu-cookie', '.eu-cookie', '#cookieDirective', '.cookieDirective'
+                ];
+                
+                // Try to find and close banners
+                for (const selector of selectors) {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(element => {
+                            // Check if element is visible
+                            const style = window.getComputedStyle(element);
+                            const isVisible = style.display !== 'none' && 
+                                            style.visibility !== 'hidden' && 
+                                            style.opacity !== '0' &&
+                                            element.offsetWidth > 0 && 
+                                            element.offsetHeight > 0;
+                            
+                            if (isVisible) {
+                                // Try to find close button within the element
+                                const closeButtons = element.querySelectorAll(
+                                    'button[class*="close"], ' +
+                                    'button[class*="Close"], ' +
+                                    'button[aria-label*="close" i], ' +
+                                    'button[aria-label*="dismiss" i], ' +
+                                    'button[title*="close" i], ' +
+                                    '.close, .Close, [class*="close-button"], ' +
+                                    '[class*="dismiss"], [class*="accept"], ' +
+                                    '[id*="close"], [id*="Close"], ' +
+                                    '[class*="cookie-accept"], ' +
+                                    '[class*="cookie-decline"], ' +
+                                    '[class*="cookie-dismiss"]'
+                                );
+                                
+                                if (closeButtons.length > 0) {
+                                    // Click the first close button
+                                    closeButtons[0].click();
+                                    closed++;
+                                } else {
+                                    // No close button found, try to hide the element directly
+                                    element.style.display = 'none';
+                                    element.style.visibility = 'hidden';
+                                    element.style.opacity = '0';
+                                    element.style.height = '0';
+                                    element.style.overflow = 'hidden';
+                                    closed++;
+                                }
+                            }
+                        });
+                    } catch (e) {
+                        // Continue with next selector
+                    }
+                }
+                
+                // Also try common close button selectors globally
+                const globalCloseSelectors = [
+                    'button[aria-label*="close" i]',
+                    'button[aria-label*="dismiss" i]',
+                    'button[title*="close" i]',
+                    '.close-button', '.dismiss-button', '.accept-button',
+                    '[data-dismiss="modal"]', '[data-bs-dismiss="modal"]'
+                ];
+                
+                for (const selector of globalCloseSelectors) {
+                    try {
+                        const buttons = document.querySelectorAll(selector);
+                        buttons.forEach(button => {
+                            const style = window.getComputedStyle(button);
+                            if (style.display !== 'none' && button.offsetWidth > 0) {
+                                button.click();
+                                closed++;
+                            }
+                        });
+                    } catch (e) {
+                        // Continue
+                    }
+                }
+                
+                return closed;
+            }
+        """)
+        
+        banners_closed = closed_count or 0
+        
+        # If we closed some banners, wait a bit for animations
+        if banners_closed > 0:
+            await asyncio.sleep(1)
+            
+            # Try one more time to catch any that appeared after first attempt
+            additional_closed = await page.evaluate("""
+                () => {
+                    let closed = 0;
+                    const selectors = [
+                        '[id*="cookie"]', '[class*="cookie"]', '[id*="newsletter"]', 
+                        '[class*="newsletter"]', '.modal', '.overlay', '.popup'
+                    ];
+                    
+                    for (const selector of selectors) {
+                        try {
+                            const elements = document.querySelectorAll(selector);
+                            elements.forEach(element => {
+                                const style = window.getComputedStyle(element);
+                                if (style.display !== 'none' && element.offsetHeight > 0) {
+                                    element.style.display = 'none';
+                                    closed++;
+                                }
+                            });
+                        } catch (e) {}
+                    }
+                    return closed;
+                }
+            """)
+            
+            banners_closed += (additional_closed or 0)
+        
+    except Exception as e:
+        ultra_safe_log_print(f"⚠️  Banner handling error: {str(e)[:50]}")
+        # Continue anyway - don't fail the whole process
+    
+    return banners_closed
 
 async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, Any]:
     """ULTRA-RESILIENT simple form filling that cannot fail."""
@@ -2608,13 +2786,13 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
         except:
             pass
         
-        for wait_attempt in range(15):  # Wait up to 15 seconds
+        for wait_attempt in range(30):  # Wait up to 30 seconds (increased from 15)
             await asyncio.sleep(1)
             
             # Check for form POST/GET to the actual form URL
             try:
                 form_submission_found = False
-                # Check POST requests
+                # Check POST requests - VERIFY they contain form data
                 for req in post_requests:
                     try:
                         from urllib.parse import urlparse
@@ -2624,10 +2802,32 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         if (current_domain and req_domain == current_domain) or (form_domain and req_domain == form_domain):
                             # Check if URL matches form action
                             if form_action_url and (req['url'] == form_action_url or req['url'].startswith(form_action_url.split('?')[0])):
-                                form_submission_found = True
-                                form_submission_detected = True
-                                ultra_safe_log_print(f"   ✅ Found form POST to form URL: {req['url'][:100]}")
-                                break
+                                # CRITICAL: Verify POST request contains form data
+                                has_form_data = False
+                                try:
+                                    # Check if we captured form data for this request
+                                    if form_submission_data and form_submission_data.get('url') == req['url']:
+                                        has_form_data = True
+                                        ultra_safe_log_print(f"   ✅ Form data verified in POST request")
+                                    # Also check request post_data if available
+                                    # Note: We can't access post_data from the request object here,
+                                    # but we can check if form_submission_data was set
+                                except:
+                                    pass
+                                
+                                # Only mark as found if we have form data OR if URL clearly indicates form submission
+                                url_lower = req['url'].lower()
+                                is_form_endpoint = any(kw in url_lower for kw in ['contact', 'submit', 'form', 'message', 'send', 'mail', 'api/contact', 'api/submit'])
+                                
+                                if has_form_data or is_form_endpoint:
+                                    form_submission_found = True
+                                    form_submission_detected = True
+                                    ultra_safe_log_print(f"   ✅ Found form POST to form URL: {req['url'][:100]}")
+                                    if has_form_data:
+                                        ultra_safe_log_print(f"      Form data confirmed in request")
+                                    break
+                                else:
+                                    ultra_safe_log_print(f"   ⚠️  POST request found but no form data verified: {req['url'][:100]}")
                     except:
                         pass
                 
@@ -2777,29 +2977,90 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                 ultra_safe_log_print(f"   ⚠️  AJAX check error: {str(e)[:50]}")
                 pass
             
+            # Additional verification: Check if form fields are cleared (indicates submission)
+            if wait_attempt >= 5:  # Only check after 5 seconds
+                try:
+                    form_fields_cleared = await page.evaluate("""
+                        () => {
+                            const form = document.querySelector('form');
+                            if (!form) return { cleared: false, reason: 'no_form' };
+                            
+                            const inputs = Array.from(form.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea'));
+                            let filled_count = 0;
+                            let empty_count = 0;
+                            
+                            inputs.forEach(input => {
+                                if (input.value && input.value.trim().length > 0) {
+                                    filled_count++;
+                                } else {
+                                    empty_count++;
+                                }
+                            });
+                            
+                            // If most fields are empty, form was likely submitted
+                            const cleared = empty_count > filled_count && inputs.length > 0;
+                            return { cleared: cleared, filled: filled_count, empty: empty_count, total: inputs.length };
+                        }
+                    """)
+                    
+                    if form_fields_cleared.get('cleared') and not form_submission_detected:
+                        ultra_safe_log_print(f"   🔍 Form fields appear cleared ({form_fields_cleared.get('empty')}/{form_fields_cleared.get('total')} empty) - possible submission")
+                except:
+                    pass
+            
             if form_submission_detected:
                 result["form_submission_detected"] = True
-                result["submission_success"] = True
-                ultra_safe_log_print("   ✅ Form submission confirmed!")
-                break
+                # STRICT: Only mark as success if we have verified form data
+                if form_submission_data:
+                    result["submission_success"] = True
+                    ultra_safe_log_print("   ✅ Form submission confirmed with verified form data!")
+                    break
+                elif wait_attempt >= 20:  # Wait at least 20 seconds before accepting without form data
+                    # Even after 20 seconds, only mark as success if we have strong indicators
+                    # Check for success messages on page
+                    try:
+                        page_content = await page.content()
+                        content_lower = page_content.lower()
+                        strong_indicators = ['thank you', 'success', 'received', 'submitted successfully', 'message sent']
+                        has_strong_indicator = any(indicator in content_lower for indicator in strong_indicators)
+                        if has_strong_indicator:
+                            result["submission_success"] = True
+                            ultra_safe_log_print("   ✅ Form submission confirmed by success message on page!")
+                            break
+                        else:
+                            ultra_safe_log_print("   ⚠️  Form submission detected but no form data or success message - marking as attempted only")
+                            result["submission_success"] = False
+                            break
+                    except:
+                        ultra_safe_log_print("   ⚠️  Form submission detected but no form data - marking as attempted only")
+                        result["submission_success"] = False
+                        break
+                else:
+                    ultra_safe_log_print("   ⏳ Form submission detected but waiting for form data verification...")
+                    # Continue waiting to verify
             
-            # Check for success indicators on page
+            # Check for success indicators on page (but require form_submission_data for strict verification)
             try:
                 page_content = await page.content()
                 content_lower = page_content.lower()
                 success_indicators = ['thank you', 'thankyou', 'success', 'received', 'submitted successfully', 'message sent', 'your message has been']
                 if any(indicator in content_lower for indicator in success_indicators):
-                    result["submission_success"] = True
-                    ultra_safe_log_print("   ✅ Success indicators found on page!")
-                    # If success indicators found, also mark as detected
-                    if not form_submission_detected:
-                        form_submission_detected = True
-                        result["form_submission_detected"] = True
-                    break
+                    # Only mark as success if we also have form data OR if we've waited long enough
+                    if form_submission_data or wait_attempt >= 15:
+                        result["submission_success"] = True
+                        ultra_safe_log_print("   ✅ Success indicators found on page!")
+                        # If success indicators found, also mark as detected
+                        if not form_submission_detected:
+                            form_submission_detected = True
+                            result["form_submission_detected"] = True
+                        break
+                    else:
+                        ultra_safe_log_print("   ⏳ Success message found but waiting for form data verification...")
             except:
                 pass
     
     # Final check: if we have POST requests to the form URL, consider it submitted
+    # BUT: Only if we have form_submission_data to verify actual form submission
     if not form_submission_detected and post_requests:
         for req in post_requests:
             url_lower = req['url'].lower()
@@ -2812,21 +3073,33 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     current_domain = urlparse(page.url).netloc if page.url else ""
                     form_domain = urlparse(form_action_url).netloc if form_action_url else ""
                     
-                    # Match by domain
+                    # STRICT: Only mark as submitted if:
+                    # 1. URL matches form action OR
+                    # 2. URL contains form keywords AND we have form_submission_data
+                    url_matches_action = False
+                    if form_action_url:
+                        form_base = form_action_url.split('?')[0]
+                        req_base = req['url'].split('?')[0]
+                        url_matches_action = req_base == form_base or req['url'].startswith(form_base)
+                    
+                    is_form_endpoint = any(kw in url_lower for kw in ['contact', 'submit', 'send', 'message', 'form', 'api/contact', 'api/submit'])
+                    has_form_data = form_submission_data and (form_submission_data.get('url') == req['url'] or form_submission_data.get('url', '').startswith(req['url'].split('?')[0]))
+                    
+                    # Match by domain AND (form action OR form endpoint with data)
                     if current_domain and req_domain == current_domain:
-                        form_submission_detected = True
-                        ultra_safe_log_print(f"   ✅ Form submission detected by domain match: {req['url'][:80]}")
-                        break
+                        if url_matches_action or (is_form_endpoint and has_form_data):
+                            form_submission_detected = True
+                            ultra_safe_log_print(f"   ✅ Form submission detected by domain match: {req['url'][:80]}")
+                            if has_form_data:
+                                ultra_safe_log_print(f"      Form data verified in request")
+                            break
                     # Match by form action
                     if form_domain and req_domain == form_domain:
-                        form_submission_detected = True
-                        ultra_safe_log_print(f"   ✅ Form submission detected by form action match: {req['url'][:80]}")
-                        break
-                    # Match by URL pattern (but exclude analytics)
-                    if not any(ex in url_lower for ex in ['google.com', 'pagead', 'ccm', 'analytics']):
-                        if any(kw in url_lower for kw in ['contact', 'submit', 'send', 'message']):
+                        if url_matches_action or (is_form_endpoint and has_form_data):
                             form_submission_detected = True
-                            ultra_safe_log_print(f"   ✅ Form submission detected by URL pattern: {req['url'][:80]}")
+                            ultra_safe_log_print(f"   ✅ Form submission detected by form action match: {req['url'][:80]}")
+                            if has_form_data:
+                                ultra_safe_log_print(f"      Form data verified in request")
                             break
                 except:
                     pass
@@ -2869,27 +3142,51 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     req_base = req['url'].split('?')[0]
                     if form_base and (req_base == form_base or req['url'].startswith(form_base)):
                         if '?' in req['url']:  # Has query params = form data submitted
-                            form_submission_detected = True
-                            result["form_submission_detected"] = True
-                            result["submission_success"] = True
-                            ultra_safe_log_print("   ✅ Form submission detected (GET with query params)")
-                            break
+                            # Verify query params contain form fields
+                            try:
+                                from urllib.parse import urlparse, parse_qs
+                                query_string = urlparse(req['url']).query
+                                query_params = parse_qs(query_string)
+                                # Check if query params contain form fields
+                                has_form_fields = any(key.lower() in ['name', 'email', 'message', 'phone', 'subject', 'contact'] for key in query_params.keys())
+                                if has_form_fields:
+                                    form_submission_detected = True
+                                    result["form_submission_detected"] = True
+                                    result["submission_success"] = True
+                                    ultra_safe_log_print("   ✅ Form submission detected (GET with form data in query params)")
+                                    break
+                                else:
+                                    ultra_safe_log_print(f"   ⚠️  GET request has query params but no form fields: {req['url'][:80]}")
+                            except:
+                                # If we can't parse, be conservative
+                                ultra_safe_log_print(f"   ⚠️  GET request with query params but couldn't verify form data: {req['url'][:80]}")
+                                pass
             except:
                 pass
     
-    # If we have POST requests but no detection, still mark as attempted
+    # STRICT: Only mark as detected if we have verified form data
+    # Don't mark as success just because there's a POST request - require form data verification
     if result["post_requests"] > 0 and not form_submission_detected:
-        # Check if any POST request is to the same domain (likely form submission)
+        # Check if any POST request is to the same domain AND has form data
         for req in post_requests:
             try:
                 from urllib.parse import urlparse
                 req_domain = urlparse(req['url']).netloc
                 current_domain = urlparse(page.url).netloc if page.url else ""
                 if current_domain and req_domain == current_domain:
-                    form_submission_detected = True
-                    result["form_submission_detected"] = True
-                    ultra_safe_log_print("   ✅ Form submission likely (POST to same domain)")
-                    break
+                    # CRITICAL: Only mark as detected if we have form_submission_data
+                    if form_submission_data:
+                        form_submission_detected = True
+                        result["form_submission_detected"] = True
+                        ultra_safe_log_print("   ✅ Form submission verified (POST with form data)")
+                        break
+                    else:
+                        # Check if URL suggests it's a form endpoint
+                        url_lower = req['url'].lower()
+                        is_form_endpoint = any(kw in url_lower for kw in ['contact', 'submit', 'send', 'message', 'form', 'api/contact', 'api/submit', 'api/message'])
+                        if is_form_endpoint:
+                            ultra_safe_log_print(f"   ⚠️  POST to form endpoint but no form data captured: {req['url'][:80]}")
+                            ultra_safe_log_print("   ⚠️  Submission NOT verified - may be a false positive")
             except:
                 pass
     
@@ -2910,38 +3207,54 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         "attempt_id": int(time.time() * 1000)
     }
     
-    playwright_manager = UltimatePlaywrightManager()
+    # Step 1: Load template (cannot fail) - need to load before creating manager
+    ultra_safe_log_print("=" * 80)
+    ultra_safe_log_print("🚀 STARTING AUTOMATION")
+    ultra_safe_log_print("=" * 80)
+    ultra_safe_log_print(f"📋 Loading template from: {template_path}")
+    template = await ultra_safe_template_load(template_path)
+    result["steps_completed"].append("template_loaded")
+    result["template_used"] = "custom" if template.get("fields") else "default"
+    ultra_safe_log_print(f"✅ Template loaded: {result['template_used']} template")
+    
+    # Get headless setting from template (default to False for better CAPTCHA solving)
+    headless_mode = template.get("headless", False)
+    if headless_mode:
+        ultra_safe_log_print("🖥️  Running in headless mode")
+    else:
+        ultra_safe_log_print("🖥️  Running in visible browser mode (better for CAPTCHA solving)")
+    
+    playwright_manager = UltimatePlaywrightManager(headless=headless_mode)
     
     try:
-        # Step 1: Load template (cannot fail)
-        ultra_safe_log_print("📋 Loading template...")
-        template = await ultra_safe_template_load(template_path)
-        result["steps_completed"].append("template_loaded")
-        result["template_used"] = "custom" if template.get("fields") else "default"
-        
         # Step 2: Initialize Playwright (cannot fail)
-        ultra_safe_log_print("🚀 Initializing browser...")
+        ultra_safe_log_print(f"🚀 Initializing browser (headless={headless_mode})...")
         playwright_ready = await playwright_manager.start()
         
         if not playwright_ready:
+            error_msg = "Browser initialization failed"
+            ultra_safe_log_print(f"❌ {error_msg}")
             result.update({
                 "status": "error",
-                "message": "Browser initialization failed",
+                "message": error_msg,
                 "error_type": "browser_init_failed",
                 "recovered": True
             })
             return result
         
+        ultra_safe_log_print("✅ Browser initialized successfully")
         result["steps_completed"].append("browser_ready")
         
         # Step 3: Navigate to URL (cannot fail)
-        ultra_safe_log_print("🌐 Navigating to URL...")
+        ultra_safe_log_print(f"🌐 Navigating to URL: {url}")
         navigation_success = await playwright_manager.navigate(url)
         
         if not navigation_success:
+            error_msg = f"Navigation failed to {url}"
+            ultra_safe_log_print(f"❌ {error_msg}")
             result.update({
                 "status": "error", 
-                "message": "Navigation failed",
+                "message": error_msg + "\n\nThis usually means the page failed to load or timed out.",
                 "error_type": "navigation_failed",
                 "recovered": True
             })
@@ -2952,6 +3265,44 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             lambda: playwright_manager.page.url,
             default_return=url
         )
+        
+        # Step 3.5: Handle banners, popups, and cookie consent (CRITICAL - must be done before form interaction)
+        ultra_safe_log_print("")
+        ultra_safe_log_print("🚫 STEP 3.5: Handling banners, popups, and cookie consent...")
+        ultra_safe_log_print("-" * 80)
+        banners_closed = await handle_banners_and_popups(playwright_manager.page)
+        result["banners_closed"] = banners_closed
+        if banners_closed > 0:
+            ultra_safe_log_print(f"✅ Closed {banners_closed} banner(s)/popup(s)")
+        else:
+            ultra_safe_log_print("ℹ️  No banners or popups detected")
+        ultra_safe_log_print("")
+        
+        # Step 3.6: Ensure forms appear above all banners with high z-index
+        ultra_safe_log_print("📋 STEP 3.6: Ensuring forms appear above banners...")
+        ultra_safe_log_print("-" * 80)
+        forms_updated = await playwright_manager.page.evaluate("""
+            () => {
+                const forms = document.querySelectorAll('form');
+                let updated = 0;
+                
+                forms.forEach(form => {
+                    // Apply high z-index and position relative to ensure form is above banners
+                    form.style.position = 'relative';
+                    form.style.zIndex = '999999';
+                    form.style.backgroundColor = form.style.backgroundColor || 'transparent';
+                    updated++;
+                });
+                
+                return updated;
+            }
+        """)
+        
+        if forms_updated > 0:
+            ultra_safe_log_print(f"✅ Applied high z-index to {forms_updated} form(s) to ensure they appear above banners")
+        else:
+            ultra_safe_log_print("ℹ️  No forms found to update")
+        ultra_safe_log_print("")
         
         # Check if there's a contact form, if not try to find contact page
         try:
@@ -3083,42 +3434,153 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         result["steps_completed"].append("captcha_handled")
         
         # Step 5: Simple form filling (cannot fail)
-        ultra_safe_log_print("✍️  Filling form fields...")
+        ultra_safe_log_print("")
+        ultra_safe_log_print("✍️  STEP 5: Filling form fields...")
+        ultra_safe_log_print("-" * 80)
         fill_result = await ultra_simple_form_fill(playwright_manager.page, template)
         result.update(fill_result)
         result["steps_completed"].append("form_filled")
+        ultra_safe_log_print(f"✅ Form filling completed: {fill_result.get('fields_filled', 0)} field(s) filled")
+        ultra_safe_log_print("")
         
         # Step 5.5: Check and solve CAPTCHA again (after form filling, CAPTCHA might be visible now)
-        ultra_safe_log_print("🔐 Re-checking CAPTCHAs after form fill...")
+        ultra_safe_log_print("🔐 STEP 5.5: Re-checking CAPTCHAs after form fill...")
+        ultra_safe_log_print("-" * 80)
         captcha_result_after = await playwright_manager.handle_captchas()
         if captcha_result_after.get("captchas_solved", 0) > 0:
-            ultra_safe_log_print("✅ CAPTCHA solved after form fill")
+            ultra_safe_log_print(f"✅ CAPTCHA solved after form fill: {captcha_result_after.get('captchas_solved')} solved")
             result["captcha_result"] = captcha_result_after
+        else:
+            ultra_safe_log_print("ℹ️  No additional CAPTCHAs found after form fill")
+        ultra_safe_log_print("")
         
         # Step 6: Form submission (cannot fail)
-        ultra_safe_log_print("📤 Submitting form...")
+        ultra_safe_log_print("📤 STEP 6: Submitting form...")
+        ultra_safe_log_print("-" * 80)
         submit_result = await ultra_simple_form_submit(playwright_manager.page)
         result.update(submit_result)
         result["steps_completed"].append("submission_attempted")
+        ultra_safe_log_print(f"✅ Submission step completed")
+        ultra_safe_log_print(f"   - Attempted: {submit_result.get('submission_attempted', False)}")
+        ultra_safe_log_print(f"   - Detected: {submit_result.get('form_submission_detected', False)}")
+        ultra_safe_log_print(f"   - Success flag: {submit_result.get('submission_success', False)}")
+        ultra_safe_log_print(f"   - POST requests: {submit_result.get('post_requests', 0)}")
+        ultra_safe_log_print(f"   - Form data captured: {submit_result.get('form_submission_data') is not None}")
+        ultra_safe_log_print("")
         
-        # Determine final status
-        if submit_result.get("submission_success"):
-            result.update({
-                "status": "success",
-                "message": "Form submitted successfully"
-            })
+        # Collect all logs for final message - DETAILED VERSION
+        all_logs = []
+        all_logs.append("=" * 80)
+        all_logs.append("AUTOMATION EXECUTION LOG - DETAILED")
+        all_logs.append("=" * 80)
+        all_logs.append(f"URL: {url}")
+        all_logs.append(f"Template: {template.get('name', 'Universal Auto-Detect')}")
+        all_logs.append(f"Template Type: {result.get('template_used', 'unknown')}")
+        all_logs.append(f"Headless Mode: {headless_mode}")
+        all_logs.append("")
+        all_logs.append("STEPS COMPLETED:")
+        for step in result.get('steps_completed', []):
+            all_logs.append(f"  ✅ {step}")
+        all_logs.append("")
+        
+        # Add form filling details
+        all_logs.append("FORM FILLING:")
+        fields_filled = result.get("fields_filled", 0)
+        fields_attempted = result.get("fields_attempted", 0)
+        all_logs.append(f"  Fields attempted: {fields_attempted}")
+        all_logs.append(f"  Fields filled: {fields_filled}")
+        if fields_filled == 0:
+            all_logs.append("  ⚠️  WARNING: No form fields were filled!")
+        all_logs.append("")
+        
+        # Add CAPTCHA details
+        all_logs.append("CAPTCHA HANDLING:")
+        captcha_result = result.get("captcha_result", {})
+        captchas_detected = captcha_result.get("captchas_detected", 0)
+        captchas_solved = captcha_result.get("captchas_solved", 0)
+        all_logs.append(f"  CAPTCHAs detected: {captchas_detected}")
+        all_logs.append(f"  CAPTCHAs solved: {captchas_solved}")
+        if captchas_detected > 0 and captchas_solved == 0:
+            all_logs.append("  ⚠️  WARNING: CAPTCHAs detected but NOT solved!")
+        elif captchas_detected == 0:
+            all_logs.append("  ℹ️  No CAPTCHAs detected on page")
+        all_logs.append("")
+        
+        # Add submission details
+        all_logs.append("SUBMISSION DETAILS:")
+        all_logs.append(f"  Submission attempted: {submit_result.get('submission_attempted', False)}")
+        all_logs.append(f"  Form submission detected: {submit_result.get('form_submission_detected', False)}")
+        all_logs.append(f"  Submission success: {submit_result.get('submission_success', False)}")
+        all_logs.append(f"  Method used: {submit_result.get('method_used', 'none')}")
+        all_logs.append(f"  POST requests: {submit_result.get('post_requests', 0)}")
+        all_logs.append(f"  POST responses: {submit_result.get('post_responses', 0)}")
+        all_logs.append(f"  GET requests: {submit_result.get('get_requests', 0)}")
+        
+        form_submission_data = submit_result.get("form_submission_data")
+        if form_submission_data:
+            all_logs.append(f"  ✅ Form data verified in request")
+            if isinstance(form_submission_data, dict):
+                all_logs.append(f"     URL: {form_submission_data.get('url', 'unknown')[:80]}")
+                if form_submission_data.get('data_preview'):
+                    all_logs.append(f"     Data preview: {form_submission_data.get('data_preview', '')[:200]}")
+        else:
+            all_logs.append(f"  ⚠️  WARNING: No form data captured in request!")
+            all_logs.append(f"     This may indicate the form was NOT actually submitted.")
+        
+        all_logs.append("")
+        all_logs.append("FINAL VERIFICATION:")
+        has_form_data = submit_result.get("form_submission_data") is not None
+        form_detected = submit_result.get("form_submission_detected", False)
+        submission_success = submit_result.get("submission_success", False)
+        
+        all_logs.append(f"  Form submission detected: {form_detected}")
+        all_logs.append(f"  Form data verified: {has_form_data}")
+        all_logs.append(f"  Submission success flag: {submission_success}")
+        
+        if submission_success and not has_form_data:
+            all_logs.append("  ⚠️  WARNING: Marked as success but NO form data verified!")
+            all_logs.append("     This is likely a FALSE POSITIVE - form may not have actually submitted.")
+        elif submission_success and has_form_data:
+            all_logs.append("  ✅ All verification checks passed - submission confirmed.")
+        elif not submission_success:
+            all_logs.append("  ❌ Submission verification failed.")
+        
+        all_logs.append("")
+        all_logs.append("=" * 80)
+        
+        # Determine final status - STRICT verification
+        if submit_result.get("submission_success") and submit_result.get("form_submission_detected"):
+            # Only mark as success if BOTH submission_success AND form_submission_detected are True
+            # AND we have form_submission_data
+            has_form_data = submit_result.get("form_submission_data") is not None
+            if has_form_data:
+                all_logs.append("✅ FINAL STATUS: SUCCESS - Form submitted with verified data")
+                result.update({
+                    "status": "success",
+                    "message": "\n".join(all_logs)
+                })
+            else:
+                # Even if marked as success, if no form data, mark as submitted (unconfirmed)
+                all_logs.append("⚠️  FINAL STATUS: SUBMITTED (unconfirmed) - No form data verification")
+                result.update({
+                    "status": "submitted",
+                    "message": "\n".join(all_logs)
+                })
         elif submit_result.get("submission_attempted"):
+            all_logs.append("⚠️  FINAL STATUS: SUBMITTED (unconfirmed) - Submission attempted but not verified")
             result.update({
                 "status": "submitted",
-                "message": "Form submission attempted (success unconfirmed)"
+                "message": "\n".join(all_logs)
             })
         else:
+            all_logs.append("❌ FINAL STATUS: COMPLETED - No submission was attempted")
             result.update({
                 "status": "completed",
-                "message": "Process completed without submission"
+                "message": "\n".join(all_logs)
             })
         
         ultra_safe_log_print("✅ Process completed successfully")
+        ultra_safe_log_print("\n".join(all_logs))
         return result
         
     except Exception as e:
@@ -3146,16 +3608,27 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
 async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     """ULTRA-RESILIENT main async function - CANNOT FAIL to return JSON."""
     
+    # Print startup logs immediately
+    ultra_safe_log_print("=" * 80)
+    ultra_safe_log_print("🚀 AUTOMATION STARTING")
+    ultra_safe_log_print("=" * 80)
+    ultra_safe_log_print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
     # Validate inputs with fallbacks
     url = UltimateSafetyWrapper.execute_sync(
         lambda: args.url if hasattr(args, 'url') and args.url else "https://example.com",
         default_return="https://example.com"
     )
     
+    ultra_safe_log_print(f"📋 Target URL: {url}")
+    
     template_path = UltimateSafetyWrapper.execute_sync(
         lambda: Path(args.template) if hasattr(args, 'template') and args.template else Path("default.json"),
         default_return=Path("default.json")
     )
+    
+    ultra_safe_log_print(f"📄 Template path: {template_path}")
+    ultra_safe_log_print("")
     
     try:
         # Get timeout from template or use default
@@ -3177,41 +3650,106 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     
     # Run with timeout protection and multiple fallbacks
     try:
+        ultra_safe_log_print(f"⏱️  Starting submission with timeout: {timeout} seconds")
+        ultra_safe_log_print("")
+        
         result = await asyncio.wait_for(
             run_ultra_resilient_submission(url, template_path),
             timeout=timeout
         )
         
+        ultra_safe_log_print("")
+        ultra_safe_log_print("=" * 80)
+        ultra_safe_log_print("📊 SUBMISSION PROCESS COMPLETED")
+        ultra_safe_log_print("=" * 80)
+        
         # Ensure result is properly formatted
         if not isinstance(result, dict):
+            ultra_safe_log_print("⚠️  Invalid result format, creating fallback")
             result = {"status": "error", "message": "Invalid result format", "recovered": True}
             
         result["url"] = url  # Ensure URL is always set
         result["timestamp"] = time.time()
         
-        return json.dumps(result)
+        # Print final result summary
+        ultra_safe_log_print(f"Final Status: {result.get('status', 'unknown')}")
+        message_length = len(result.get('message', ''))
+        ultra_safe_log_print(f"Message length: {message_length} characters")
+        
+        # ALWAYS ensure message contains detailed logs - this is critical
+        if not result.get("message") or message_length < 200:
+            ultra_safe_log_print("⚠️  WARNING: Result message is too short or missing, adding detailed info")
+            detailed_logs = []
+            detailed_logs.append("=" * 80)
+            detailed_logs.append("AUTOMATION EXECUTION LOG - DETAILED")
+            detailed_logs.append("=" * 80)
+            detailed_logs.append(f"URL: {url}")
+            detailed_logs.append(f"Template: {template_data.get('name', 'Universal Auto-Detect')}")
+            detailed_logs.append(f"Status: {result.get('status', 'unknown')}")
+            detailed_logs.append(f"Steps completed: {', '.join(result.get('steps_completed', []))}")
+            detailed_logs.append(f"Fields filled: {result.get('fields_filled', 0)}")
+            detailed_logs.append(f"Fields attempted: {result.get('fields_attempted', 0)}")
+            detailed_logs.append(f"CAPTCHAs detected: {result.get('captcha_result', {}).get('captchas_detected', 0)}")
+            detailed_logs.append(f"CAPTCHAs solved: {result.get('captcha_result', {}).get('captchas_solved', 0)}")
+            detailed_logs.append(f"Submission attempted: {result.get('submission_attempted', False)}")
+            detailed_logs.append(f"Form submission detected: {result.get('form_submission_detected', False)}")
+            detailed_logs.append(f"Submission success: {result.get('submission_success', False)}")
+            detailed_logs.append(f"POST requests: {result.get('post_requests', 0)}")
+            detailed_logs.append(f"POST responses: {result.get('post_responses', 0)}")
+            detailed_logs.append("=" * 80)
+            
+            if result.get("message"):
+                result["message"] = "\n".join(detailed_logs) + "\n\n" + result["message"]
+            else:
+                result["message"] = "\n".join(detailed_logs)
+        
+        ultra_safe_log_print("")
+        ultra_safe_log_print("📋 Final message preview (first 500 chars):")
+        ultra_safe_log_print(result.get("message", "")[:500])
+        ultra_safe_log_print("")
+        
+        # Print JSON result to stdout (for route.ts to capture)
+        json_result = json.dumps(result, indent=2)
+        ultra_safe_log_print("📤 Outputting JSON result to stdout...")
+        print(json_result, flush=True)  # Print to stdout for route.ts
+        ultra_safe_log_print("✅ JSON result output complete")
+        
+        return json_result
         
     except asyncio.TimeoutError:
+        ultra_safe_log_print("")
+        ultra_safe_log_print("⏱️  TIMEOUT: Operation exceeded timeout")
         timeout_result = {
             "status": "timeout",
-            "message": f"Operation timed out after {timeout} seconds",
+            "message": f"Operation timed out after {timeout} seconds\n\nAll logs up to timeout:\n{stderr if 'stderr' in locals() else 'No logs captured'}",
             "url": url,
             "error_type": "timeout",
             "recovered": True,
             "timestamp": time.time()
         }
-        return json.dumps(timeout_result)
+        json_result = json.dumps(timeout_result)
+        print(json_result, flush=True)
+        return json_result
         
     except Exception as e:
+        error_msg = str(e)
+        ultra_safe_log_print("")
+        ultra_safe_log_print(f"❌ ERROR: {error_msg}")
+        import traceback
+        traceback_str = traceback.format_exc()
+        ultra_safe_log_print(f"Traceback:\n{traceback_str}")
+        
         error_result = {
             "status": "error",
-            "message": f"Execution failed: {str(e)[:100]}",
+            "message": f"Execution failed: {error_msg}\n\nTraceback:\n{traceback_str}",
             "url": url,
             "error_type": "execution_failed",
             "recovered": True,
             "timestamp": time.time()
         }
-        return json.dumps(error_result)
+        json_result = json.dumps(error_result)
+        print(json_result, flush=True)
+        return json_result
 
 def main() -> int:
     """ULTRA-RESILIENT main function - CANNOT FAIL."""

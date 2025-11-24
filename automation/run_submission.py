@@ -163,11 +163,11 @@ class LocalCaptchaSolver:
             logger.warning(f"Base64 CAPTCHA solving failed: {e}")
             return None
     
-    def solve_captcha_from_url(self, page, img_selector: str) -> Optional[str]:
+    async def solve_captcha_from_url(self, page, img_selector: str) -> Optional[str]:
         """Solve CAPTCHA by extracting image from page."""
         try:
             # Get image source
-            img_src = page.evaluate(f"""
+            img_src = await page.evaluate(f"""
             () => {{
                 const img = document.querySelector('{img_selector}');
                 return img ? img.src : null;
@@ -264,10 +264,10 @@ class UniversalCaptchaSolver:
             'human verification', 'anti-spam', 'type the text', 'enter the text'
         ]
     
-    def detect_captcha_fields(self, page) -> List[Dict[str, Any]]:
+    async def detect_captcha_fields(self, page) -> List[Dict[str, Any]]:
         """Detect CAPTCHA-related fields on the page."""
         try:
-            captcha_elements = page.evaluate("""
+            captcha_elements = await page.evaluate("""
             () => {
                 const elements = [];
                 
@@ -335,19 +335,19 @@ class UniversalCaptchaSolver:
             logger.warning(f"CAPTCHA detection failed: {e}")
             return []
     
-    def solve_captcha(self, page, captcha_element: Dict[str, Any]) -> Optional[str]:
+    async def solve_captcha(self, page, captcha_element: Dict[str, Any]) -> Optional[str]:
         """Solve CAPTCHA based on element type."""
         try:
             captcha_type = captcha_element.get('type', '')
             selector = captcha_element.get('selector', '')
             
             if captcha_type == 'image_captcha':
-                return self.image_solver.solve_captcha_from_url(page, selector)
+                return await self.image_solver.solve_captcha_from_url(page, selector)
             
             elif captcha_type == 'captcha_input':
                 # For text-based CAPTCHAs, we need to find the associated image
                 # Look for nearby images that might be the CAPTCHA
-                nearby_image = page.evaluate(f"""
+                nearby_image = await page.evaluate(f"""
                 () => {{
                     const input = document.querySelector('{selector}');
                     if (!input) return null;
@@ -420,7 +420,7 @@ async def handle_captcha_in_form(page, form_data: Dict[str, Any]) -> Dict[str, A
     solver = UniversalCaptchaSolver()
     
     # Detect CAPTCHA elements
-    captcha_elements = solver.detect_captcha_fields(page)
+    captcha_elements = await solver.detect_captcha_fields(page)
     
     if not captcha_elements:
         logger.info("No CAPTCHA detected in form")
@@ -432,7 +432,7 @@ async def handle_captcha_in_form(page, form_data: Dict[str, Any]) -> Dict[str, A
     
     for captcha_element in captcha_elements:
         # Try to solve the CAPTCHA
-        solution = solver.solve_captcha(page, captcha_element)
+        solution = await solver.solve_captcha(page, captcha_element)
         
         if solution:
             solved_captcha = solution

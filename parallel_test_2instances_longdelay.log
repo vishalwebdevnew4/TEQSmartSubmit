@@ -1,0 +1,473 @@
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+✅ Found reCAPTCHA element with selector: iframe[src*="recaptcha/api2/anchor"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe detected after checkbox click! (attempt 1)
+   🎧 Attempting to solve audio challenge...
+🎧 Starting audio challenge solving...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found, attempting audio challenge...
+   ⏳ Waiting for challenge to fully load...
+   🔄 Ensuring we're in audio challenge mode...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+✅ Found reCAPTCHA element with selector: iframe[src*="recaptcha/api2/anchor"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+✅ Found reCAPTCHA element with selector: iframe[src*="google.com/recaptcha"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Clicked audio button (regular click)
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe detected after checkbox click! (attempt 1)
+   🎧 Attempting to solve audio challenge...
+🎧 Starting audio challenge solving...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found, attempting audio challenge...
+   ⏳ Waiting for challenge to fully load...
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   🔄 Ensuring we're in audio challenge mode...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button via JavaScript
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Audio switch attempt 1 failed, retrying...
+   ✅ Clicked audio button (regular click)
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Audio switch attempt 1 failed, retrying...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Audio switch attempt 2 failed, retrying...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Audio switch attempt 2 failed, retrying...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Audio switch attempt 3 failed, retrying...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ⚠️  Audio switch attempt 3 failed, retrying...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ⚠️  Audio switch attempt 4 failed, retrying...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ⚠️  Audio switch attempt 4 failed, retrying...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Already in audio mode (button click may not have been needed)
+   ⏳ Waiting for audio challenge to fully load...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 1 failed, retrying...
+   ✅ Already in audio mode (button click may not have been needed)
+   ⏳ Waiting for audio challenge to fully load...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 2 failed, retrying...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 1 failed, retrying...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 3 failed, retrying...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 2 failed, retrying...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 4 failed, retrying...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 3 failed, retrying...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Could not solve audio challenge after 5 attempts
+   ⚠️  Audio challenge solving failed, continuing with other strategies...
+2. Searching for reCAPTCHA iframes...
+🔍 Found 3 iframes, searching for reCAPTCHA...
+✅ Found reCAPTCHA iframe, attempting interaction...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Audio recognition attempt 4 failed, retrying...
+✅ Found reCAPTCHA iframe, attempting interaction...
+   🎤 Downloading and recognizing audio...
+   ⏳ Audio URL not found yet (attempt 1/5), waiting...
+   ⏳ Audio URL not found yet (attempt 2/5), waiting...
+   ⏳ Audio URL not found yet (attempt 3/5), waiting...
+   ⏳ Audio URL not found yet (attempt 4/5), waiting...
+   ⚠️  Could not find audio URL after 5 attempts
+   💡 Audio may not be loaded yet, or challenge may be in image mode
+   ⚠️  Could not solve audio challenge after 5 attempts
+   ⚠️  Audio challenge solving failed, continuing with other strategies...
+2. Searching for reCAPTCHA iframes...
+🔍 Found 3 iframes, searching for reCAPTCHA...
+✅ Found reCAPTCHA iframe, attempting interaction...
+✅ Found reCAPTCHA iframe, attempting interaction...
+   2a. Checking for challenge after iframe interaction...
+3. Executing JavaScript triggers...
+⚡ Executing JavaScript CAPTCHA triggers...
+✅ JS strategy 1 executed, result: 3
+✅ JS strategy 2 executed, result: 2
+✅ JS strategy 3 executed, result: 3
+✅ JS strategy 4 executed, result: True
+   3a. Checking for challenge after JS triggers...
+4. Comprehensive challenge detection (checking multiple times)...
+   ⏳ No challenge detected yet (attempt 1/5)...
+   ⏳ No challenge detected yet (attempt 2/5)...
+   ⏳ No challenge detected yet (attempt 3/5)...
+   ⏳ No challenge detected yet (attempt 4/5)...
+   ⏳ No challenge detected yet (attempt 5/5)...
+5. Waiting for potential automatic solve...
+⏳ Waiting for potential automatic CAPTCHA solve...
+   2a. Checking for challenge after iframe interaction...
+3. Executing JavaScript triggers...
+⚡ Executing JavaScript CAPTCHA triggers...
+✅ JS strategy 1 executed, result: 3
+✅ JS strategy 2 executed, result: 2
+✅ JS strategy 3 executed, result: 3
+✅ JS strategy 4 executed, result: True
+   3a. Checking for challenge after JS triggers...
+4. Comprehensive challenge detection (checking multiple times)...
+   ⏳ No challenge detected yet (attempt 1/5)...
+   ⏳ No challenge detected yet (attempt 2/5)...
+   ⏳ No challenge detected yet (attempt 3/5)...
+   ⏳ No challenge detected yet (attempt 4/5)...
+   ⏳ No challenge detected yet (attempt 5/5)...
+5. Waiting for potential automatic solve...
+⏳ Waiting for potential automatic CAPTCHA solve...
+❌ All reCAPTCHA solving strategies failed
+⚠️  Note: Server may reject fake tokens. Consider using a real CAPTCHA solving service.
+⚠️  reCAPTCHA solving timeout after 300 seconds
+❌ All reCAPTCHA solving strategies failed
+⚠️  Note: Server may reject fake tokens. Consider using a real CAPTCHA solving service.
+⚠️  reCAPTCHA solving timeout after 300 seconds
+================================================================================
+🚀 PARALLEL RECAPTCHA AUDIO CHALLENGE SOLVER
+================================================================================
+
+📍 URL: https://interiordesign.xcelanceweb.com/contact
+🔢 Instances: 2
+🖥️  Headless: False
+⚡ Running in parallel for maximum speed!
+
+================================================================================
+
+🚀 Launching 2 parallel instances (staggered start for safety)...
+
+[Instance 1] ⏳ Starting...
+[Instance 2] ⏳ Starting...
+[Instance 1] ✅ Filled 4 fields
+[Instance 1] 🔐 Solving CAPTCHA...
+[Instance 2] ✅ Filled 4 fields
+[Instance 2] 🔐 Solving CAPTCHA...
+[Instance 1] ❌ CAPTCHA failed: Local reCAPTCHA solving timeout after 300s
+[Instance 2] ❌ CAPTCHA failed: Local reCAPTCHA solving timeout after 300s
+
+================================================================================
+📊 RESULTS SUMMARY
+================================================================================
+
+[Instance 1] ❌ FAILED
+   Duration: 537.37s
+   Fields filled: 4
+   CAPTCHA solved: No
+   Form submitted: No
+   Error: Local reCAPTCHA solving timeout after 300s
+
+[Instance 2] ❌ FAILED
+   Duration: 539.30s
+   Fields filled: 4
+   CAPTCHA solved: No
+   Form submitted: No
+   Error: Local reCAPTCHA solving timeout after 300s
+
+================================================================================
+📈 STATISTICS
+================================================================================
+✅ Successful: 0/2
+❌ Failed: 2/2
+⏱️  Total time: 583.48s
+⚡ Average time per instance: 291.74s
+🚀 Speed improvement: ~2x faster than sequential
+================================================================================
+
+💾 Results saved to: parallel_results_20251124_133324.json
+
+⚠️  Some instances failed

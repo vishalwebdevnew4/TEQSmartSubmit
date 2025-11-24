@@ -1,0 +1,430 @@
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+✅ Found reCAPTCHA element with selector: iframe[src*="recaptcha/api2/anchor"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe detected after checkbox click! (attempt 1)
+   🎧 Attempting to solve audio challenge...
+🎧 Starting audio challenge solving...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found, attempting audio challenge...
+   ⏳ Waiting for challenge to fully load...
+   🔄 Ensuring we're in audio challenge mode...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ✅ Clicked audio button (regular click)
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Audio switch attempt 1 failed, retrying...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Audio switch attempt 2 failed, retrying...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Coordinate click failed: Frame.evaluate: Target page, c
+   ⚠️  Regular click failed: ElementHandle.click: Target pa
+   ⚠️  JavaScript click failed: Frame.evaluate: Target page, c
+   ⚠️  Audio switch attempt 3 failed, retrying...
+   ⚠️  Switch to audio error: Frame.evaluate: Target page, context or browser ha
+   ⚠️  Audio switch attempt 4 failed, retrying...
+   ⚠️  Switch to audio error: Frame.evaluate: Target page, context or browser ha
+   ⚠️  Audio challenge error: Frame.evaluate: Target page, context or browser has been closed
+   📋 Traceback: Traceback (most recent call last):
+  File "/var/www/html/TEQSmartSubmit/automation/captcha_solver.py", line 786, in _handle_audio_challenge
+    is_audio_mode = await frame.evaluate("""
+  File "/home/t
+   ⚠️  Audio challenge solving failed, continuing with other strategies...
+2. Searching for reCAPTCHA iframes...
+⚠️  reCAPTCHA iframe interaction error: Page.query_selector_all: Target page, context or b
+   2a. Checking for challenge after iframe interaction...
+3. Executing JavaScript triggers...
+⚡ Executing JavaScript CAPTCHA triggers...
+   3a. Checking for challenge after JS triggers...
+4. Comprehensive challenge detection (checking multiple times)...
+   ⏳ No challenge detected yet (attempt 1/5)...
+   ⏳ No challenge detected yet (attempt 2/5)...
+   ⏳ No challenge detected yet (attempt 3/5)...
+   ⏳ No challenge detected yet (attempt 4/5)...
+   ⏳ No challenge detected yet (attempt 5/5)...
+5. Waiting for potential automatic solve...
+⏳ Waiting for potential automatic CAPTCHA solve...
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+❌ All reCAPTCHA solving strategies failed
+⚠️  Note: Server may reject fake tokens. Consider using a real CAPTCHA solving service.
+❌ LocalCaptchaSolver: reCAPTCHA v2 solving failed - no valid token obtained
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ⏳ No challenge detected yet (attempt 1/5)...
+   ⏳ No challenge detected yet (attempt 2/5)...
+   ⏳ No challenge detected yet (attempt 3/5)...
+   ⏳ No challenge detected yet (attempt 4/5)...
+2. Searching for reCAPTCHA iframes...
+⚠️  reCAPTCHA iframe interaction error: Page.query_selector_all: Target page, context or b
+   2a. Checking for challenge after iframe interaction...
+3. Executing JavaScript triggers...
+⚡ Executing JavaScript CAPTCHA triggers...
+   3a. Checking for challenge after JS triggers...
+4. Comprehensive challenge detection (checking multiple times)...
+   ⏳ No challenge detected yet (attempt 1/5)...
+   ⏳ No challenge detected yet (attempt 2/5)...
+   ⏳ No challenge detected yet (attempt 3/5)...
+   ⏳ No challenge detected yet (attempt 4/5)...
+   ⏳ No challenge detected yet (attempt 5/5)...
+5. Waiting for potential automatic solve...
+⏳ Waiting for potential automatic CAPTCHA solve...
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+❌ All reCAPTCHA solving strategies failed
+⚠️  Note: Server may reject fake tokens. Consider using a real CAPTCHA solving service.
+❌ LocalCaptchaSolver: reCAPTCHA v2 solving failed - no valid token obtained
+🤖 LocalCaptchaSolver: Starting reCAPTCHA v2 solving...
+🔄 Starting comprehensive reCAPTCHA v2 solving...
+1. Attempting simple checkbox click...
+🖱️  Looking for reCAPTCHA checkbox...
+✅ Found reCAPTCHA element with selector: iframe[src*="recaptcha/api2/anchor"]
+   ✅ Clicked reCAPTCHA checkbox
+✅ Found reCAPTCHA element with selector: iframe[src*="google.com/recaptcha"]
+   ✅ Clicked reCAPTCHA checkbox
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ⚠️  Challenge iframe detected after checkbox click - will be handled by challenge solver
+   1a. Checking for challenge after checkbox click (multiple attempts)...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe detected after checkbox click! (attempt 1)
+   🎧 Attempting to solve audio challenge...
+🎧 Starting audio challenge solving...
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Challenge iframe found, attempting audio challenge...
+   ⏳ Waiting for challenge to fully load...
+   🔄 Ensuring we're in audio challenge mode...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button.rc-button-audio
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[id*="audio"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [class*="audio-button"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: [id*="audio-button"]
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Clicked audio button via JavaScript
+   ⚠️  Audio switch attempt 1 failed, retrying...
+   🔄 Clicking audio challenge button...
+   ✅ Found visible audio button: #recaptcha-audio-button
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: button[title*="audio"]
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Timeout 5
+   ✅ Found visible audio button: .rc-button-audio
+   ✅ Challenge iframe found with selector: iframe[title*="challenge"]
+   ✅ Clicked audio button via absolute coordinates
+   ⚠️  Regular click failed: ElementHandle.click: Target pa
+   ⚠️  JavaScript click failed: Frame.evaluate: Target page, c
+   ⚠️  Audio switch attempt 2 failed, retrying...
+   ⚠️  Switch to audio error: Frame.evaluate: Target page, context or browser ha
+   ⚠️  Audio switch attempt 3 failed, retrying...
+   ⚠️  Switch to audio error: Frame.evaluate: Target page, context or browser ha
+   ⚠️  Audio switch attempt 4 failed, retrying...
+   ⚠️  Switch to audio error: Frame.evaluate: Target page, context or browser ha
+   ⚠️  Audio challenge error: Frame.evaluate: Target page, context or browser has been closed
+   📋 Traceback: Traceback (most recent call last):
+  File "/var/www/html/TEQSmartSubmit/automation/captcha_solver.py", line 786, in _handle_audio_challenge
+    is_audio_mode = await frame.evaluate("""
+  File "/home/t
+   ⚠️  Audio challenge solving failed, continuing with other strategies...
+2. Searching for reCAPTCHA iframes...
+⚠️  reCAPTCHA iframe interaction error: Page.query_selector_all: Target page, context or b
+   2a. Checking for challenge after iframe interaction...
+3. Executing JavaScript triggers...
+⚡ Executing JavaScript CAPTCHA triggers...
+   3a. Checking for challenge after JS triggers...
+4. Comprehensive challenge detection (checking multiple times)...
+   ⏳ No challenge detected yet (attempt 1/5)...
+   ⏳ No challenge detected yet (attempt 2/5)...
+   ⏳ No challenge detected yet (attempt 3/5)...
+   ⏳ No challenge detected yet (attempt 4/5)...
+   ⏳ No challenge detected yet (attempt 5/5)...
+5. Waiting for potential automatic solve...
+⏳ Waiting for potential automatic CAPTCHA solve...
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+⚠️  Get reCAPTCHA token error: Page.evaluate: Target page, context or browser has
+❌ All reCAPTCHA solving strategies failed
+⚠️  Note: Server may reject fake tokens. Consider using a real CAPTCHA solving service.
+❌ LocalCaptchaSolver: reCAPTCHA v2 solving failed - no valid token obtained
+================================================================================
+🌐 UNIVERSAL MULTI-SITE RECAPTCHA SOLVER
+================================================================================
+
+📍 Sites to test: 5
+🖥️  Headless: False
+🔧 Features:
+   - Auto-detects and fills ALL form fields
+   - Handles Google automation detection (refresh & retry)
+   - Retries CAPTCHA on timeout
+   - Works for any website structure
+
+================================================================================
+
+
+================================================================================
+🌐 SITE 1: https://interiordesign.xcelanceweb.com/contact
+================================================================================
+
+[Site 1] ⏳ Navigating...
+[Site 1] ✅ Page loaded
+[Site 1] ✅ Cookie banner handled
+   📝 Auto-detecting and filling all form fields...
+      ✅ Filled text: name = Sarah...
+      ✅ Filled email: email = 16raz17g@hotmail.com...
+      ✅ Filled text: phone = +1-483-813-5179...
+      ✅ Filled textarea: comment = Please contact me regarding yo...
+   ✅ Filled 4 field(s)
+[Site 1] 🔐 Solving CAPTCHA...
+[Site 1] ❌ CAPTCHA failed: Local solver could not solve reCAPTCHA
+
+[Site 1] ❌ FAILED: Local solver could not solve reCAPTCHA
+
+⏳ Waiting 7.9s before next site...
+
+================================================================================
+🌐 SITE 2: https://petpointmedia.com/contact-us/
+================================================================================
+
+[Site 2] ⏳ Navigating...
+[Site 2] ⚠️  Automation detected, refreshing...
+[Site 2] ✅ Page loaded
+   📝 Auto-detecting and filling all form fields...
+      ✅ Filled text: wpforms[fields][5] = 4S2DLS...
+      ✅ Filled email: wpforms[fields][2] = 2w088hv3@hotmail.com...
+      ✅ Filled text: wpforms[fields][11] = p3EVkjcUsZO...
+      ✅ Filled text: wpforms[fields][4] = RBWXrw22...
+      ✅ Filled text: wpforms[fields][2] = piu2SBdcyraU...
+      ✅ Filled text: wpforms[fields][5] = rRFX0p5AlZt...
+   ✅ Filled 6 field(s)
+[Site 2] 🔐 Solving CAPTCHA...
+   ⚠️  Error (attempt 1): Page.evaluate: Target page, context or browser has
+   ⚠️  Error (attempt 2): Page.evaluate: Target page, context or browser has
+[Site 2] ❌ Error: Page.evaluate: Target page, context or browser has been closed
+
+[Site 2] ❌ FAILED: Page.evaluate: Target page, context or browser has been closed
+
+⏳ Waiting 6.9s before next site...
+
+================================================================================
+🌐 SITE 3: https://www.seoily.com/contact-us
+================================================================================
+
+[Site 3] ⏳ Navigating...
+[Site 3] ✅ Page loaded
+   📝 Auto-detecting and filling all form fields...
+   ✅ Filled 0 field(s)
+[Site 3] ⚠️  No form fields found
+[Site 3] 🔐 Solving CAPTCHA...
+[Site 3] ❌ CAPTCHA failed: Local solver could not solve reCAPTCHA
+
+[Site 3] ❌ FAILED: Local solver could not solve reCAPTCHA
+
+⏳ Waiting 5.3s before next site...
+
+================================================================================
+🌐 SITE 4: https://360digiexpertz.com/contact-us/
+================================================================================
+
+[Site 4] ⏳ Navigating...
+[Site 4] ⚠️  Automation detected, refreshing...
+[Site 4] ✅ Page loaded
+   📝 Auto-detecting and filling all form fields...
+      ✅ Filled text: wpforms[fields][0][first] = Michael...
+      ✅ Filled text: wpforms[fields][0][last] = Miller...
+      ✅ Filled email: wpforms[fields][1] = cbobg380@gmail.com...
+      ✅ Filled number: wpforms[fields][3] = 340...
+      ✅ Filled textarea: wpforms[fields][2] = kLnAtipLkBXxJ4yi...
+   ✅ Filled 5 field(s)
+[Site 4] 🔐 Solving CAPTCHA...
+   ⚠️  Automation detected (attempt 1), refreshing page...
+   ⚠️  Automation detected (attempt 2), refreshing page...
+   ⚠️  Automation detected (attempt 3), refreshing page...
+[Site 4] ❌ CAPTCHA failed: Max retries exceeded
+
+[Site 4] ❌ FAILED: Max retries exceeded
+
+⏳ Waiting 5.9s before next site...
+
+================================================================================
+🌐 SITE 5: https://teqtopaustralia.xcelanceweb.com/contact
+================================================================================
+
+[Site 5] ⏳ Navigating...
+[Site 5] ✅ Page loaded
+[Site 5] ✅ Cookie banner handled
+   📝 Auto-detecting and filling all form fields...
+      ✅ Filled text: name = Michael...
+      ✅ Filled text: phone = 133-237-4691...
+      ✅ Filled text: email = ouogk9s6@outlook.com...
+      ✅ Filled textarea: message = 50...
+      ✅ Filled select: how_do_you_know = google
+   ✅ Filled 5 field(s)
+[Site 5] 🔐 Solving CAPTCHA...
+[Site 5] ❌ CAPTCHA failed: Local solver could not solve reCAPTCHA
+
+[Site 5] ❌ FAILED: Local solver could not solve reCAPTCHA
+
+================================================================================
+📊 FINAL RESULTS SUMMARY
+================================================================================
+
+[Site 1] ❌ FAILED
+   URL: https://interiordesign.xcelanceweb.com/contact
+   Duration: 262.99s
+   Fields filled: 4
+   CAPTCHA solved: No
+   Form submitted: No
+   Error: Local solver could not solve reCAPTCHA
+
+[Site 2] ❌ FAILED
+   URL: https://petpointmedia.com/contact-us/
+   Duration: 210.74s
+   Fields filled: 6
+   CAPTCHA solved: No
+   Form submitted: No
+   Error: Page.evaluate: Target page, context or browser has been closed
+
+[Site 3] ❌ FAILED
+   URL: https://www.seoily.com/contact-us
+   Duration: 95.73s
+   Fields filled: 0
+   CAPTCHA solved: No
+   Form submitted: No
+   Error: Local solver could not solve reCAPTCHA
+
+[Site 4] ❌ FAILED
+   URL: https://360digiexpertz.com/contact-us/
+   Duration: 63.59s
+   Fields filled: 5
+   CAPTCHA solved: No
+   Form submitted: No
+   Error: Max retries exceeded
+
+[Site 5] ❌ FAILED
+   URL: https://teqtopaustralia.xcelanceweb.com/contact
+   Duration: 195.09s
+   Fields filled: 5
+   CAPTCHA solved: No
+   Form submitted: No
+   Error: Local solver could not solve reCAPTCHA
+
+================================================================================
+📈 STATISTICS
+================================================================================
+✅ Successful: 0/5
+❌ Failed: 5/5
+⏱️  Total time: 828.13s
+================================================================================
+
+💾 Results saved to: universal_results_20251124_141338.json
+
+⚠️  Some sites failed

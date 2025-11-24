@@ -1,0 +1,35 @@
+{
+  "total_instances": 3,
+  "successful": 0,
+  "failed": 3,
+  "total_duration": 268.405539,
+  "results": [
+    {
+      "instance_id": 1,
+      "success": false,
+      "error": "Local solver could not solve reCAPTCHA",
+      "duration": 206.517645,
+      "fields_filled": 4,
+      "captcha_solved": false,
+      "form_submitted": false
+    },
+    {
+      "instance_id": 2,
+      "success": false,
+      "error": "Local solver could not solve reCAPTCHA",
+      "duration": 266.204903,
+      "fields_filled": 4,
+      "captcha_solved": false,
+      "form_submitted": false
+    },
+    {
+      "instance_id": 3,
+      "success": false,
+      "error": "Local solver could not solve reCAPTCHA",
+      "duration": 206.687892,
+      "fields_filled": 4,
+      "captcha_solved": false,
+      "form_submitted": false
+    }
+  ]
+}
