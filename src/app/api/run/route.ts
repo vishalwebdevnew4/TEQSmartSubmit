@@ -132,8 +132,23 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Use 'python' on Windows, 'python3' on Linux/Mac
-    const pythonCommand = os.platform() === "win32" ? "python" : "python3";
+        // Use 'python' on Windows, 'python3' on Linux/Mac
+        const pythonCommand = os.platform() === "win32" ? "python" : "python3";
+        
+        // Check if xvfb-run is available (doesn't require sudo, just needs to be installed)
+        // This allows visible browser mode on headless servers without Xvfb installation
+        let useXvfbRun = false;
+        if (os.platform() !== "win32" && !process.env.DISPLAY) {
+          try {
+            const { execSync } = require('child_process');
+            execSync('which xvfb-run', { stdio: 'ignore', timeout: 2000 });
+            useXvfbRun = true;
+            console.log('[AUTOMATION] xvfb-run detected - will use for virtual display');
+          } catch {
+            // xvfb-run not available, will try other methods
+            console.log('[AUTOMATION] xvfb-run not available - will try other display methods');
+          }
+        }
     
     // Return immediately with submission ID - let automation run in background
     // This prevents the API from timing out while automation is running
@@ -176,7 +191,22 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        const python = spawn(pythonCommand, [scriptPath, "--url", url, "--template", templatePath], {
+        // Build command - use xvfb-run wrapper if available and no DISPLAY is set
+        let finalCommand = pythonCommand;
+        let finalArgs = [scriptPath, "--url", url, "--template", templatePath];
+        
+        if (useXvfbRun) {
+          finalCommand = "xvfb-run";
+          finalArgs = [
+            "-a", // Auto-display-number
+            "-s", "-screen 0 1280x720x24", // Screen settings
+            pythonCommand,
+            ...finalArgs
+          ];
+          console.log('[AUTOMATION] Using xvfb-run wrapper for virtual display');
+        }
+        
+        const python = spawn(finalCommand, finalArgs, {
           cwd: process.cwd(),
           env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
         });
