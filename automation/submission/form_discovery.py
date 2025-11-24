@@ -9,17 +9,29 @@ from __future__ import annotations
 
 # CRITICAL: Print to stderr immediately so route.ts can capture it
 import sys
+# Force unbuffered output
+sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+
 try:
-    print("=" * 80, file=sys.stderr, flush=True)
-    print("🚀 PYTHON SCRIPT STARTING", file=sys.stderr, flush=True)
-    print("=" * 80, file=sys.stderr, flush=True)
-    print(f"Python version: {sys.version}", file=sys.stderr, flush=True)
+    # Print startup message immediately
+    sys.stderr.write("=" * 80 + "\n")
+    sys.stderr.write("🚀 PYTHON SCRIPT STARTING\n")
+    sys.stderr.write("=" * 80 + "\n")
+    sys.stderr.flush()
+    
+    sys.stderr.write(f"Python version: {sys.version}\n")
+    sys.stderr.flush()
+    
     try:
-        print(f"Script path: {__file__}", file=sys.stderr, flush=True)
+        sys.stderr.write(f"Script path: {__file__}\n")
     except:
-        print("Script path: (unknown)", file=sys.stderr, flush=True)
-    print("", file=sys.stderr, flush=True)
-    print("🔄 Starting imports...", file=sys.stderr, flush=True)
+        sys.stderr.write("Script path: (unknown)\n")
+    sys.stderr.flush()
+    
+    sys.stderr.write("\n")
+    sys.stderr.write("🔄 Starting imports...\n")
+    sys.stderr.flush()
 except Exception as e:
     # Last resort - write to a file if stderr fails
     try:
@@ -30,17 +42,23 @@ except Exception as e:
 
 try:
     import argparse
-    print("✅ argparse imported", file=sys.stderr, flush=True)
+    sys.stderr.write("✅ argparse imported\n")
+    sys.stderr.flush()
     import asyncio
-    print("✅ asyncio imported", file=sys.stderr, flush=True)
+    sys.stderr.write("✅ asyncio imported\n")
+    sys.stderr.flush()
     import json
-    print("✅ json imported", file=sys.stderr, flush=True)
+    sys.stderr.write("✅ json imported\n")
+    sys.stderr.flush()
     import os
-    print("✅ os imported", file=sys.stderr, flush=True)
+    sys.stderr.write("✅ os imported\n")
+    sys.stderr.flush()
     import time
-    print("✅ time imported", file=sys.stderr, flush=True)
+    sys.stderr.write("✅ time imported\n")
+    sys.stderr.flush()
     import traceback
-    print("✅ traceback imported", file=sys.stderr, flush=True)
+    sys.stderr.write("✅ traceback imported\n")
+    sys.stderr.flush()
     import random
     import base64
     import hashlib
@@ -49,14 +67,18 @@ try:
     from pathlib import Path
     from typing import Any, Dict, List, Optional, Union
     from urllib.parse import urlparse
-    print("✅ All basic imports successful", file=sys.stderr, flush=True)
+    sys.stderr.write("✅ All basic imports successful\n")
+    sys.stderr.flush()
 except ImportError as e:
-    print(f"❌ IMPORT ERROR: {str(e)}", file=sys.stderr, flush=True)
+    sys.stderr.write(f"❌ IMPORT ERROR: {str(e)}\n")
+    sys.stderr.flush()
     sys.exit(1)
 except Exception as e:
-    print(f"❌ ERROR during imports: {str(e)}", file=sys.stderr, flush=True)
+    sys.stderr.write(f"❌ ERROR during imports: {str(e)}\n")
+    sys.stderr.flush()
     import traceback
     traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
     sys.exit(1)
 
 # ULTRA-RESILIENT ENVIRONMENT SETUP

@@ -208,11 +208,23 @@ export async function POST(req: NextRequest) {
         
         const python = spawn(finalCommand, finalArgs, {
           cwd: process.cwd(),
-          env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" },
+          env: { 
+            ...process.env, 
+            PYTHONUNBUFFERED: "1", 
+            PYTHONIOENCODING: "utf-8",
+            // Force immediate output
+            PYTHON_FLUSH: "1"
+          },
+          // Ensure we can capture output immediately
+          stdio: ['ignore', 'pipe', 'pipe']
         });
 
         python.stdout.setEncoding("utf8");
         python.stderr.setEncoding("utf8");
+        
+        // Set streams to flowing mode for immediate output
+        python.stdout.resume();
+        python.stderr.resume();
 
         let stdout = "";
         let stderr = "";
