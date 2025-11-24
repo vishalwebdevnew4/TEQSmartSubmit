@@ -4202,24 +4202,56 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
 async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     """ULTRA-RESILIENT main async function - CANNOT FAIL to return JSON."""
     
+    # Update heartbeat immediately
+    try:
+        heartbeat_file_path = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
+        if not heartbeat_file_path.exists():
+            heartbeat_file_path = Path('/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
+        
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [main_async] Function called\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
+    sys.stderr.write("📍 [main_async] Function called\n")
+    sys.stderr.flush()
+    
     # Print startup logs immediately
     ultra_safe_log_print("=" * 80)
     ultra_safe_log_print("🚀 AUTOMATION STARTING")
     ultra_safe_log_print("=" * 80)
     ultra_safe_log_print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     
+    sys.stderr.write("📍 [main_async] After initial log prints\n")
+    sys.stderr.flush()
+    
     # Validate inputs with fallbacks
+    sys.stderr.write("📍 [main_async] About to get URL\n")
+    sys.stderr.flush()
+    
     url = UltimateSafetyWrapper.execute_sync(
         lambda: args.url if hasattr(args, 'url') and args.url else "https://example.com",
         default_return="https://example.com"
     )
     
+    sys.stderr.write(f"📍 [main_async] URL: {url}\n")
+    sys.stderr.flush()
+    
     ultra_safe_log_print(f"📋 Target URL: {url}")
+    
+    sys.stderr.write("📍 [main_async] About to get template path\n")
+    sys.stderr.flush()
     
     template_path = UltimateSafetyWrapper.execute_sync(
         lambda: Path(args.template) if hasattr(args, 'template') and args.template else Path("default.json"),
         default_return=Path("default.json")
     )
+    
+    sys.stderr.write(f"📍 [main_async] Template path: {template_path}\n")
+    sys.stderr.flush()
     
     ultra_safe_log_print(f"📄 Template path: {template_path}")
     ultra_safe_log_print("")
@@ -4370,8 +4402,50 @@ def main() -> int:
     
     # ULTRA-RESILIENT execution
     try:
+        # Update heartbeat before starting main function
+        try:
+            if heartbeat_file:
+                if isinstance(heartbeat_file, Path):
+                    if heartbeat_file.exists():
+                        with open(heartbeat_file, 'a') as f:
+                            f.write("About to call asyncio.run(main_async_with_ultimate_safety)\n")
+                            f.flush()
+                            os.fsync(f.fileno())
+                else:
+                    if os.path.exists(str(heartbeat_file)):
+                        with open(heartbeat_file, 'a') as f:
+                            f.write("About to call asyncio.run(main_async_with_ultimate_safety)\n")
+                            f.flush()
+                            os.fsync(f.fileno())
+        except:
+            pass
+        
+        sys.stderr.write("📍 [main()] About to call asyncio.run(main_async_with_ultimate_safety)\n")
+        sys.stderr.flush()
+        
         # Run the async function and get JSON result
         json_result = asyncio.run(main_async_with_ultimate_safety(args))
+        
+        sys.stderr.write("📍 [main()] asyncio.run() completed\n")
+        sys.stderr.flush()
+        
+        # Update heartbeat after main function
+        try:
+            if heartbeat_file:
+                if isinstance(heartbeat_file, Path):
+                    if heartbeat_file.exists():
+                        with open(heartbeat_file, 'a') as f:
+                            f.write("asyncio.run() completed\n")
+                            f.flush()
+                            os.fsync(f.fileno())
+                else:
+                    if os.path.exists(str(heartbeat_file)):
+                        with open(heartbeat_file, 'a') as f:
+                            f.write("asyncio.run() completed\n")
+                            f.flush()
+                            os.fsync(f.fileno())
+        except:
+            pass
         
         # ULTRA-RESILIENT output - cannot fail
         try:
