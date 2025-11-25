@@ -3783,6 +3783,27 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
 async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[str, Any]:
     """ULTRA-RESILIENT main submission function - CANNOT FAIL."""
     
+    # Get heartbeat file path for debugging
+    heartbeat_file_path = None
+    try:
+        heartbeat_file_path = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
+        if not heartbeat_file_path.exists():
+            heartbeat_file_path = Path('/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
+    except:
+        pass
+    
+    # Update heartbeat - function entry
+    try:
+        if heartbeat_file_path and heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [run_ultra_resilient_submission] Function entry\n")
+                f.write(f"📍 [run_ultra_resilient_submission] URL: {url}\n")
+                f.write(f"📍 [run_ultra_resilient_submission] Template: {template_path}\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
     # Initialize result with multiple fallback values
     result = {
         "status": "unknown",
@@ -3796,11 +3817,29 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     }
     
     # Step 1: Load template (cannot fail) - need to load before creating manager
+    try:
+        if heartbeat_file_path and heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [run_ultra_resilient_submission] About to load template\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
     ultra_safe_log_print("=" * 80)
     ultra_safe_log_print("🚀 STARTING AUTOMATION")
     ultra_safe_log_print("=" * 80)
     ultra_safe_log_print(f"📋 Loading template from: {template_path}")
     template = await ultra_safe_template_load(template_path)
+    
+    try:
+        if heartbeat_file_path and heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [run_ultra_resilient_submission] Template loaded\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
     result["steps_completed"].append("template_loaded")
     result["template_used"] = "custom" if template.get("fields") else "default"
     ultra_safe_log_print(f"✅ Template loaded: {result['template_used']} template")
@@ -3812,9 +3851,28 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     else:
         ultra_safe_log_print("🖥️  Running in visible browser mode (better for CAPTCHA solving)")
     
+    try:
+        if heartbeat_file_path and heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [run_ultra_resilient_submission] About to create PlaywrightManager\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
     ultra_safe_log_print(f"🔧 Creating PlaywrightManager instance...")
     playwright_manager = UltimatePlaywrightManager(headless=headless_mode)
     ultra_safe_log_print(f"✅ PlaywrightManager created")
+    
+    try:
+        if heartbeat_file_path and heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [run_ultra_resilient_submission] PlaywrightManager created\n")
+                f.write("📍 [run_ultra_resilient_submission] About to call playwright_manager.start()\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
     
     try:
         # Step 2: Initialize Playwright (cannot fail)
@@ -3823,6 +3881,15 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         sys.stderr.flush()
         
         playwright_ready = await playwright_manager.start()
+        
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [run_ultra_resilient_submission] playwright_manager.start() returned: {playwright_ready}\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
         
         ultra_safe_log_print(f"   📍 playwright_manager.start() returned: {playwright_ready}")
         sys.stderr.flush()
@@ -3859,9 +3926,28 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         ultra_safe_log_print("✅ Browser initialized successfully")
         result["steps_completed"].append("browser_ready")
         
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [run_ultra_resilient_submission] Browser initialized successfully\n")
+                    f.write("📍 [run_ultra_resilient_submission] About to navigate to URL\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         # Step 3: Navigate to URL (cannot fail)
         ultra_safe_log_print(f"🌐 Navigating to URL: {url}")
         navigation_success = await playwright_manager.navigate(url)
+        
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [run_ultra_resilient_submission] Navigation result: {navigation_success}\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
         
         if not navigation_success:
             error_msg = f"Navigation failed to {url}"
@@ -4042,12 +4128,39 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             pass  # Continue anyway
         
         # Step 4: Handle CAPTCHAs with LOCAL solver (cannot fail)
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [run_ultra_resilient_submission] Step 4: About to handle CAPTCHAs\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         ultra_safe_log_print("🔐 Checking for CAPTCHAs (using LOCAL solver)...")
         captcha_result = await playwright_manager.handle_captchas()
         result["captcha_result"] = captcha_result
         result["steps_completed"].append("captcha_handled")
         
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [run_ultra_resilient_submission] Step 4: CAPTCHA handled, detected: {captcha_result.get('captchas_detected', 0)}\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         # Step 5: Simple form filling (cannot fail)
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [run_ultra_resilient_submission] Step 5: About to fill form fields\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         ultra_safe_log_print("")
         ultra_safe_log_print("✍️  STEP 5: Filling form fields...")
         ultra_safe_log_print("-" * 80)
@@ -4057,7 +4170,25 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         ultra_safe_log_print(f"✅ Form filling completed: {fill_result.get('fields_filled', 0)} field(s) filled")
         ultra_safe_log_print("")
         
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [run_ultra_resilient_submission] Step 5: Form filled, fields: {fill_result.get('fields_filled', 0)}\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         # Step 5.5: Check and solve CAPTCHA again (after form filling, CAPTCHA might be visible now)
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [run_ultra_resilient_submission] Step 5.5: Re-checking CAPTCHAs after form fill\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         ultra_safe_log_print("🔐 STEP 5.5: Re-checking CAPTCHAs after form fill...")
         ultra_safe_log_print("-" * 80)
         captcha_result_after = await playwright_manager.handle_captchas()
@@ -4069,11 +4200,32 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         ultra_safe_log_print("")
         
         # Step 6: Form submission (cannot fail)
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [run_ultra_resilient_submission] Step 6: About to submit form\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         ultra_safe_log_print("📤 STEP 6: Submitting form...")
         ultra_safe_log_print("-" * 80)
         submit_result = await ultra_simple_form_submit(playwright_manager.page)
         result.update(submit_result)
         result["steps_completed"].append("submission_attempted")
+        
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [run_ultra_resilient_submission] Step 6: Form submission completed\n")
+                    f.write(f"📍 [run_ultra_resilient_submission] Submission attempted: {submit_result.get('submission_attempted', False)}\n")
+                    f.write(f"📍 [run_ultra_resilient_submission] Submission detected: {submit_result.get('form_submission_detected', False)}\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         ultra_safe_log_print(f"✅ Submission step completed")
         ultra_safe_log_print(f"   - Attempted: {submit_result.get('submission_attempted', False)}")
         ultra_safe_log_print(f"   - Detected: {submit_result.get('form_submission_detected', False)}")
@@ -4195,12 +4347,33 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         ultra_safe_log_print("✅ Process completed successfully")
         ultra_safe_log_print("\n".join(all_logs))
+        
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [run_ultra_resilient_submission] Process completed, status: {result.get('status', 'unknown')}\n")
+                    f.write("📍 [run_ultra_resilient_submission] About to return result\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         return result
         
     except Exception as e:
         # This should never happen, but just in case
         error_msg = str(e)[:100] if str(e) else "unknown error"
         ultra_safe_log_print(f"💥 Unexpected error in main process: {error_msg}")
+        
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [run_ultra_resilient_submission] EXCEPTION: {type(e).__name__}: {error_msg}\n")
+                    f.write("📍 [run_ultra_resilient_submission] Creating error result\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
         
         result.update({
             "status": "error",
@@ -4212,12 +4385,31 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
     finally:
         # ULTRA-RESILIENT cleanup (cannot fail)
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [run_ultra_resilient_submission] Finally block: About to cleanup\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         ultra_safe_log_print("🔒 Cleaning up resources...")
         await UltimateSafetyWrapper.execute_async(
             playwright_manager.cleanup,
             default_return=None
         )
         ultra_safe_log_print("🔒 Cleanup completed")
+        
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [run_ultra_resilient_submission] Cleanup completed\n")
+                    f.write("📍 [run_ultra_resilient_submission] Function exit\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
 
 async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     """ULTRA-RESILIENT main async function - CANNOT FAIL to return JSON."""
