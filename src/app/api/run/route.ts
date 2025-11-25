@@ -393,7 +393,18 @@ export async function POST(req: NextRequest) {
 
     // If we found valid JSON, use it regardless of exit code
     if (parsed && typeof parsed === "object") {
-      const finalStatus = parsed.status === "success" ? "success" : parsed.status || (exitCode === 0 ? "success" : "failed");
+      // CRITICAL: Respect timeout status - never override it
+      let finalStatus: string;
+      if (parsed.status === "timeout") {
+        finalStatus = "timeout";
+      } else if (parsed.status === "success") {
+        finalStatus = "success";
+      } else if (parsed.status === "failed") {
+        finalStatus = "failed";
+      } else {
+        // Use parsed status if available, otherwise fallback based on exit code
+        finalStatus = parsed.status || (exitCode === 0 ? "success" : "failed");
+      }
       
       // Build complete logs: prioritize parsed.message, then combine with stderr
       let completeLogs = "";

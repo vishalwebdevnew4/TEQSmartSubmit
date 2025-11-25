@@ -109,6 +109,36 @@ async def safe_async_sleep(seconds: float):
         except:
             pass
 
+def check_ffmpeg_available() -> tuple:
+    """
+    Check if ffmpeg and ffprobe are available in PATH.
+    Returns (is_available, error_message)
+    """
+    try:
+        import subprocess
+        import shutil
+        
+        # Check for ffmpeg
+        ffmpeg_path = shutil.which('ffmpeg')
+        if not ffmpeg_path:
+            return False, "ffmpeg not found in PATH. Install with: sudo apt-get install -y ffmpeg"
+        
+        # Check for ffprobe (usually comes with ffmpeg)
+        ffprobe_path = shutil.which('ffprobe')
+        if not ffprobe_path:
+            return False, "ffprobe not found in PATH. Install with: sudo apt-get install -y ffmpeg"
+        
+        # Verify they're executable
+        try:
+            subprocess.run([ffmpeg_path, '-version'], capture_output=True, timeout=2, check=False)
+            subprocess.run([ffprobe_path, '-version'], capture_output=True, timeout=2, check=False)
+        except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError):
+            return False, "ffmpeg/ffprobe found but not executable. Check permissions."
+        
+        return True, ""
+    except Exception as e:
+        return False, f"Error checking ffmpeg: {str(e)[:100]}"
+
 class UltimateLocalCaptchaSolver:
     """
     Ultimate Local CAPTCHA Solver that NEVER fails.
@@ -903,6 +933,16 @@ class UltimateLocalCaptchaSolver:
         try:
             safe_log_print("🎧 Starting audio challenge solving...")
             
+            # Early check: Fail fast if ffmpeg/ffprobe is not available
+            ffmpeg_available, ffmpeg_error = check_ffmpeg_available()
+            if not ffmpeg_available:
+                safe_log_print(f"   ⚠️  {ffmpeg_error}")
+                safe_log_print("   ⚠️  Audio challenge solving requires ffmpeg/ffprobe")
+                safe_log_print("   💡 Skipping audio challenge - install ffmpeg to enable audio solving")
+                safe_log_print("   💡 Install with: sudo apt-get install -y ffmpeg")
+                safe_log_print("   💡 Or check PATH: which ffmpeg && which ffprobe")
+                return None
+            
             # Check if challenge iframe exists (with retries)
             challenge_iframe = None
             for attempt in range(3):
@@ -1396,6 +1436,14 @@ class UltimateLocalCaptchaSolver:
                     import speech_recognition as sr
                     from pydub import AudioSegment
                     
+                    # Check for ffmpeg/ffprobe BEFORE attempting conversion
+                    ffmpeg_available, ffmpeg_error = check_ffmpeg_available()
+                    if not ffmpeg_available:
+                        safe_log_print(f"   ⚠️  {ffmpeg_error}")
+                        safe_log_print("   ⚠️  Audio challenge solving requires ffmpeg/ffprobe")
+                        safe_log_print("   💡 Skipping audio challenge - install ffmpeg to enable audio solving")
+                        return None
+                    
                     # Convert to WAV
                     safe_log_print("   🔄 Converting audio to WAV...")
                     try:
@@ -1404,8 +1452,14 @@ class UltimateLocalCaptchaSolver:
                         audio.export(wav_path, format="wav")
                         safe_log_print("   ✅ Audio converted to WAV")
                     except Exception as e:
-                        safe_log_print(f"   ⚠️  Audio conversion error: {str(e)[:50]}")
-                        # Try direct recognition if conversion fails
+                        error_msg = str(e)
+                        if 'ffprobe' in error_msg.lower() or 'ffmpeg' in error_msg.lower():
+                            safe_log_print(f"   ⚠️  Audio conversion error: {error_msg[:100]}")
+                            safe_log_print("   ⚠️  ffmpeg/ffprobe may not be properly installed or accessible")
+                            safe_log_print("   💡 Install with: sudo apt-get install -y ffmpeg")
+                            return None
+                        safe_log_print(f"   ⚠️  Audio conversion error: {error_msg[:50]}")
+                        # Try direct recognition if conversion fails (unlikely to work without conversion)
                         wav_path = audio_path
                     
                     # Recognize (with retries)

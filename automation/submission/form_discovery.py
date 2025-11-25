@@ -4929,19 +4929,26 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
         timeout_message += f"Timeout: {timeout} seconds\n\n"
         timeout_message += "⚠️  The automation process exceeded the timeout limit.\n"
         timeout_message += "   This usually happens when:\n"
-        timeout_message += "   1. CAPTCHA solving takes too long (audio challenge)\n"
+        timeout_message += "   1. CAPTCHA solving takes too long (audio challenge requires ffmpeg/ffprobe)\n"
         timeout_message += "   2. Page loading is very slow\n"
         timeout_message += "   3. Network issues\n\n"
+        timeout_message += "💡 COMMON FIXES:\n"
+        timeout_message += "   - Install ffmpeg for audio CAPTCHA solving: sudo apt-get install -y ffmpeg\n"
+        timeout_message += "   - Check if ffmpeg is in PATH: which ffmpeg && which ffprobe\n"
+        timeout_message += "   - Increase timeout in template if needed\n\n"
         if captured_logs:
             timeout_message += "Last known progress (from heartbeat):\n"
             last_lines = captured_logs[-30:] if len(captured_logs) > 30 else captured_logs
             for line in last_lines:
                 if line.strip():
                     timeout_message += f"   {line.strip()}\n"
+        else:
+            timeout_message += "ℹ️  Progress logs are available in the submission log above.\n"
         timeout_message += "\n" + "=" * 80 + "\n"
         timeout_message += "💡 TIP: Check the heartbeat file for detailed progress:\n"
         if heartbeat_file_path:
             timeout_message += f"   {heartbeat_file_path}\n"
+        timeout_message += "\n📋 NOTE: All execution logs are captured in stderr and displayed above.\n"
         
         timeout_result = {
             "status": "timeout",
