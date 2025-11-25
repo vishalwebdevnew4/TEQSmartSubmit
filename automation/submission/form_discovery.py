@@ -386,7 +386,8 @@ def ultra_safe_log_print(*args, **kwargs):
                 except:
                     safe_args.append("[unprintable]")
             
-            # Safely print to stderr (for logs) - use direct write for better reliability
+            # Safely print to stderr (for logs) - use direct write WITHOUT flush to avoid blocking
+            # The pipe reader (Node.js) will handle buffering, and flush() can block if buffer is full
             try:
                 # Handle sep parameter
                 sep = kwargs.get('sep', ' ')
@@ -396,12 +397,21 @@ def ultra_safe_log_print(*args, **kwargs):
                 end = kwargs.get('end', '\n')
                 message += end
                 
+                # Write without flush to avoid blocking on full pipe buffers
+                # Node.js will read the pipe and handle buffering
                 sys.stderr.write(message)
-                sys.stderr.flush()
+                # DO NOT flush here - it can block if pipe buffer is full on servers
+                # Only flush if we're writing to a real file (not a pipe)
+                try:
+                    if hasattr(sys.stderr, 'isatty') and sys.stderr.isatty():
+                        # Only flush if it's a TTY (terminal), not a pipe
+                        sys.stderr.flush()
+                except:
+                    pass  # Skip flush if it fails
             except:
                 # Fallback to print if direct write fails
                 try:
-                    print(*safe_args, **{**kwargs, 'file': sys.stderr}, flush=True)
+                    print(*safe_args, **{**kwargs, 'file': sys.stderr}, flush=False)  # Don't flush
                 except:
                     pass
                 
@@ -4226,64 +4236,76 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     except:
         pass
     
-    sys.stderr.write("📍 [main_async] Function called\n")
-    sys.stderr.flush()
+    # Use direct stderr writes WITHOUT flush to avoid blocking on pipe buffers
+    # Node.js will read the pipe and handle buffering automatically
+    def safe_write(msg):
+        """Write to stderr without flushing to avoid blocking on pipes."""
+        try:
+            sys.stderr.write(msg)
+            # Only flush if it's a TTY (terminal), not a pipe
+            try:
+                if hasattr(sys.stderr, 'isatty') and sys.stderr.isatty():
+                    sys.stderr.flush()
+            except:
+                pass
+        except:
+            pass
     
-    # Print startup logs immediately with debug tracking
-    sys.stderr.write("📍 [main_async] About to call ultra_safe_log_print (1)\n")
-    sys.stderr.flush()
-    ultra_safe_log_print("=" * 80)
+    safe_write("📍 [main_async] Function called\n")
     
-    sys.stderr.write("📍 [main_async] About to call ultra_safe_log_print (2)\n")
-    sys.stderr.flush()
-    ultra_safe_log_print("🚀 AUTOMATION STARTING")
-    
-    sys.stderr.write("📍 [main_async] About to call ultra_safe_log_print (3)\n")
-    sys.stderr.flush()
-    ultra_safe_log_print("=" * 80)
-    
-    sys.stderr.write("📍 [main_async] About to get timestamp\n")
-    sys.stderr.flush()
+    # Print startup logs using direct writes (more reliable on servers)
     try:
+        safe_write("=" * 80 + "\n")
+        safe_write("🚀 AUTOMATION STARTING\n")
+        safe_write("=" * 80 + "\n")
         timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S')
-        sys.stderr.write(f"📍 [main_async] Timestamp: {timestamp_str}\n")
-        sys.stderr.flush()
-        ultra_safe_log_print(f"Timestamp: {timestamp_str}")
+        safe_write(f"Timestamp: {timestamp_str}\n")
     except Exception as e:
-        sys.stderr.write(f"📍 [main_async] Error getting timestamp: {e}\n")
-        sys.stderr.flush()
-        ultra_safe_log_print("Timestamp: (error)")
+        # If direct write fails, try ultra_safe_log_print as fallback
+        try:
+            ultra_safe_log_print("=" * 80)
+            ultra_safe_log_print("🚀 AUTOMATION STARTING")
+            ultra_safe_log_print("=" * 80)
+            ultra_safe_log_print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        except:
+            pass  # Silent failure - continue execution
     
-    sys.stderr.write("📍 [main_async] After initial log prints\n")
-    sys.stderr.flush()
+    safe_write("📍 [main_async] After initial log prints\n")
     
     # Validate inputs with fallbacks
-    sys.stderr.write("📍 [main_async] About to get URL\n")
-    sys.stderr.flush()
+    safe_write("📍 [main_async] About to get URL\n")
     
     url = UltimateSafetyWrapper.execute_sync(
         lambda: args.url if hasattr(args, 'url') and args.url else "https://example.com",
         default_return="https://example.com"
     )
     
-    sys.stderr.write(f"📍 [main_async] URL: {url}\n")
-    sys.stderr.flush()
+    safe_write(f"📍 [main_async] URL: {url}\n")
+    safe_write(f"📋 Target URL: {url}\n")
     
-    ultra_safe_log_print(f"📋 Target URL: {url}")
+    # Try ultra_safe_log_print but don't let it block
+    try:
+        ultra_safe_log_print(f"📋 Target URL: {url}")
+    except:
+        pass
     
-    sys.stderr.write("📍 [main_async] About to get template path\n")
-    sys.stderr.flush()
+    safe_write("📍 [main_async] About to get template path\n")
     
     template_path = UltimateSafetyWrapper.execute_sync(
         lambda: Path(args.template) if hasattr(args, 'template') and args.template else Path("default.json"),
         default_return=Path("default.json")
     )
     
-    sys.stderr.write(f"📍 [main_async] Template path: {template_path}\n")
-    sys.stderr.flush()
+    safe_write(f"📍 [main_async] Template path: {template_path}\n")
+    safe_write(f"📄 Template path: {template_path}\n")
+    safe_write("\n")
     
-    ultra_safe_log_print(f"📄 Template path: {template_path}")
-    ultra_safe_log_print("")
+    # Try ultra_safe_log_print but don't let it block
+    try:
+        ultra_safe_log_print(f"📄 Template path: {template_path}")
+        ultra_safe_log_print("")
+    except:
+        pass
     
     try:
         # Get timeout from template or use default
