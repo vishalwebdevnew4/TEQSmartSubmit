@@ -1,14 +1,53 @@
 #!/bin/bash
 # Deploy and test the form_discovery.py fix on the server
 # Run this on the server: bash deploy_and_test_fix.sh
+# Works from any directory - finds the git repo automatically
 
 set -e
 
-SOURCE_FILE="/var/www/html/TEQSmartSubmit/automation/submission/form_discovery.py"
+# Find the script location and git repo root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || pwd)"
+cd "$SCRIPT_DIR" 2>/dev/null || cd "$(pwd)"
+
+# Try to find the git repo root
+if [ -d ".git" ]; then
+    REPO_ROOT="$(pwd)"
+elif [ -f "automation/submission/form_discovery.py" ]; then
+    REPO_ROOT="$(pwd)"
+else
+    # Try common locations
+    for dir in "/var/www/html/TEQSmartSubmit" "$HOME/TEQSmartSubmit" "$(pwd)"; do
+        if [ -f "$dir/automation/submission/form_discovery.py" ]; then
+            REPO_ROOT="$dir"
+            break
+        fi
+    done
+fi
+
+# If still not found, try to find it
+if [ -z "$REPO_ROOT" ] || [ ! -f "$REPO_ROOT/automation/submission/form_discovery.py" ]; then
+    # Search for the file
+    FOUND_FILE=$(find /var/www /home -name "form_discovery.py" -path "*/automation/submission/*" 2>/dev/null | head -1)
+    if [ -n "$FOUND_FILE" ]; then
+        REPO_ROOT=$(dirname "$(dirname "$(dirname "$FOUND_FILE")")")
+    fi
+fi
+
+if [ -z "$REPO_ROOT" ] || [ ! -f "$REPO_ROOT/automation/submission/form_discovery.py" ]; then
+    echo "❌ Could not find form_discovery.py"
+    echo "   Searched in: $SCRIPT_DIR, /var/www/html/TEQSmartSubmit, current directory"
+    echo "   Please run this script from the git repository root"
+    exit 1
+fi
+
+cd "$REPO_ROOT"
+SOURCE_FILE="$REPO_ROOT/automation/submission/form_discovery.py"
 TARGET_FILE="/var/www/projects/teqsmartsubmit/teqsmartsubmit/automation/submission/form_discovery.py"
 
 echo "🚀 Deploying form_discovery.py fix to server..."
 echo ""
+echo "📍 Repository root: $REPO_ROOT"
+echo "📍 Source file: $SOURCE_FILE"
 
 # Check if source file exists
 if [ ! -f "$SOURCE_FILE" ]; then
