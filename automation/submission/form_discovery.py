@@ -4236,24 +4236,81 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     except:
         pass
     
-    # Use direct stderr writes WITHOUT flush to avoid blocking on pipe buffers
-    # Node.js will read the pipe and handle buffering automatically
+    # Use non-blocking stderr writes to prevent hanging on full pipe buffers
+    # CRITICAL: Even sys.stderr.write() can block if pipe buffer is full!
+    # Solution: Check if pipe is writable before writing, skip if not
+    try:
+        import select
+        import errno
+        HAS_SELECT = True
+    except ImportError:
+        HAS_SELECT = False
+        import errno
+    
     def safe_write(msg):
-        """Write to stderr without flushing to avoid blocking on pipes."""
+        """Write to stderr without blocking - skip if pipe buffer is full."""
         try:
-            sys.stderr.write(msg)
-            # Only flush if it's a TTY (terminal), not a pipe
+            # Check if stderr is a pipe (not TTY)
+            is_pipe = not (hasattr(sys.stderr, 'isatty') and sys.stderr.isatty())
+            
+            if is_pipe and HAS_SELECT:
+                # For pipes, check if writable before writing (non-blocking check)
+                try:
+                    if hasattr(sys.stderr, 'fileno'):
+                        fileno = sys.stderr.fileno()
+                        # Check if file descriptor is writable (timeout 0 = non-blocking)
+                        # If not writable, pipe buffer is full - skip to avoid blocking
+                        ready, _, _ = select.select([], [fileno], [], 0)
+                        if fileno not in ready:
+                            # Pipe buffer is full, skip this write to avoid blocking
+                            # This is OK - Node.js will eventually read and we'll continue
+                            return
+                except (OSError, ValueError):
+                    # select failed (might be Windows or other issue), try writing anyway
+                    pass
+            
+            # Write the message (this might still block, but we tried to prevent it)
             try:
-                if hasattr(sys.stderr, 'isatty') and sys.stderr.isatty():
-                    sys.stderr.flush()
-            except:
-                pass
+                sys.stderr.write(msg)
+            except (IOError, OSError) as e:
+                # If write would block (EAGAIN/EWOULDBLOCK), just skip it
+                if hasattr(errno, 'EAGAIN') and e.errno == errno.EAGAIN:
+                    return
+                if hasattr(errno, 'EWOULDBLOCK') and e.errno == errno.EWOULDBLOCK:
+                    return
+                # Other error, continue silently
+            
+            # Only flush if it's a TTY (terminal), not a pipe
+            if not is_pipe:
+                try:
+                    if hasattr(sys.stderr, 'isatty') and sys.stderr.isatty():
+                        sys.stderr.flush()
+                except:
+                    pass
         except:
+            # Any error - silently skip to prevent blocking
             pass
     
+    # CRITICAL: Update heartbeat FIRST before any stderr writes
+    try:
+        heartbeat_file_path = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
+        if not heartbeat_file_path.exists():
+            heartbeat_file_path = Path('/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
+        
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [main_async] Function called\n")
+                f.write("📍 [main_async] About to write startup messages\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
+    # Try to write to stderr, but don't let it block execution
     safe_write("📍 [main_async] Function called\n")
     
-    # Print startup logs using direct writes (more reliable on servers)
+    # Print startup logs - but skip if pipe might be blocking
+    # CRITICAL: Don't let logging block execution!
     try:
         safe_write("=" * 80 + "\n")
         safe_write("🚀 AUTOMATION STARTING\n")
@@ -4261,14 +4318,18 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
         timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S')
         safe_write(f"Timestamp: {timestamp_str}\n")
     except Exception as e:
-        # If direct write fails, try ultra_safe_log_print as fallback
-        try:
-            ultra_safe_log_print("=" * 80)
-            ultra_safe_log_print("🚀 AUTOMATION STARTING")
-            ultra_safe_log_print("=" * 80)
-            ultra_safe_log_print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        except:
-            pass  # Silent failure - continue execution
+        # If write fails, just continue - don't block
+        pass
+    
+    # Update heartbeat to show we got past the writes
+    try:
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [main_async] After initial log prints\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
     
     safe_write("📍 [main_async] After initial log prints\n")
     
