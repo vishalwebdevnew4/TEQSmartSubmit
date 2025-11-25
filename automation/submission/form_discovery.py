@@ -4222,15 +4222,22 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
 async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     """ULTRA-RESILIENT main async function - CANNOT FAIL to return JSON."""
     
-    # Update heartbeat immediately
+    # Initialize heartbeat file path for debugging (available throughout function)
+    heartbeat_file_path = None
     try:
         heartbeat_file_path = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
         if not heartbeat_file_path.exists():
             heartbeat_file_path = Path('/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
-        
-        if heartbeat_file_path.exists():
+    except:
+        pass
+    
+    # Update heartbeat immediately - function entry
+    try:
+        if heartbeat_file_path and heartbeat_file_path.exists():
             with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [main_async] Function entry - main_async_with_ultimate_safety called\n")
                 f.write("📍 [main_async] Function called\n")
+                f.write("📍 [main_async] About to write startup messages\n")
                 f.flush()
                 os.fsync(f.fileno())
     except:
@@ -4291,16 +4298,11 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
             # Any error - silently skip to prevent blocking
             pass
     
-    # CRITICAL: Update heartbeat FIRST before any stderr writes
+    # CRITICAL: Update heartbeat FIRST before any stderr writes (heartbeat_file_path already initialized above)
     try:
-        heartbeat_file_path = Path('/var/www/projects/teqsmartsubmit/teqsmartsubmit/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
-        if not heartbeat_file_path.exists():
-            heartbeat_file_path = Path('/tmp/python_script_heartbeat_' + str(os.getpid()) + '.txt')
-        
-        if heartbeat_file_path.exists():
+        if heartbeat_file_path and heartbeat_file_path.exists():
             with open(heartbeat_file_path, 'a') as f:
-                f.write("📍 [main_async] Function called\n")
-                f.write("📍 [main_async] About to write startup messages\n")
+                f.write("📍 [main_async] About to write startup messages (duplicate check)\n")
                 f.flush()
                 os.fsync(f.fileno())
     except:
@@ -4408,6 +4410,16 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     except:
         pass
     
+    # Update heartbeat - about to read template
+    try:
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [main_async] About to read template file\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
     try:
         # Get timeout from template or use default
         template_content = UltimateSafetyWrapper.execute_sync(
@@ -4423,23 +4435,83 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
         )
         
         timeout = template_data.get("max_timeout_seconds", 300)
-    except:
+        
+        # Update heartbeat - template read successfully
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [main_async] Template read, timeout: {timeout}s\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+    except Exception as e:
         timeout = 300
+        # Update heartbeat - template read failed, using default
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [main_async] Template read failed, using default timeout: {timeout}s\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+    
+    # Update heartbeat - about to start submission
+    try:
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write(f"📍 [main_async] Starting submission with timeout: {timeout} seconds\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
     
     # Run with timeout protection and multiple fallbacks
     try:
         ultra_safe_log_print(f"⏱️  Starting submission with timeout: {timeout} seconds")
         ultra_safe_log_print("")
         
+        # Update heartbeat - about to call run_ultra_resilient_submission
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] About to call run_ultra_resilient_submission\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         result = await asyncio.wait_for(
             run_ultra_resilient_submission(url, template_path),
             timeout=timeout
         )
         
+        # Update heartbeat - submission completed
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [main_async] Submission completed, status: {result.get('status', 'unknown')}\n")
+                    f.write("📍 [main_async] About to process result\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         ultra_safe_log_print("")
         ultra_safe_log_print("=" * 80)
         ultra_safe_log_print("📊 SUBMISSION PROCESS COMPLETED")
         ultra_safe_log_print("=" * 80)
+        
+        # Update heartbeat - processing result
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] Processing result format\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
         
         # Ensure result is properly formatted
         if not isinstance(result, dict):
@@ -4448,6 +4520,16 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
             
         result["url"] = url  # Ensure URL is always set
         result["timestamp"] = time.time()
+        
+        # Update heartbeat - result formatted
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [main_async] Result formatted, status: {result.get('status', 'unknown')}\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
         
         # Print final result summary
         ultra_safe_log_print(f"Final Status: {result.get('status', 'unknown')}")
@@ -4486,15 +4568,46 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
         ultra_safe_log_print(result.get("message", "")[:500])
         ultra_safe_log_print("")
         
+        # Update heartbeat - about to output JSON
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] About to output JSON result\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         # Print JSON result to stdout (for route.ts to capture)
         json_result = json.dumps(result, indent=2)
         ultra_safe_log_print("📤 Outputting JSON result to stdout...")
         print(json_result, flush=True)  # Print to stdout for route.ts
         ultra_safe_log_print("✅ JSON result output complete")
         
+        # Update heartbeat - JSON output complete
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] JSON result output complete\n")
+                    f.write("📍 [main_async] About to return json_result\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         return json_result
         
     except asyncio.TimeoutError:
+        # Update heartbeat - timeout occurred
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [main_async] TIMEOUT ERROR after {timeout} seconds\n")
+                    f.write("📍 [main_async] Creating timeout result\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
         ultra_safe_log_print("")
         ultra_safe_log_print("⏱️  TIMEOUT: Operation exceeded timeout")
         timeout_result = {
@@ -4505,11 +4618,43 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
             "recovered": True,
             "timestamp": time.time()
         }
+        
+        # Update heartbeat - timeout result created
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] Timeout result created, about to output JSON\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         json_result = json.dumps(timeout_result)
         print(json_result, flush=True)
+        
+        # Update heartbeat - timeout JSON output
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] Timeout JSON output, returning\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         return json_result
         
     except Exception as e:
+        # Update heartbeat - exception occurred
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write(f"📍 [main_async] EXCEPTION: {type(e).__name__}: {str(e)[:100]}\n")
+                    f.write("📍 [main_async] Creating error result\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
         error_msg = str(e)
         ultra_safe_log_print("")
         ultra_safe_log_print(f"❌ ERROR: {error_msg}")
@@ -4525,8 +4670,30 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
             "recovered": True,
             "timestamp": time.time()
         }
+        
+        # Update heartbeat - error result created
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] Error result created, about to output JSON\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         json_result = json.dumps(error_result)
         print(json_result, flush=True)
+        
+        # Update heartbeat - error JSON output
+        try:
+            if heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'a') as f:
+                    f.write("📍 [main_async] Error JSON output, returning\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except:
+            pass
+        
         return json_result
 
 def main() -> int:
