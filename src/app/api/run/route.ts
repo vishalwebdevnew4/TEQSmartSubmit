@@ -225,15 +225,6 @@ export async function POST(req: NextRequest) {
         // Set streams to flowing mode for immediate output
         python.stdout.resume();
         python.stderr.resume();
-        
-        // CRITICAL: Set highWaterMark to 0 for unbuffered streaming
-        // This ensures we read data as soon as it's available
-        if (python.stdout.setDefaultEncoding) {
-          python.stdout.setDefaultEncoding("utf8");
-        }
-        if (python.stderr.setDefaultEncoding) {
-          python.stderr.setDefaultEncoding("utf8");
-        }
 
         let stdout = "";
         let stderr = "";
@@ -241,8 +232,6 @@ export async function POST(req: NextRequest) {
         const LOG_UPDATE_INTERVAL = 1000; // Update database every 1 second with logs (more frequent)
         let processStartTime = Date.now();
         let hasReceivedAnyOutput = false;
-        let stderrUpdateQueue: string[] = [];
-        let isUpdatingStderr = false;
 
         // Handle stdout
         python.stdout.on("data", async (chunk) => {
@@ -251,44 +240,26 @@ export async function POST(req: NextRequest) {
         });
 
         // Handle stderr - update database immediately for EVERY chunk (no delay)
-        // Use a queue to ensure all updates are processed even if database is slow
+        // CRITICAL: Update on every chunk to show real-time progress
         python.stderr.on("data", async (chunk) => {
           stderr += chunk;
-          stderrUpdateQueue.push(chunk);
           hasReceivedAnyOutput = true;
           
-          // Update database immediately for EVERY chunk (with queue to prevent blocking)
-          const updateStderr = async () => {
-            if (isUpdatingStderr) return; // Already updating
-            isUpdatingStderr = true;
-            
-            try {
-              // Get all queued chunks
-              const chunksToProcess = stderrUpdateQueue.splice(0);
-              if (chunksToProcess.length > 0) {
-                // Update with current full stderr
-                await prisma.submissionLog.update({
-                  where: { id: submission.id },
-                  data: {
-                    message: stderr || "Automation in progress...",
-                  },
-                });
-                lastLogUpdate = Date.now();
-              }
-            } catch (updateError) {
-              // Ignore update errors to avoid breaking the main flow
-              console.error("Failed to update log:", updateError);
-            } finally {
-              isUpdatingStderr = false;
-              // Process any chunks that arrived while we were updating
-              if (stderrUpdateQueue.length > 0) {
-                setImmediate(updateStderr);
-              }
-            }
-          };
-          
-          // Trigger update (will queue if already updating)
-          updateStderr();
+          // Update database immediately for EVERY chunk
+          // Don't queue - update directly to ensure logs appear in real-time
+          try {
+            await prisma.submissionLog.update({
+              where: { id: submission.id },
+              data: {
+                message: stderr || "Automation in progress...",
+              },
+            });
+            lastLogUpdate = Date.now();
+          } catch (updateError) {
+            // Log error but don't break the flow
+            console.error("Failed to update log:", updateError);
+            // Try to continue - maybe database is temporarily unavailable
+          }
         });
 
         // Handle process errors (script not found, permission denied, etc.)

@@ -29,6 +29,13 @@ export default function LogsPage() {
 
   useEffect(() => {
     fetchLogs();
+    
+    // Auto-refresh every 2 seconds to show real-time log updates
+    const interval = setInterval(() => {
+      fetchLogs(false); // Silent refresh
+    }, 2000);
+    
+    return () => clearInterval(interval);
   }, [filterStatus]);
 
   const fetchLogs = async (isRefresh = false) => {

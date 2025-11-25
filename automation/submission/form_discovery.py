@@ -538,10 +538,12 @@ class LocalCaptchaSolver:
                 if challenge_exists:
                     ultra_safe_log_print("   ⚠️  Challenge iframe already present - will attempt audio challenge solving")
                 
-                # Try comprehensive solving with longer timeout (5 minutes for audio challenge)
+                # Try comprehensive solving with timeout (60 seconds max to prevent consuming entire operation timeout)
+                # If audio challenge requires ffmpeg and it's not available, it will fail quickly
+                captcha_timeout = 60.0  # 60 seconds max for CAPTCHA solving
                 result = await asyncio.wait_for(
                     self.ultimate_solver.solve_recaptcha_v2(site_key, page_url),
-                    timeout=300.0  # 5 minutes for comprehensive solving including audio challenge
+                    timeout=captcha_timeout
                 )
                 
                 # Wait for token to appear after solving
@@ -644,7 +646,8 @@ class LocalCaptchaSolver:
                 else:
                     ultra_safe_log_print("⚠️  Comprehensive solver did not return success - may need manual solving")
             except asyncio.TimeoutError:
-                ultra_safe_log_print("⚠️  Comprehensive solving timed out (120s) - CAPTCHA may require manual solving")
+                ultra_safe_log_print("⚠️  Comprehensive solving timed out (60s) - CAPTCHA may require manual solving")
+                ultra_safe_log_print("   💡 Tip: Install ffmpeg for audio challenge solving, or use a CAPTCHA solving service")
             except Exception as e:
                 ultra_safe_log_print(f"⚠️  Comprehensive solving failed: {str(e)[:50]}")
                 import traceback
@@ -4357,34 +4360,72 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         all_logs.append("")
         all_logs.append("=" * 80)
         
+        # Get field filling stats for status determination
+        fields_filled = result.get("fields_filled", 0)
+        fields_attempted = result.get("fields_attempted", 0)
+        
         # Determine final status - STRICT verification
+        # CRITICAL: Only mark as success if fields were filled AND submission was verified
         if submit_result.get("submission_success") and submit_result.get("form_submission_detected"):
             # Only mark as success if BOTH submission_success AND form_submission_detected are True
             # AND we have form_submission_data
+            # AND fields were actually filled
             has_form_data = submit_result.get("form_submission_data") is not None
-            if has_form_data:
+            if has_form_data and fields_filled > 0:
                 all_logs.append("✅ FINAL STATUS: SUCCESS - Form submitted with verified data")
                 result.update({
                     "status": "success",
                     "message": "\n".join(all_logs)
                 })
+            elif has_form_data and fields_filled == 0:
+                # Has form data but no fields filled - suspicious, mark as failed
+                all_logs.append("❌ FINAL STATUS: FAILED - Form data captured but no fields were filled")
+                result.update({
+                    "status": "failed",
+                    "message": "\n".join(all_logs)
+                })
             else:
-                # Even if marked as success, if no form data, mark as submitted (unconfirmed)
-                all_logs.append("⚠️  FINAL STATUS: SUBMITTED (unconfirmed) - No form data verification")
+                # No form data verification - mark as failed
+                all_logs.append("❌ FINAL STATUS: FAILED - No form data verification")
+                result.update({
+                    "status": "failed",
+                    "message": "\n".join(all_logs)
+                })
+        elif submit_result.get("submission_attempted"):
+            # Submission was attempted but not verified
+            # Check if fields were filled and submission was detected
+            form_detected = submit_result.get("form_submission_detected", False)
+            has_form_data = submit_result.get("form_submission_data") is not None
+            
+            if fields_filled == 0 and fields_attempted == 0:
+                # No fields filled at all - this is a failure
+                all_logs.append("❌ FINAL STATUS: FAILED - No fields filled and no submission verified")
+                result.update({
+                    "status": "failed",
+                    "message": "\n".join(all_logs)
+                })
+            elif not form_detected and not has_form_data:
+                # Submission attempted but not detected - failure
+                all_logs.append("❌ FINAL STATUS: FAILED - Submission attempted but not detected")
+                result.update({
+                    "status": "failed",
+                    "message": "\n".join(all_logs)
+                })
+            else:
+                # Some fields filled but submission not fully verified - unconfirmed
+                all_logs.append("⚠️  FINAL STATUS: SUBMITTED (unconfirmed) - Submission attempted but not verified")
                 result.update({
                     "status": "submitted",
                     "message": "\n".join(all_logs)
                 })
-        elif submit_result.get("submission_attempted"):
-            all_logs.append("⚠️  FINAL STATUS: SUBMITTED (unconfirmed) - Submission attempted but not verified")
-            result.update({
-                "status": "submitted",
-                "message": "\n".join(all_logs)
-            })
         else:
-            all_logs.append("❌ FINAL STATUS: COMPLETED - No submission was attempted")
+            # No submission was attempted
+            if fields_filled == 0:
+                all_logs.append("❌ FINAL STATUS: FAILED - No fields filled and no submission attempted")
+            else:
+                all_logs.append("❌ FINAL STATUS: FAILED - No submission was attempted")
             result.update({
-                "status": "completed",
+                "status": "failed",
                 "message": "\n".join(all_logs)
             })
         
@@ -4835,7 +4876,7 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     except asyncio.TimeoutError:
         # Update heartbeat - timeout occurred
         try:
-            if heartbeat_file_path.exists():
+            if heartbeat_file_path and heartbeat_file_path.exists():
                 with open(heartbeat_file_path, 'a') as f:
                     f.write(f"📍 [main_async] TIMEOUT ERROR after {timeout} seconds\n")
                     f.write("📍 [main_async] Creating timeout result\n")
@@ -4843,11 +4884,68 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
                     os.fsync(f.fileno())
         except:
             pass
+        
+        # Try to read heartbeat file to get logs
+        captured_logs = []
+        try:
+            if heartbeat_file_path and heartbeat_file_path.exists():
+                with open(heartbeat_file_path, 'r') as f:
+                    captured_logs = f.readlines()
+        except:
+            pass
+        
         ultra_safe_log_print("")
         ultra_safe_log_print("⏱️  TIMEOUT: Operation exceeded timeout")
+        ultra_safe_log_print(f"⏱️  Timeout occurred after {timeout} seconds")
+        ultra_safe_log_print("")
+        ultra_safe_log_print("=" * 80)
+        ultra_safe_log_print("TIMEOUT SUMMARY")
+        ultra_safe_log_print("=" * 80)
+        ultra_safe_log_print(f"URL: {url}")
+        ultra_safe_log_print(f"Timeout: {timeout} seconds")
+        ultra_safe_log_print("")
+        ultra_safe_log_print("⚠️  The automation process exceeded the timeout limit.")
+        ultra_safe_log_print("   This usually happens when:")
+        ultra_safe_log_print("   1. CAPTCHA solving takes too long")
+        ultra_safe_log_print("   2. Page loading is very slow")
+        ultra_safe_log_print("   3. Network issues")
+        ultra_safe_log_print("")
+        if captured_logs:
+            ultra_safe_log_print("Last known progress (from heartbeat):")
+            # Get last 20 lines of heartbeat
+            last_lines = captured_logs[-20:] if len(captured_logs) > 20 else captured_logs
+            for line in last_lines:
+                if line.strip():
+                    ultra_safe_log_print(f"   {line.strip()}")
+        ultra_safe_log_print("")
+        ultra_safe_log_print("=" * 80)
+        
+        # Build timeout message with captured info
+        timeout_message = f"Operation timed out after {timeout} seconds\n\n"
+        timeout_message += "=" * 80 + "\n"
+        timeout_message += "TIMEOUT SUMMARY\n"
+        timeout_message += "=" * 80 + "\n"
+        timeout_message += f"URL: {url}\n"
+        timeout_message += f"Timeout: {timeout} seconds\n\n"
+        timeout_message += "⚠️  The automation process exceeded the timeout limit.\n"
+        timeout_message += "   This usually happens when:\n"
+        timeout_message += "   1. CAPTCHA solving takes too long (audio challenge)\n"
+        timeout_message += "   2. Page loading is very slow\n"
+        timeout_message += "   3. Network issues\n\n"
+        if captured_logs:
+            timeout_message += "Last known progress (from heartbeat):\n"
+            last_lines = captured_logs[-30:] if len(captured_logs) > 30 else captured_logs
+            for line in last_lines:
+                if line.strip():
+                    timeout_message += f"   {line.strip()}\n"
+        timeout_message += "\n" + "=" * 80 + "\n"
+        timeout_message += "💡 TIP: Check the heartbeat file for detailed progress:\n"
+        if heartbeat_file_path:
+            timeout_message += f"   {heartbeat_file_path}\n"
+        
         timeout_result = {
             "status": "timeout",
-            "message": f"Operation timed out after {timeout} seconds\n\nNo logs captured",
+            "message": timeout_message,
             "url": url,
             "error_type": "timeout",
             "recovered": True,
