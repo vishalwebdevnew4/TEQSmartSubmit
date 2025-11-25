@@ -386,14 +386,24 @@ def ultra_safe_log_print(*args, **kwargs):
                 except:
                     safe_args.append("[unprintable]")
             
-            # Safely print to stderr (for logs) - this ensures logs are captured by route.ts
-            print(*safe_args, **{**kwargs, 'file': sys.stderr})
-            
-            # ALWAYS flush stderr to ensure logs are captured immediately
+            # Safely print to stderr (for logs) - use direct write for better reliability
             try:
+                # Handle sep parameter
+                sep = kwargs.get('sep', ' ')
+                message = sep.join(str(arg) for arg in safe_args)
+                
+                # Handle end parameter (default is newline)
+                end = kwargs.get('end', '\n')
+                message += end
+                
+                sys.stderr.write(message)
                 sys.stderr.flush()
             except:
-                pass
+                # Fallback to print if direct write fails
+                try:
+                    print(*safe_args, **{**kwargs, 'file': sys.stderr}, flush=True)
+                except:
+                    pass
                 
             break  # Success
             
@@ -4219,11 +4229,30 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     sys.stderr.write("📍 [main_async] Function called\n")
     sys.stderr.flush()
     
-    # Print startup logs immediately
+    # Print startup logs immediately with debug tracking
+    sys.stderr.write("📍 [main_async] About to call ultra_safe_log_print (1)\n")
+    sys.stderr.flush()
     ultra_safe_log_print("=" * 80)
+    
+    sys.stderr.write("📍 [main_async] About to call ultra_safe_log_print (2)\n")
+    sys.stderr.flush()
     ultra_safe_log_print("🚀 AUTOMATION STARTING")
+    
+    sys.stderr.write("📍 [main_async] About to call ultra_safe_log_print (3)\n")
+    sys.stderr.flush()
     ultra_safe_log_print("=" * 80)
-    ultra_safe_log_print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    sys.stderr.write("📍 [main_async] About to get timestamp\n")
+    sys.stderr.flush()
+    try:
+        timestamp_str = time.strftime('%Y-%m-%d %H:%M:%S')
+        sys.stderr.write(f"📍 [main_async] Timestamp: {timestamp_str}\n")
+        sys.stderr.flush()
+        ultra_safe_log_print(f"Timestamp: {timestamp_str}")
+    except Exception as e:
+        sys.stderr.write(f"📍 [main_async] Error getting timestamp: {e}\n")
+        sys.stderr.flush()
+        ultra_safe_log_print("Timestamp: (error)")
     
     sys.stderr.write("📍 [main_async] After initial log prints\n")
     sys.stderr.flush()
@@ -4347,7 +4376,7 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
         ultra_safe_log_print("⏱️  TIMEOUT: Operation exceeded timeout")
         timeout_result = {
             "status": "timeout",
-            "message": f"Operation timed out after {timeout} seconds\n\nAll logs up to timeout:\n{stderr if 'stderr' in locals() else 'No logs captured'}",
+            "message": f"Operation timed out after {timeout} seconds\n\nNo logs captured",
             "url": url,
             "error_type": "timeout",
             "recovered": True,
