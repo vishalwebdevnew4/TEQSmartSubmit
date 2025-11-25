@@ -206,10 +206,18 @@ export async function POST(req: NextRequest) {
           console.log('[AUTOMATION] Using xvfb-run wrapper for virtual display');
         }
         
+        // Ensure PATH includes common binary locations (especially for ffmpeg/ffprobe)
+        const currentPath = process.env.PATH || '';
+        const requiredPaths = ['/usr/bin', '/usr/local/bin', '/bin', '/sbin'];
+        const pathParts = currentPath.split(':');
+        const finalPathParts = [...new Set([...requiredPaths, ...pathParts])]; // Remove duplicates, keep order
+        const finalPath = finalPathParts.join(':');
+        
         const python = spawn(finalCommand, finalArgs, {
           cwd: process.cwd(),
           env: { 
-            ...process.env, 
+            ...process.env,
+            PATH: finalPath, // Ensure PATH includes /usr/bin for ffmpeg/ffprobe
             PYTHONUNBUFFERED: "1", 
             PYTHONIOENCODING: "utf-8",
             // Force immediate output

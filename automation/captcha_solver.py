@@ -1435,6 +1435,8 @@ class UltimateLocalCaptchaSolver:
                 try:
                     import speech_recognition as sr
                     from pydub import AudioSegment
+                    from pydub.utils import which
+                    import shutil
                     
                     # Check for ffmpeg/ffprobe BEFORE attempting conversion
                     ffmpeg_available, ffmpeg_error = check_ffmpeg_available()
@@ -1443,6 +1445,10 @@ class UltimateLocalCaptchaSolver:
                         safe_log_print("   ⚠️  Audio challenge solving requires ffmpeg/ffprobe")
                         safe_log_print("   💡 Skipping audio challenge - install ffmpeg to enable audio solving")
                         return None
+                    
+                    # Get paths for better error messages
+                    ffmpeg_path = shutil.which('ffmpeg')
+                    ffprobe_path = shutil.which('ffprobe')
                     
                     # Convert to WAV
                     safe_log_print("   🔄 Converting audio to WAV...")
@@ -1453,9 +1459,11 @@ class UltimateLocalCaptchaSolver:
                         safe_log_print("   ✅ Audio converted to WAV")
                     except Exception as e:
                         error_msg = str(e)
-                        if 'ffprobe' in error_msg.lower() or 'ffmpeg' in error_msg.lower():
+                        if 'ffprobe' in error_msg.lower() or 'ffmpeg' in error_msg.lower() or 'no such file' in error_msg.lower():
                             safe_log_print(f"   ⚠️  Audio conversion error: {error_msg[:100]}")
                             safe_log_print("   ⚠️  ffmpeg/ffprobe may not be properly installed or accessible")
+                            safe_log_print(f"   💡 ffmpeg path: {ffmpeg_path or 'NOT FOUND'}")
+                            safe_log_print(f"   💡 ffprobe path: {ffprobe_path or 'NOT FOUND'}")
                             safe_log_print("   💡 Install with: sudo apt-get install -y ffmpeg")
                             return None
                         safe_log_print(f"   ⚠️  Audio conversion error: {error_msg[:50]}")
