@@ -1855,21 +1855,49 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                                 
                                 // Determine value to fill
                                 const currentName = (input.name || input.id || '').toLowerCase();
+                                let valueToFill = 'Test Value';
                                 if (input.type === 'email' || currentName.includes('email') || placeholder.includes('email') || placeholder.includes('e-mailadres')) {
-                                    input.value = 'test@example.com';
+                                    valueToFill = 'test@example.com';
                                 } else if (currentName.includes('name') || placeholder.includes('naam') || placeholder.includes('name')) {
-                                    input.value = 'Test User';
+                                    valueToFill = 'Test User';
                                 } else if (currentName.includes('phone') || currentName.includes('telefoon') || placeholder.includes('phone') || placeholder.includes('nummer') || input.type === 'tel') {
-                                    input.value = '+1234567890';
+                                    valueToFill = '+1234567890';
                                 } else if (currentName.includes('message') || currentName.includes('comment') || currentName.includes('bericht') || placeholder.includes('message') || placeholder.includes('bericht') || input.tagName === 'TEXTAREA') {
-                                    input.value = 'This is an automated test submission.';
-                                } else {
-                                    input.value = 'Test Value';
+                                    valueToFill = 'This is an automated test submission.';
                                 }
                                 
-                                // Trigger events
-                                input.dispatchEvent(new Event('input', { bubbles: true }));
-                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                                // For React/Next.js controlled components, use native setter
+                                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+                                const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+                                
+                                if (input.tagName === 'INPUT' && nativeInputValueSetter) {
+                                    nativeInputValueSetter.call(input, valueToFill);
+                                } else if (input.tagName === 'TEXTAREA' && nativeTextAreaValueSetter) {
+                                    nativeTextAreaValueSetter.call(input, valueToFill);
+                                } else {
+                                    input.value = valueToFill;
+                                }
+                                
+                                // Trigger React's synthetic events with proper target
+                                const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                                const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                                Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
+                                Object.defineProperty(changeEvent, 'target', { value: input, enumerable: true });
+                                
+                                input.dispatchEvent(inputEvent);
+                                input.dispatchEvent(changeEvent);
+                                
+                                // Also trigger focus/blur to ensure React state updates
+                                input.focus();
+                                input.dispatchEvent(new Event('focus', { bubbles: true }));
+                                input.dispatchEvent(new Event('blur', { bubbles: true }));
+                                
+                                // Update React's internal value tracker if available
+                                if (input._valueTracker) {
+                                    input._valueTracker.setValue('');
+                                    input._valueTracker.setValue(valueToFill);
+                                }
+                                
                                 filled++;
                             }
                         } catch (e) {}
@@ -2622,10 +2650,55 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
         pass
     
     # Also intercept fetch/XHR for AJAX form submissions
+    # CRITICAL: Intercept and inject field values for React/Next.js forms
     try:
         await page.evaluate("""
             () => {
                 window.__ajaxSubmissions = [];
+                window.__formFieldValues = {};
+                
+                // Function to get all form field values from DOM (bypass React state)
+                function getFormFieldValues() {
+                    const form = document.querySelector('form');
+                    if (!form) return {};
+                    
+                    const values = {};
+                    const allFields = form.querySelectorAll('input, select, textarea');
+                    allFields.forEach(field => {
+                        if (field.type !== 'submit' && field.type !== 'button' && field.type !== 'hidden') {
+                            const name = field.name || field.id || '';
+                            if (name && field.value) {
+                                values[name] = field.value;
+                            }
+                        }
+                    });
+                    return values;
+                }
+                
+                // Function to inject field values into request body
+                function injectFieldValues(body, fieldValues) {
+                    if (!body || !fieldValues || Object.keys(fieldValues).length === 0) {
+                        return body;
+                    }
+                    
+                    try {
+                        // Try to parse as JSON
+                        if (typeof body === 'string' && body.trim().startsWith('{')) {
+                            const data = JSON.parse(body);
+                            // Merge field values into data
+                            Object.keys(fieldValues).forEach(key => {
+                                if (!data[key] || data[key] === '') {
+                                    data[key] = fieldValues[key];
+                                }
+                            });
+                            return JSON.stringify(data);
+                        }
+                    } catch (e) {
+                        // Not JSON, might be FormData or URL-encoded
+                    }
+                    
+                    return body;
+                }
                 
                 // Intercept fetch
                 const originalFetch = window.fetch;
@@ -2633,11 +2706,36 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     const url = args[0];
                     const options = args[1] || {};
                     if (options.method === 'POST' || options.method === 'post') {
+                        // Get actual field values from DOM before submission
+                        const fieldValues = getFormFieldValues();
+                        window.__formFieldValues = fieldValues;
+                        
+                        // Inject field values into request body if it's empty or missing fields
+                        if (options.body) {
+                            const originalBody = options.body;
+                            const injectedBody = injectFieldValues(originalBody, fieldValues);
+                            if (injectedBody !== originalBody) {
+                                options.body = injectedBody;
+                                console.log('🔧 Injected field values into fetch request:', fieldValues);
+                            }
+                        } else {
+                            // If no body, create one with field values
+                            try {
+                                options.body = JSON.stringify(fieldValues);
+                                options.headers = options.headers || {};
+                                options.headers['Content-Type'] = 'application/json';
+                                console.log('🔧 Created request body with field values:', fieldValues);
+                            } catch (e) {
+                                console.log('⚠️ Could not create request body:', e);
+                            }
+                        }
+                        
                         const submission = {
                             type: 'fetch',
                             url: url,
                             method: options.method || 'GET',
                             body: options.body ? (typeof options.body === 'string' ? options.body.substring(0, 500) : 'binary') : null,
+                            field_values: fieldValues,
                             timestamp: Date.now()
                         };
                         window.__ajaxSubmissions.push(submission);
@@ -2674,11 +2772,34 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                 };
                 XMLHttpRequest.prototype.send = function(data) {
                     if (this._method === 'POST' || this._method === 'post') {
+                        // Get actual field values from DOM before submission
+                        const fieldValues = getFormFieldValues();
+                        window.__formFieldValues = fieldValues;
+                        
+                        // Inject field values into request data if it's empty or missing fields
+                        let finalData = data;
+                        if (data) {
+                            finalData = injectFieldValues(data, fieldValues);
+                            if (finalData !== data) {
+                                console.log('🔧 Injected field values into XHR request:', fieldValues);
+                            }
+                        } else {
+                            // If no data, create it with field values
+                            try {
+                                finalData = JSON.stringify(fieldValues);
+                                this.setRequestHeader('Content-Type', 'application/json');
+                                console.log('🔧 Created XHR request data with field values:', fieldValues);
+                            } catch (e) {
+                                console.log('⚠️ Could not create XHR request data:', e);
+                            }
+                        }
+                        
                         const submission = {
                             type: 'xhr',
                             url: this._url,
                             method: this._method,
-                            data: data ? (typeof data === 'string' ? data.substring(0, 500) : 'binary') : null,
+                            data: finalData ? (typeof finalData === 'string' ? finalData.substring(0, 500) : 'binary') : null,
+                            field_values: fieldValues,
                             timestamp: Date.now()
                         };
                         
@@ -2695,7 +2816,9 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         window.__ajaxSubmissions.push(submission);
                         window.__formSubmissionDetected = true;
                         window.__formSubmissionURL = this._url;
-                        console.log('🔍 AJAX XHR POST detected:', this._url, data ? data.substring(0, 100) : '');
+                        console.log('🔍 AJAX XHR POST detected:', this._url, finalData ? finalData.substring(0, 100) : '');
+                        
+                        return originalSend.apply(this, [finalData]);
                     }
                     return originalSend.apply(this, [data]);
                 };
@@ -3160,13 +3283,27 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                             # For GET forms, always try button click first (many modern forms use JavaScript)
                             # But first, ensure all field values are properly set (especially for React/Next.js)
                             ultra_safe_log_print("   🔧 Ensuring all field values are set before submission...")
+                            
+                            # CRITICAL: For React/Next.js forms, we need to update React's internal state
+                            # and intercept the form submission to ensure field values are included
                             await page.evaluate("""
                                 () => {
                                     const form = document.querySelector('form');
                                     if (!form) return;
                                     
-                                    // For React/Next.js controlled components, we need to trigger React's synthetic events
+                                    // Store original field values before React might clear them
+                                    window.__formFieldValues = {};
                                     const allFields = form.querySelectorAll('input, select, textarea');
+                                    allFields.forEach(field => {
+                                        if (field.type !== 'submit' && field.type !== 'button' && field.type !== 'hidden') {
+                                            const fieldName = field.name || field.id || '';
+                                            if (field.value && fieldName) {
+                                                window.__formFieldValues[fieldName] = field.value;
+                                            }
+                                        }
+                                    });
+                                    
+                                    // For React/Next.js controlled components, we need to trigger React's synthetic events
                                     allFields.forEach(field => {
                                         if (field.type !== 'submit' && field.type !== 'button' && field.type !== 'hidden') {
                                             if (field.value) {
@@ -3181,9 +3318,13 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                                     nativeTextAreaValueSetter.call(field, field.value);
                                                 }
                                                 
-                                                // Trigger React's synthetic events
+                                                // Trigger React's synthetic events with proper properties
                                                 const inputEvent = new Event('input', { bubbles: true, cancelable: true });
                                                 const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                                                
+                                                // Set target property for React
+                                                Object.defineProperty(inputEvent, 'target', { value: field, enumerable: true });
+                                                Object.defineProperty(changeEvent, 'target', { value: field, enumerable: true });
                                                 
                                                 // Also try React's specific event types
                                                 field.dispatchEvent(inputEvent);
@@ -3205,9 +3346,9 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                     });
                                 }
                             """)
-                            await asyncio.sleep(1)  # Give more time for React to process
+                            await asyncio.sleep(2)  # Give more time for React to process
                             
-                            # Verify field values are still set
+                            # Verify field values are still set and re-fill if needed
                             field_values = await page.evaluate("""
                                 () => {
                                     const form = document.querySelector('form');
@@ -3225,6 +3366,54 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                 }
                             """)
                             ultra_safe_log_print(f"   📋 Field values before submission: {field_values}")
+                            
+                            # Check if any required fields are empty and re-fill them
+                            empty_fields = [name for name, value in field_values.items() if not value or value.strip() == '']
+                            if empty_fields:
+                                ultra_safe_log_print(f"   ⚠️  Some fields are empty: {empty_fields}, re-filling...")
+                                # Re-fill empty fields using Playwright's fill() method
+                                for field_name in empty_fields:
+                                    try:
+                                        # Try to find the field by name or id
+                                        field = await page.query_selector(f'input[name="{field_name}"], textarea[name="{field_name}"], input[id="{field_name}"], textarea[id="{field_name}"]')
+                                        if field:
+                                            # Determine value based on field name
+                                            value_to_fill = 'Test Value'
+                                            field_name_lower = field_name.lower()
+                                            if 'email' in field_name_lower:
+                                                value_to_fill = 'test@example.com'
+                                            elif 'name' in field_name_lower:
+                                                value_to_fill = 'Test User'
+                                            elif 'phone' in field_name_lower or 'telefoon' in field_name_lower:
+                                                value_to_fill = '+1234567890'
+                                            elif 'message' in field_name_lower or 'comment' in field_name_lower or 'bericht' in field_name_lower:
+                                                value_to_fill = 'This is an automated test submission.'
+                                            
+                                            await field.fill(value_to_fill)
+                                            await asyncio.sleep(0.3)
+                                            ultra_safe_log_print(f"   ✅ Re-filled field: {field_name} = {value_to_fill}")
+                                    except:
+                                        pass
+                                
+                                # Verify again after re-filling
+                                await asyncio.sleep(1)
+                                field_values = await page.evaluate("""
+                                    () => {
+                                        const form = document.querySelector('form');
+                                        if (!form) return {};
+                                        
+                                        const values = {};
+                                        const allFields = form.querySelectorAll('input, select, textarea');
+                                        allFields.forEach(field => {
+                                            if (field.type !== 'submit' && field.type !== 'button' && field.type !== 'hidden') {
+                                                const name = field.name || field.id || 'unnamed';
+                                                values[name] = field.value || '';
+                                            }
+                                        });
+                                        return values;
+                                    }
+                                """)
+                                ultra_safe_log_print(f"   📋 Field values after re-fill: {field_values}")
                             
                             # Now try button click
                             ultra_safe_log_print("   📤 Trying button click first (may trigger JavaScript)...")
@@ -3589,10 +3778,32 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                     ultra_safe_log_print(f"   ✅ Contact form AJAX submission detected!")
                                     ultra_safe_log_print(f"      URL: {url[:100]}")
                                     ultra_safe_log_print(f"      Status: {status}")
-                                    if status >= 200 and status < 300:
+                                    
+                                    # CRITICAL: Check response status and body for errors
+                                    submission_failed = False
+                                    if status >= 400:
+                                        submission_failed = True
+                                        ultra_safe_log_print(f"      ❌ Submission failed with status {status}")
+                                    
+                                    # Check response body for error messages
+                                    if response_data:
+                                        response_lower = str(response_data).lower()
+                                        # Check for common error indicators in JSON responses
+                                        if '"success":false' in response_lower or '"error":' in response_lower:
+                                            submission_failed = True
+                                            ultra_safe_log_print(f"      ❌ Server returned error: {response_data[:200]}")
+                                        # Check for error messages
+                                        error_keywords = ['missing required', 'invalid', 'error', 'failed', 'required fields']
+                                        if any(keyword in response_lower for keyword in error_keywords):
+                                            submission_failed = True
+                                            ultra_safe_log_print(f"      ❌ Error message in response: {response_data[:200]}")
+                                    
+                                    # Store submission failure status
+                                    if submission_failed:
+                                        form_submission_response["failed"] = True
+                                        form_submission_response["error_reason"] = f"Status {status}" if status >= 400 else "Error in response"
+                                    elif status >= 200 and status < 300:
                                         ultra_safe_log_print(f"      ✅ Submission successful!")
-                                    elif status >= 400:
-                                        ultra_safe_log_print(f"      ⚠️  Submission failed with status {status}")
                         except:
                             pass
                 
@@ -3644,10 +3855,78 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
             
             if form_submission_detected:
                 result["form_submission_detected"] = True
-                # STRICT: Only mark as success if we have verified form data
+                # STRICT: Only mark as success if we have verified form data AND no errors
+                
+                # Check for submission failures (400, 500, error messages)
+                submission_failed = False
+                failure_reason = None
+                
+                # Check POST responses for error status codes
+                for resp in post_responses:
+                    if resp.get('status', 0) >= 400:
+                        submission_failed = True
+                        failure_reason = f"POST response status {resp.get('status')}"
+                        ultra_safe_log_print(f"   ❌ Form submission failed: {failure_reason}")
+                        break
+                
+                # Check AJAX submission responses
+                try:
+                    ajax_submissions = await page.evaluate("() => window.__ajaxSubmissions || []")
+                    for submission in ajax_submissions:
+                        status = submission.get('response_status', 0)
+                        response_data = submission.get('response_data', '')
+                        
+                        if status >= 400:
+                            submission_failed = True
+                            failure_reason = f"AJAX response status {status}"
+                            ultra_safe_log_print(f"   ❌ AJAX submission failed: {failure_reason}")
+                            break
+                        
+                        # Check response body for error messages
+                        if response_data:
+                            response_str = str(response_data).lower()
+                            if '"success":false' in response_str or '"error":' in response_str:
+                                submission_failed = True
+                                failure_reason = "Server returned error in response"
+                                ultra_safe_log_print(f"   ❌ Server error in response: {response_data[:200]}")
+                                break
+                except:
+                    pass
+                
+                # Check if form data contains actual values (not empty strings)
                 if form_submission_data:
+                    data_preview = form_submission_data.get('data_preview', '')
+                    if data_preview:
+                        # Check if all fields are empty in the submitted data
+                        import json
+                        try:
+                            if isinstance(data_preview, str):
+                                # Try to parse as JSON
+                                if data_preview.startswith('{'):
+                                    data_obj = json.loads(data_preview)
+                                    # Check if all non-CAPTCHA fields are empty
+                                    non_captcha_fields = {k: v for k, v in data_obj.items() if 'captcha' not in k.lower() and 'token' not in k.lower()}
+                                    if non_captcha_fields and all(not str(v).strip() for v in non_captcha_fields.values()):
+                                        submission_failed = True
+                                        failure_reason = "All form fields are empty in submission data"
+                                        ultra_safe_log_print(f"   ❌ Form submission failed: {failure_reason}")
+                        except:
+                            # If not JSON, check if it's a query string with empty values
+                            if '=' in data_preview:
+                                params = data_preview.split('&')
+                                non_captcha_params = [p for p in params if 'captcha' not in p.lower() and 'token' not in p.lower()]
+                                if non_captcha_params and all('=' in p and (p.split('=')[1] == '' or p.split('=')[1] == 'null') for p in non_captcha_params):
+                                    submission_failed = True
+                                    failure_reason = "All form fields are empty in submission data"
+                                    ultra_safe_log_print(f"   ❌ Form submission failed: {failure_reason}")
+                
+                if form_submission_data and not submission_failed:
                     result["submission_success"] = True
                     ultra_safe_log_print("   ✅ Form submission confirmed with verified form data!")
+                    break
+                elif submission_failed:
+                    result["submission_success"] = False
+                    ultra_safe_log_print(f"   ❌ Form submission failed: {failure_reason}")
                     break
                 elif wait_attempt >= 20:  # Wait at least 20 seconds before accepting without form data
                     # Even after 20 seconds, only mark as success if we have strong indicators
