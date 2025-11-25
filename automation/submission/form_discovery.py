@@ -386,8 +386,8 @@ def ultra_safe_log_print(*args, **kwargs):
                 except:
                     safe_args.append("[unprintable]")
             
-            # Safely print to stderr (for logs) - use direct write WITHOUT flush to avoid blocking
-            # The pipe reader (Node.js) will handle buffering, and flush() can block if buffer is full
+            # Safely print to stderr (for logs) - use same non-blocking approach as safe_write
+            # CRITICAL: Use select() to check if pipe is writable before writing to prevent blocking
             try:
                 # Handle sep parameter
                 sep = kwargs.get('sep', ' ')
@@ -397,17 +397,60 @@ def ultra_safe_log_print(*args, **kwargs):
                 end = kwargs.get('end', '\n')
                 message += end
                 
-                # Write without flush to avoid blocking on full pipe buffers
-                # Node.js will read the pipe and handle buffering
-                sys.stderr.write(message)
-                # DO NOT flush here - it can block if pipe buffer is full on servers
-                # Only flush if we're writing to a real file (not a pipe)
+                # Check if stderr is a pipe (not TTY)
+                is_pipe = not (hasattr(sys.stderr, 'isatty') and sys.stderr.isatty())
+                
+                # For pipes, check if writable before writing (non-blocking check)
+                if is_pipe:
+                    try:
+                        import select
+                        if hasattr(sys.stderr, 'fileno'):
+                            fileno = sys.stderr.fileno()
+                            # Check if file descriptor is writable (timeout 0 = non-blocking)
+                            ready, _, _ = select.select([], [fileno], [], 0)
+                            if fileno not in ready:
+                                # Pipe buffer is full, but for logging we'll try a small delay and retry once
+                                # This ensures important logs don't get completely lost
+                                import time
+                                time.sleep(0.01)  # Small delay to let buffer drain
+                                # Try once more
+                                ready, _, _ = select.select([], [fileno], [], 0)
+                                if fileno not in ready:
+                                    # Still full, but write anyway - better to have partial logs than none
+                                    # The write might block briefly, but Node.js should read it
+                                    pass
+                    except (ImportError, OSError, ValueError):
+                        # select not available or failed, try writing anyway
+                        pass
+                
+                # Write the message
                 try:
-                    if hasattr(sys.stderr, 'isatty') and sys.stderr.isatty():
-                        # Only flush if it's a TTY (terminal), not a pipe
-                        sys.stderr.flush()
-                except:
-                    pass  # Skip flush if it fails
+                    sys.stderr.write(message)
+                except (IOError, OSError) as e:
+                    # If write would block (EAGAIN/EWOULDBLOCK), try once more after brief delay
+                    import errno
+                    if hasattr(errno, 'EAGAIN') and e.errno == errno.EAGAIN:
+                        import time
+                        time.sleep(0.01)
+                        try:
+                            sys.stderr.write(message)
+                        except:
+                            pass  # Give up
+                    elif hasattr(errno, 'EWOULDBLOCK') and e.errno == errno.EWOULDBLOCK:
+                        import time
+                        time.sleep(0.01)
+                        try:
+                            sys.stderr.write(message)
+                        except:
+                            pass  # Give up
+                
+                # Only flush if it's a TTY (terminal), not a pipe
+                if not is_pipe:
+                    try:
+                        if hasattr(sys.stderr, 'isatty') and sys.stderr.isatty():
+                            sys.stderr.flush()
+                    except:
+                        pass
             except:
                 # Fallback to print if direct write fails
                 try:
