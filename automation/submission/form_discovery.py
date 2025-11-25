@@ -4333,6 +4333,16 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     
     safe_write("📍 [main_async] After initial log prints\n")
     
+    # Update heartbeat
+    try:
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [main_async] About to get URL\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
     # Validate inputs with fallbacks
     safe_write("📍 [main_async] About to get URL\n")
     
@@ -4340,6 +4350,16 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
         lambda: args.url if hasattr(args, 'url') and args.url else "https://example.com",
         default_return="https://example.com"
     )
+    
+    # Update heartbeat
+    try:
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write(f"📍 [main_async] URL: {url}\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
     
     safe_write(f"📍 [main_async] URL: {url}\n")
     safe_write(f"📋 Target URL: {url}\n")
@@ -4350,12 +4370,32 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
     except:
         pass
     
+    # Update heartbeat
+    try:
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write("📍 [main_async] About to get template path\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
+    
     safe_write("📍 [main_async] About to get template path\n")
     
     template_path = UltimateSafetyWrapper.execute_sync(
         lambda: Path(args.template) if hasattr(args, 'template') and args.template else Path("default.json"),
         default_return=Path("default.json")
     )
+    
+    # Update heartbeat
+    try:
+        if heartbeat_file_path.exists():
+            with open(heartbeat_file_path, 'a') as f:
+                f.write(f"📍 [main_async] Template path: {template_path}\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except:
+        pass
     
     safe_write(f"📍 [main_async] Template path: {template_path}\n")
     safe_write(f"📄 Template path: {template_path}\n")
