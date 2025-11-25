@@ -1,0 +1,59 @@
+#!/usr/bin/expect -f
+# Expect script to automate SSH connection and test
+
+set timeout 30
+set server "teqsmartsubmit.xcelanceweb.com"
+set port "3129"
+set user "teqsmartsftpuser"
+set pass "XFho65rfr@uj()7y8"
+
+spawn ssh -p $port $user@$server
+
+expect {
+    "password:" {
+        send "$pass\r"
+        exp_continue
+    }
+    "Password:" {
+        send "$pass\r"
+        exp_continue
+    }
+    "yes/no" {
+        send "yes\r"
+        exp_continue
+    }
+    "$ " {
+        send "cd ~ && pwd\r"
+    }
+    "# " {
+        send "cd ~ && pwd\r"
+    }
+}
+
+expect {
+    "$ " {
+        send "bash test_fix_on_server.sh\r"
+    }
+    "# " {
+        send "bash test_fix_on_server.sh\r"
+    }
+}
+
+expect {
+    timeout {
+        puts "Test timed out"
+        exit 1
+    }
+    eof {
+        puts "Connection closed"
+    }
+    "$ " {
+        send "exit\r"
+    }
+    "# " {
+        send "exit\r"
+    }
+}
+
+expect eof
+
