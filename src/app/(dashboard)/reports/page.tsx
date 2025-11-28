@@ -1,16 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
+interface Stats {
+  total: number;
+  success: number;
+  failed: number;
+  successRate: number;
+}
 
 export default function ReportsPage() {
   const [customRange, setCustomRange] = useState(false);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(true);
   const [exportStatus, setExportStatus] = useState<{
     type: string;
     format: string;
   } | null>(null);
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
+
+  const fetchStats = async () => {
+    try {
+      const response = await fetch("/api/logs?limit=1000");
+      if (response.ok) {
+        const data = await response.json();
+        const logs = data.logs || [];
+        const total = logs.length;
+        const success = logs.filter((l: any) => l.status === "success").length;
+        const failed = logs.filter((l: any) => l.status === "failed").length;
+        const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
+        
+        setStats({ total, success, failed, successRate });
+      }
+    } catch (error) {
+      console.error("Failed to fetch stats:", error);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
 
   const handleExport = async (
     status: string | null,
@@ -128,6 +161,27 @@ export default function ReportsPage() {
           Generate on-demand analytics or schedule exports for stakeholders.
         </p>
       </header>
+
+      {stats && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Total Submissions</p>
+            <p className="mt-1 text-2xl font-semibold text-white">{stats.total}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Success Rate</p>
+            <p className="mt-1 text-2xl font-semibold text-emerald-400">{stats.successRate}%</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Successful</p>
+            <p className="mt-1 text-2xl font-semibold text-emerald-400">{stats.success}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Failed</p>
+            <p className="mt-1 text-2xl font-semibold text-rose-400">{stats.failed}</p>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">

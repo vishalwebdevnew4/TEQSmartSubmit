@@ -15,22 +15,39 @@ export default async function DashboardPage() {
   
   // Wrap database queries in try-catch to handle connection errors gracefully
   let stats = 0;
+  let activeDomains = 0;
+  let domainsWithForms = 0;
   let recentActivity: any[] = [];
   let domains: any[] = [];
   let universalTemplates: any[] = [];
+  let totalSubmissions = 0;
+  let successSubmissions = 0;
+  let failedSubmissions = 0;
   
   try {
-    [stats, recentActivity, domains, universalTemplates] = await Promise.all([
+    [
+      stats,
+      activeDomains,
+      recentActivity,
+      domains,
+      universalTemplates,
+      totalSubmissions,
+      successSubmissions,
+      failedSubmissions,
+    ] = await Promise.all([
       prisma.domain.count().catch(() => 0),
+      prisma.domain.count({ where: { isActive: true } }).catch(() => 0),
       prisma.submissionLog.findMany({
         orderBy: { createdAt: "desc" },
-        take: 6,
+        take: 10,
         include: {
-          domain: { select: { url: true } },
+          domain: true,
         },
       }).catch(() => []),
       prisma.domain.findMany({
-        where: { isActive: true },
+        where: { 
+          isActive: true,
+        },
         orderBy: { createdAt: "desc" },
         include: {
           templates: {
@@ -43,7 +60,13 @@ export default async function DashboardPage() {
         where: { domainId: null },
         orderBy: { createdAt: "desc" },
       }).catch(() => []),
+      prisma.submissionLog.count().catch(() => 0),
+      prisma.submissionLog.count({ where: { status: "success" } }).catch(() => 0),
+      prisma.submissionLog.count({ where: { status: "failed" } }).catch(() => 0),
     ]);
+    
+    // Count domains with forms found from the fetched domains
+    domainsWithForms = domains.filter((d: any) => d.contactCheckStatus === "found").length;
   } catch (error) {
     // If database connection fails during build, return empty page
     console.error("Database connection error:", error);
@@ -79,8 +102,9 @@ export default async function DashboardPage() {
     return domain;
   });
 
+  // Filter to only domains with forms found and templates
   const activeDomainsWithTemplates = domainsWithTemplates.filter(
-    (domain) => domain.templates.length > 0
+    (domain) => domain.templates.length > 0 && domain.contactCheckStatus === "found"
   );
   const primaryDomain = activeDomainsWithTemplates[0] ?? null;
   
@@ -98,29 +122,53 @@ export default async function DashboardPage() {
       </header>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-400">Domains</p>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Total Domains</p>
           <p className="mt-3 text-2xl font-semibold text-white">{stats}</p>
-          <p className="mt-1 text-xs text-slate-500">Active domains ready for automation</p>
+          <p className="mt-1 text-xs text-slate-500">{activeDomains} active</p>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-400">Recent success</p>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Forms Found</p>
+          <p className="mt-3 text-2xl font-semibold text-emerald-400">{domainsWithForms}</p>
+          <p className="mt-1 text-xs text-slate-500">Ready for automation</p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Success Rate</p>
           <p className="mt-3 text-2xl font-semibold text-white">
+            {totalSubmissions > 0 
+              ? Math.round((successSubmissions / totalSubmissions) * 100) 
+              : 0}%
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {successSubmissions} of {totalSubmissions} succeeded
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Ready Domains</p>
+          <p className="mt-3 text-2xl font-semibold text-indigo-400">{activeDomainsWithTemplates.length}</p>
+          <p className="mt-1 text-xs text-slate-500">With templates & forms</p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Total Submissions</p>
+          <p className="mt-3 text-2xl font-semibold text-white">{totalSubmissions}</p>
+          <p className="mt-1 text-xs text-slate-500">All time submissions</p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Recent Success</p>
+          <p className="mt-3 text-2xl font-semibold text-emerald-400">
             {recentActivity.filter((item) => item.status === "success").length}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Successful submissions (last 6 runs)</p>
+          <p className="mt-1 text-xs text-slate-500">Last 10 runs</p>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-400">Recent failures</p>
-          <p className="mt-3 text-2xl font-semibold text-white">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Recent Failures</p>
+          <p className="mt-3 text-2xl font-semibold text-rose-400">
             {recentActivity.filter((item) => item.status !== "success").length}
           </p>
-          <p className="mt-1 text-xs text-slate-500">Runs needing attention</p>
-        </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm">
-          <p className="text-xs uppercase tracking-wide text-slate-400">Ready domains</p>
-          <p className="mt-3 text-2xl font-semibold text-white">{activeDomainsWithTemplates.length}</p>
-          <p className="mt-1 text-xs text-slate-500">Domains with templates configured</p>
+          <p className="mt-1 text-xs text-slate-500">Last 10 runs</p>
         </div>
       </section>
 
@@ -131,8 +179,16 @@ export default async function DashboardPage() {
         />
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-          <h3 className="text-lg font-semibold text-white">Activity Feed</h3>
-          <ul className="mt-4 space-y-3 text-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Recent Activity</h3>
+            <a 
+              href="/logs" 
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+            >
+              View all →
+            </a>
+          </div>
+          <ul className="mt-4 space-y-2 text-sm max-h-[400px] overflow-y-auto">
             {recentActivity.length === 0 ? (
               <li className="rounded-lg bg-slate-950/60 px-4 py-6 text-center text-xs text-slate-500">
                 No recent automation runs yet.
@@ -141,19 +197,28 @@ export default async function DashboardPage() {
               recentActivity.map((item) => (
                 <li
                   key={item.id}
-                  className="flex items-center justify-between rounded-lg bg-slate-950/60 px-4 py-3"
+                  className="flex items-center justify-between rounded-lg bg-slate-950/60 px-4 py-3 hover:bg-slate-900/80 transition-colors"
                 >
-                  <div>
-                    <p className="font-medium text-slate-200">{item.domain?.url ?? "Unknown domain"}</p>
-                    <p className="text-xs text-slate-500">{item.createdAt.toLocaleString()}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-200 truncate">
+                      {item.domain?.contactPageUrl || item.domain?.url || "Unknown domain"}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {item.domain?.contactPageUrl && item.domain?.url && item.domain.contactPageUrl !== item.domain.url && (
+                        <span className="text-slate-600">Domain: {item.domain.url} • </span>
+                      )}
+                      {new Date(item.createdAt).toLocaleString()}
+                    </p>
                   </div>
                   <span
-                    className={`rounded-full px-3 py-1 text-xs ${
+                    className={`rounded-full px-3 py-1 text-xs font-medium ml-2 flex-shrink-0 ${
                       item.status === "success"
-                        ? "bg-emerald-500/20 text-emerald-300"
+                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                         : item.status === "failed"
-                          ? "bg-rose-500/20 text-rose-300"
-                          : "bg-slate-700/50 text-slate-300"
+                          ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                          : item.status === "running"
+                            ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                            : "bg-slate-700/50 text-slate-300 border border-slate-600/30"
                     }`}
                   >
                     {item.status}
@@ -167,4 +232,3 @@ export default async function DashboardPage() {
     </div>
   );
 }
-

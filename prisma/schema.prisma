@@ -17,13 +17,17 @@ model Admin {
 }
 
 model Domain {
-  id          Int             @id @default(autoincrement())
-  url         String          @unique
-  category    String?
-  isActive    Boolean         @default(true)
-  createdAt   DateTime        @default(now())
-  templates   Template[]
-  submissions SubmissionLog[]
+  id                 Int             @id @default(autoincrement())
+  url                String          @unique
+  category           String?
+  isActive           Boolean         @default(true)
+  contactPageUrl     String?
+  contactCheckStatus String? // "pending", "found", "not_found", "error", "no_form"
+  contactCheckedAt   DateTime?
+  createdAt          DateTime        @default(now())
+  templates          Template[]
+  submissions        SubmissionLog[]
+  contactChecks      ContactCheck[]
 }
 
 model Template {
@@ -57,7 +61,15 @@ model Setting {
   id        Int      @id @default(autoincrement())
   key       String   @unique
   value     String
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
-
+model ContactCheck {
+  id         Int      @id @default(autoincrement())
+  domainId   Int
+  domain     Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  status     String // "found", "not_found", "error", "no_form"
+  contactUrl String?
+  message    String?
+  checkedAt  DateTime @default(now())
+}

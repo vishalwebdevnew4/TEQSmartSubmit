@@ -241,6 +241,33 @@ export default function LogsPage() {
         </p>
       </header>
 
+      {logs.length > 0 && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Total Logs</p>
+            <p className="mt-1 text-2xl font-semibold text-white">{logs.length}</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Success</p>
+            <p className="mt-1 text-2xl font-semibold text-emerald-400">
+              {logs.filter(l => l.status === "success").length}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Failed</p>
+            <p className="mt-1 text-2xl font-semibold text-rose-400">
+              {logs.filter(l => l.status === "failed").length}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+            <p className="text-xs text-slate-400">Running</p>
+            <p className="mt-1 text-2xl font-semibold text-yellow-400">
+              {logs.filter(l => l.status === "running" || l.status === "pending").length}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-3 text-xs items-center">
         <button
           onClick={handleRefresh}

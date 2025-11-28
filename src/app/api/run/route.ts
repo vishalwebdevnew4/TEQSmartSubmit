@@ -401,16 +401,19 @@ export async function POST(req: NextRequest) {
 
     // If we found valid JSON, use it regardless of exit code
     if (parsed && typeof parsed === "object") {
-      // CRITICAL: Respect timeout status - never override it
+      // CRITICAL: Respect the status from Python script - never override it
       let finalStatus: string;
       if (parsed.status === "timeout") {
         finalStatus = "timeout";
-      } else if (parsed.status === "success") {
-        finalStatus = "success";
       } else if (parsed.status === "failed") {
         finalStatus = "failed";
+      } else if (parsed.status === "success") {
+        finalStatus = "success";
+      } else if (parsed.status === "submitted") {
+        finalStatus = "submitted";
       } else {
         // Use parsed status if available, otherwise fallback based on exit code
+        // But default to "failed" if status is unclear (safer than assuming success)
         finalStatus = parsed.status || (exitCode === 0 ? "success" : "failed");
       }
       
@@ -478,10 +481,26 @@ export async function POST(req: NextRequest) {
       // Include complete logs (stderr + stdout) for successful submissions
       // Prioritize parsed.message which contains detailed execution logs
       const completeLogs = (parsed.message || stderr.trim() || stdoutTrimmed || "").trim();
+      
+      // CRITICAL: Respect the status from Python script - check for "failed" first
+      let finalStatus: string;
+      if (parsed.status === "failed") {
+        finalStatus = "failed";
+      } else if (parsed.status === "timeout") {
+        finalStatus = "timeout";
+      } else if (parsed.status === "success") {
+        finalStatus = "success";
+      } else if (parsed.status === "submitted") {
+        finalStatus = "submitted";
+      } else {
+        // Default to "failed" if status is unclear (safer than assuming success)
+        finalStatus = parsed.status || "failed";
+      }
+      
       await prisma.submissionLog.update({
         where: { id: submission.id },
         data: {
-          status: parsed.status === "success" ? "success" : parsed.status ?? "success",
+          status: finalStatus,
           message: completeLogs || "No logs available",
           finishedAt: new Date(),
         },
@@ -489,12 +508,18 @@ export async function POST(req: NextRequest) {
       // Status already updated in database - no need to return here
       }
     } catch (parseError) {
-      // Not JSON, treat as success with complete message output
+      // Not JSON - check if stderr contains failure indicators
       const completeLogs = (stderr.trim() || stdoutTrimmed || "Automation complete.").trim();
+      const hasFailureIndicators = 
+        completeLogs.toLowerCase().includes("failed") ||
+        completeLogs.toLowerCase().includes("error") ||
+        completeLogs.toLowerCase().includes("❌") ||
+        completeLogs.toLowerCase().includes("final status: failed");
+      
       await prisma.submissionLog.update({
         where: { id: submission.id },
         data: {
-          status: "success",
+          status: hasFailureIndicators ? "failed" : "success",
           message: completeLogs,
           finishedAt: new Date(),
         },

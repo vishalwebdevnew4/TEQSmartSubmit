@@ -7,6 +7,10 @@ interface Domain {
   url: string;
   category: string | null;
   isActive: boolean;
+  contactPageUrl: string | null;
+  contactCheckStatus: string | null;
+  contactCheckedAt: Date | null;
+  contactCheckMessage: string | null;
   createdAt: Date;
   templates: Array<{
     name: string;
@@ -14,6 +18,7 @@ interface Domain {
 }
 
 export default function DomainsPage() {
+  const [allDomains, setAllDomains] = useState<Domain[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -21,6 +26,8 @@ export default function DomainsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showBulkEnableModal, setShowBulkEnableModal] = useState(false);
   const [showBulkDisableModal, setShowBulkDisableModal] = useState(false);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [formData, setFormData] = useState({
@@ -32,16 +39,38 @@ export default function DomainsPage() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [uploadMode, setUploadMode] = useState<"paste" | "file">("paste");
   const [processing, setProcessing] = useState(false);
+  
+  // Filter states
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "disabled">("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [contactStatusFilter, setContactStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [filteredDomains, setFilteredDomains] = useState<Domain[]>([]);
 
   useEffect(() => {
     fetchDomains();
   }, []);
 
+  useEffect(() => {
+    applyFilters();
+  }, [allDomains, statusFilter, categoryFilter, contactStatusFilter, searchQuery]);
+
+  useEffect(() => {
+    // Reset to page 1 when filters change
+    setCurrentPage(1);
+  }, [statusFilter, categoryFilter, contactStatusFilter, searchQuery]);
+
   const fetchDomains = async () => {
     try {
-      const response = await fetch("/api/domains");
+      // Fetch all domains by setting a high limit
+      const response = await fetch("/api/domains?limit=10000");
       if (response.ok) {
         const data = await response.json();
+        setAllDomains(data);
         setDomains(data);
       }
     } catch (error) {
@@ -50,6 +79,47 @@ export default function DomainsPage() {
       setLoading(false);
     }
   };
+
+  const applyFilters = () => {
+    let filtered = [...allDomains];
+
+    // Apply status filter
+    if (statusFilter === "active") {
+      filtered = filtered.filter((d) => d.isActive);
+    } else if (statusFilter === "disabled") {
+      filtered = filtered.filter((d) => !d.isActive);
+    }
+
+    // Apply category filter
+    if (categoryFilter !== "all") {
+      filtered = filtered.filter((d) => d.category === categoryFilter);
+    }
+
+    // Apply search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((d) => d.url.toLowerCase().includes(query));
+    }
+
+    // Apply contact status filter
+    if (contactStatusFilter !== "all") {
+      filtered = filtered.filter((d) => d.contactCheckStatus === contactStatusFilter);
+    }
+
+    setFilteredDomains(filtered);
+  };
+
+  useEffect(() => {
+    // Apply pagination whenever filteredDomains, currentPage, or itemsPerPage changes
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    setDomains(filteredDomains.slice(startIndex, endIndex));
+  }, [currentPage, itemsPerPage, filteredDomains]);
+
+  // Get unique categories for filter dropdown
+  const uniqueCategories = Array.from(
+    new Set(allDomains.map((d) => d.category).filter((c) => c !== null))
+  ).sort() as string[];
 
   const handleAdd = () => {
     setFormData({ url: "", category: "", isActive: true });
@@ -72,7 +142,7 @@ export default function DomainsPage() {
     try {
       const response = await fetch(`/api/domains/${id}`, { method: "DELETE" });
       if (response.ok) {
-        fetchDomains();
+        await fetchDomains();
       } else {
         const error = await response.json();
         alert(error.detail || "Failed to delete domain");
@@ -104,7 +174,7 @@ export default function DomainsPage() {
         setShowAddModal(false);
         setShowEditModal(false);
         setSelectedDomain(null);
-        fetchDomains();
+        await fetchDomains();
       } else {
         const error = await response.json();
         alert(error.detail || "Failed to save domain");
@@ -232,7 +302,7 @@ https://example3.com,marketing`;
         setShowUploadModal(false);
         setCsvContent("");
         setCsvFile(null);
-        fetchDomains();
+        await fetchDomains();
       } else {
         const error = await response.json();
         alert(error.detail || "Failed to upload domains");
@@ -267,7 +337,7 @@ https://example3.com,marketing`;
         alert(`Updated ${result.count} domain(s)`);
         setShowBulkEnableModal(false);
         setSelectedIds([]);
-        fetchDomains();
+        await fetchDomains();
       } else {
         const error = await response.json();
         alert(error.detail || "Failed to bulk enable domains");
@@ -302,7 +372,7 @@ https://example3.com,marketing`;
         alert(`Updated ${result.count} domain(s)`);
         setShowBulkDisableModal(false);
         setSelectedIds([]);
-        fetchDomains();
+        await fetchDomains();
       } else {
         const error = await response.json();
         alert(error.detail || "Failed to bulk disable domains");
@@ -310,6 +380,77 @@ https://example3.com,marketing`;
     } catch (error) {
       console.error("Failed to bulk disable:", error);
       alert("Failed to bulk disable domains");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) {
+      alert("Please select at least one domain");
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const response = await fetch("/api/domains", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: selectedIds,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(`Successfully deleted ${result.count} domain(s)`);
+        setShowBulkDeleteModal(false);
+        setSelectedIds([]);
+        await fetchDomains();
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to bulk delete domains");
+      }
+    } catch (error) {
+      console.error("Failed to bulk delete:", error);
+      alert("Failed to bulk delete domains");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    // Get all domain IDs from filtered domains (respects current filters)
+    const allFilteredIds = filteredDomains.map((d) => d.id);
+    
+    if (allFilteredIds.length === 0) {
+      alert("No domains to delete");
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const response = await fetch("/api/domains", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: allFilteredIds,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(`Successfully deleted ${result.count} domain(s)`);
+        setShowDeleteAllModal(false);
+        setSelectedIds([]);
+        await fetchDomains();
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to delete all domains");
+      }
+    } catch (error) {
+      console.error("Failed to delete all:", error);
+      alert("Failed to delete all domains");
     } finally {
       setProcessing(false);
     }
@@ -324,6 +465,30 @@ https://example3.com,marketing`;
       setSelectedIds([]);
     } else {
       setSelectedIds(domains.map((d) => d.id));
+    }
+  };
+
+  const handleDownloadFailedDomains = async () => {
+    try {
+      // Download all failed statuses
+      const statuses = ["not_found", "no_form", "error"];
+      for (const status of statuses) {
+        const response = await fetch(`/api/domains/failed-export?status=${status}`);
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `failed-domains-${status}-${new Date().toISOString().split("T")[0]}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to download failed domains:", error);
+      alert("Failed to download failed domains");
     }
   };
 
@@ -345,6 +510,116 @@ https://example3.com,marketing`;
         <h2 className="text-2xl font-semibold text-white">Domain Manager</h2>
         <p className="text-sm text-slate-400">Manage the queue of domains for automated submissions.</p>
       </header>
+
+      {/* Filter Controls */}
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="flex flex-wrap gap-4 items-end">
+          {/* Search by URL */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-medium text-slate-400 mb-1">Search by URL</label>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search domains..."
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          {/* Status Filter */}
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-medium text-slate-400 mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "disabled")}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="all">All</option>
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </div>
+
+          {/* Category Filter */}
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-medium text-slate-400 mb-1">Category</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="all">All Categories</option>
+              {uniqueCategories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Contact Status Filter */}
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-medium text-slate-400 mb-1">Contact Status</label>
+            <select
+              value={contactStatusFilter}
+              onChange={(e) => setContactStatusFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="all">All</option>
+              <option value="pending">Pending</option>
+              <option value="found">Found</option>
+              <option value="not_found">Not Found</option>
+              <option value="no_form">No Contact Form</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+
+          {/* Clear Filters */}
+          {(statusFilter !== "all" || categoryFilter !== "all" || contactStatusFilter !== "all" || searchQuery.trim()) && (
+            <button
+              onClick={() => {
+                setStatusFilter("all");
+                setCategoryFilter("all");
+                setContactStatusFilter("all");
+                setSearchQuery("");
+              }}
+              className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 whitespace-nowrap"
+            >
+              Clear Filters
+            </button>
+          )}
+
+          {/* Items Per Page */}
+          <div className="min-w-[120px]">
+            <label className="block text-xs font-medium text-slate-400 mb-1">Per Page</label>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => {
+                setItemsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+
+          {/* Results Count */}
+          <div className="relative top-[-8px] text-xs text-slate-400 whitespace-nowrap">
+            {filteredDomains.length > 0 ? (
+              <>
+                 {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, filteredDomains.length)} of {filteredDomains.length}
+                {filteredDomains.length !== allDomains.length && ` (${allDomains.length} total)`}
+              </>
+            ) : (
+              <>No domains found</>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-3">
         <button
@@ -371,6 +646,26 @@ https://example3.com,marketing`;
         >
           Bulk Disable
         </button>
+        <button
+          onClick={() => setShowBulkDeleteModal(true)}
+          className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20"
+          disabled={selectedIds.length === 0}
+        >
+          Bulk Delete
+        </button>
+        <button
+          onClick={() => setShowDeleteAllModal(true)}
+          className="rounded-lg border border-rose-700 px-4 py-2 text-xs font-medium text-rose-300 hover:bg-rose-700/20"
+          disabled={filteredDomains.length === 0}
+        >
+          Delete All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+        </button>
+        <button
+          onClick={handleDownloadFailedDomains}
+          className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20"
+        >
+          Download Failed Domains
+        </button>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
@@ -388,14 +683,19 @@ https://example3.com,marketing`;
               <th className="px-6 py-4">Domain URL</th>
               <th className="px-6 py-4">Status</th>
               <th className="px-6 py-4">Category</th>
+              <th className="px-6 py-4">Contact Page</th>
               <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {domains.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-400">
-                  No domains found yet. Seed the database or add a domain to get started.
+                <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-400">
+                  {filteredDomains.length === 0 && allDomains.length === 0
+                    ? "No domains found yet. Seed the database or add a domain to get started."
+                    : filteredDomains.length === 0
+                    ? "No domains match your filters. Try adjusting your search criteria."
+                    : "No domains on this page."}
                 </td>
               </tr>
             ) : (
@@ -436,6 +736,53 @@ https://example3.com,marketing`;
                       </span>
                     </td>
                     <td className="px-6 py-4 text-slate-300">{domain.category ?? "—"}</td>
+                    <td className="px-6 py-4 text-xs">
+                      {domain.contactCheckStatus === "pending" ? (
+                        <span className="rounded-full px-3 py-1 font-semibold bg-yellow-500/10 text-yellow-300">
+                          Checking...
+                        </span>
+                      ) : domain.contactCheckStatus === "found" ? (
+                        <div>
+                          <span className="rounded-full px-3 py-1 font-semibold bg-emerald-500/10 text-emerald-300">
+                            Found
+                          </span>
+                          {domain.contactPageUrl && (
+                            <a
+                              href={domain.contactPageUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block mt-1 text-xs text-indigo-400 hover:text-indigo-300 truncate max-w-[200px]"
+                              title={domain.contactPageUrl}
+                            >
+                              {domain.contactPageUrl.length > 30
+                                ? domain.contactPageUrl.substring(0, 30) + "..."
+                                : domain.contactPageUrl}
+                            </a>
+                          )}
+                        </div>
+                      ) : domain.contactCheckStatus === "not_found" ? (
+                        <span className="rounded-full px-3 py-1 font-semibold bg-rose-500/10 text-rose-300">
+                          Not Found
+                        </span>
+                      ) : domain.contactCheckStatus === "no_form" ? (
+                        <span className="rounded-full px-3 py-1 font-semibold bg-orange-500/10 text-orange-300" title="Contact page found but no contact form detected (may have search/newsletter forms only)">
+                          No Contact Form
+                        </span>
+                      ) : domain.contactCheckStatus === "error" ? (
+                        <span 
+                          className="rounded-full px-3 py-1 font-semibold bg-slate-700/40 text-slate-300 cursor-help"
+                          title={domain.contactCheckMessage || "Error checking contact page"}
+                        >
+                          {domain.contactCheckMessage 
+                            ? (domain.contactCheckMessage.length > 30 
+                                ? domain.contactCheckMessage.substring(0, 30) + "..." 
+                                : domain.contactCheckMessage)
+                            : "Error"}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">—</span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 text-right text-xs text-slate-400">
                       <button
                         onClick={() => handleEdit(domain)}
@@ -457,6 +804,79 @@ https://example3.com,marketing`;
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Controls */}
+      {filteredDomains.length > 0 && (
+        <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900/60 px-6 py-4">
+          <div className="text-sm text-slate-400">
+            Page {currentPage} of {Math.ceil(filteredDomains.length / itemsPerPage)}
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(1)}
+              disabled={currentPage === 1}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              First
+            </button>
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            
+            {/* Page Numbers */}
+            <div className="flex items-center gap-1">
+              {Array.from({ length: Math.min(5, Math.ceil(filteredDomains.length / itemsPerPage)) }, (_, i) => {
+                const totalPages = Math.ceil(filteredDomains.length / itemsPerPage);
+                let pageNum: number;
+                
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (currentPage <= 3) {
+                  pageNum = i + 1;
+                } else if (currentPage >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = currentPage - 2 + i;
+                }
+                
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`min-w-[32px] rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
+                      currentPage === pageNum
+                        ? "border-indigo-500 bg-indigo-500/20 text-indigo-300"
+                        : "border-slate-700 text-slate-300 hover:bg-slate-800"
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+            
+            <button
+              onClick={() => setCurrentPage((prev) => Math.min(Math.ceil(filteredDomains.length / itemsPerPage), prev + 1))}
+              disabled={currentPage >= Math.ceil(filteredDomains.length / itemsPerPage)}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+            <button
+              onClick={() => setCurrentPage(Math.ceil(filteredDomains.length / itemsPerPage))}
+              disabled={currentPage >= Math.ceil(filteredDomains.length / itemsPerPage)}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Last
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add Domain Modal */}
       {showAddModal && (
@@ -749,6 +1169,76 @@ https://example3.com,marketing`;
                 className="rounded-lg bg-rose-500 px-4 py-2 text-sm font-medium text-white hover:bg-rose-400 disabled:opacity-50"
               >
                 {processing ? "Disabling..." : "Disable Selected"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Modal */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <h3 className="text-xl font-semibold text-white mb-4">Bulk Delete</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              {selectedIds.length > 0
+                ? `⚠️ Are you sure you want to permanently delete ${selectedIds.length} selected domain(s)? This action cannot be undone.`
+                : "Select domains from the table using checkboxes, then click this button to delete them all."}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowBulkDeleteModal(false);
+                }}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={processing || selectedIds.length === 0}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+              >
+                {processing ? "Deleting..." : "Delete Selected"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Modal */}
+      {showDeleteAllModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-2xl border border-rose-800 bg-slate-900 p-6">
+            <h3 className="text-xl font-semibold text-rose-400 mb-4">⚠️ Delete All Domains</h3>
+            <div className="mb-4 space-y-2">
+              <p className="text-sm text-slate-300">
+                {filteredDomains.length === allDomains.length
+                  ? `You are about to permanently delete ALL ${filteredDomains.length} domain(s) in the database.`
+                  : `You are about to permanently delete ${filteredDomains.length} domain(s) matching your current filters (out of ${allDomains.length} total).`}
+              </p>
+              <p className="text-sm font-semibold text-rose-400">
+                ⚠️ This action CANNOT be undone!
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                All associated data (templates, submission logs, contact checks) will also be deleted.
+              </p>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowDeleteAllModal(false);
+                }}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAll}
+                disabled={processing || filteredDomains.length === 0}
+                className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-600 disabled:opacity-50"
+              >
+                {processing ? "Deleting..." : `Delete All ${filteredDomains.length}`}
               </button>
             </div>
           </div>

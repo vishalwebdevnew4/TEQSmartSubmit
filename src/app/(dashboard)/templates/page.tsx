@@ -23,10 +23,13 @@ interface Domain {
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [filteredTemplates, setFilteredTemplates] = useState<Template[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterType, setFilterType] = useState<"all" | "universal" | "domain">("all");
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -46,6 +49,7 @@ export default function TemplatesPage() {
       if (response.ok) {
         const data = await response.json();
         setTemplates(data);
+        setFilteredTemplates(data);
       }
     } catch (error) {
       console.error("Failed to fetch templates:", error);
@@ -53,6 +57,30 @@ export default function TemplatesPage() {
       setLoading(false);
     }
   };
+
+  // Filter templates based on search and type
+  useEffect(() => {
+    let filtered = templates;
+
+    // Filter by type
+    if (filterType === "universal") {
+      filtered = filtered.filter(t => t.domainId === null);
+    } else if (filterType === "domain") {
+      filtered = filtered.filter(t => t.domainId !== null);
+    }
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(t => 
+        t.name.toLowerCase().includes(query) ||
+        t.description?.toLowerCase().includes(query) ||
+        Object.keys(t.fieldMappings).some(key => key.toLowerCase().includes(query))
+      );
+    }
+
+    setFilteredTemplates(filtered);
+  }, [templates, searchQuery, filterType]);
 
   const fetchDomains = async () => {
     try {
@@ -187,25 +215,65 @@ export default function TemplatesPage() {
         <p className="text-sm text-slate-400">Create reusable mappings that the automation engine relies on.</p>
       </header>
 
-      <button
-        onClick={handleCreate}
-        className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400"
-      >
-        New Template
-      </button>
+      <div className="flex flex-wrap gap-3 items-center justify-between">
+        <button
+          onClick={handleCreate}
+          className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 transition-colors"
+        >
+          + New Template
+        </button>
+        
+        <div className="flex flex-wrap gap-3 items-center">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search templates..."
+            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none min-w-[200px]"
+          />
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as "all" | "universal" | "domain")}
+            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+          >
+            <option value="all">All Templates</option>
+            <option value="universal">Universal Only</option>
+            <option value="domain">Domain-Specific</option>
+          </select>
+        </div>
+      </div>
+
+      {templates.length > 0 && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+          <div className="flex items-center gap-4 text-sm text-slate-400">
+            <span>Total: <span className="text-white font-medium">{templates.length}</span></span>
+            <span>Universal: <span className="text-indigo-300 font-medium">{templates.filter(t => t.domainId === null).length}</span></span>
+            <span>Domain-Specific: <span className="text-emerald-300 font-medium">{templates.filter(t => t.domainId !== null).length}</span></span>
+            {searchQuery && (
+              <span className="text-slate-500">
+                Showing {filteredTemplates.length} of {templates.length}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        {templates.length === 0 ? (
+        {filteredTemplates.length === 0 ? (
           <div className="col-span-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center text-sm text-slate-400">
-            No templates found. Create your first template to get started.
+            {templates.length === 0 
+              ? "No templates found. Create your first template to get started."
+              : searchQuery || filterType !== "all"
+              ? "No templates match your filters."
+              : "No templates found."}
           </div>
         ) : (
-          templates.map((template) => {
+          filteredTemplates.map((template) => {
             const fields = getFieldKeys(template.fieldMappings);
             const preview = formatFieldMappings(template.fieldMappings);
 
             return (
-              <div key={template.id} className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+              <div key={template.id} className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 hover:border-slate-700 transition-colors">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-white">{template.name}</h3>

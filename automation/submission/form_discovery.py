@@ -525,10 +525,36 @@ class LocalCaptchaSolver:
         # Try using UltimateLocalCaptchaSolver for real solving (includes audio challenge)
         if self.ultimate_solver and self.page:
             try:
+                # Validate page is still open
+                try:
+                    if self.page.is_closed():
+                        ultra_safe_log_print("   ⚠️  Page is closed, cannot solve CAPTCHA")
+                        return {
+                            "token": None,
+                            "response": None,
+                            "site_key": site_key,
+                            "solved_at": time.time(),
+                            "method": "failed_page_closed"
+                        }
+                except:
+                    pass
+                
                 self.ultimate_solver.page = self.page  # Ensure page is set
                 ultra_safe_log_print("   🔄 Attempting comprehensive CAPTCHA solving (checkbox click, iframe interaction, audio challenge)...")
                 
                 # Check if challenge iframe already exists before solving
+                try:
+                    if self.page.is_closed():
+                        return {
+                            "token": None,
+                            "response": None,
+                            "site_key": site_key,
+                            "solved_at": time.time(),
+                            "method": "failed_page_closed"
+                        }
+                except:
+                    pass
+                
                 challenge_exists = await self.page.evaluate("""
                     () => {
                         const challengeIframes = document.querySelectorAll('iframe[title*="challenge"], iframe[src*="bframe"]');
@@ -549,8 +575,34 @@ class LocalCaptchaSolver:
                 # Wait for token to appear after solving
                 await asyncio.sleep(5)
                 
+                # Validate page is still open before checking token
+                try:
+                    if self.page.is_closed():
+                        ultra_safe_log_print("   ⚠️  Page closed during CAPTCHA solving")
+                        return {
+                            "token": None,
+                            "response": None,
+                            "site_key": site_key,
+                            "solved_at": time.time(),
+                            "method": "failed_page_closed"
+                        }
+                except:
+                    pass
+                
                 if result.get("success") and result.get("token"):
                     # Verify token is actually present in the page (not just generated)
+                    try:
+                        if self.page.is_closed():
+                            return {
+                                "token": None,
+                                "response": None,
+                                "site_key": site_key,
+                                "solved_at": time.time(),
+                                "method": "failed_page_closed"
+                            }
+                    except:
+                        pass
+                    
                     token_verified = await self.page.evaluate("""
                         () => {
                             const recaptchaResponse = document.querySelector('#g-recaptcha-response');
@@ -649,11 +701,38 @@ class LocalCaptchaSolver:
                 ultra_safe_log_print("⚠️  Comprehensive solving timed out (60s) - CAPTCHA may require manual solving")
                 ultra_safe_log_print("   💡 Tip: Install ffmpeg for audio challenge solving, or use a CAPTCHA solving service")
             except Exception as e:
-                ultra_safe_log_print(f"⚠️  Comprehensive solving failed: {str(e)[:50]}")
+                error_msg = str(e)
+                # Check if it's a rate limit error
+                if "RECAPTCHA_RATE_LIMIT" in error_msg or "rate limit" in error_msg.lower():
+                    ultra_safe_log_print("   ⚠️  reCAPTCHA rate limit detected: 'Try again later' error")
+                    ultra_safe_log_print("   🔄 This requires browser restart - will restart and retry")
+                    # Raise a special exception to trigger browser restart
+                    raise Exception("RECAPTCHA_RATE_LIMIT_DETECTED")
+                ultra_safe_log_print(f"⚠️  Comprehensive solving failed: {error_msg[:50]}")
                 import traceback
                 ultra_safe_log_print(f"   📋 Traceback: {traceback.format_exc()[:300]}")
         
         # Before fallback, check if challenge iframe exists (don't use fake token if challenge is present)
+        # Validate page is still open
+        try:
+            if not self.page or self.page.is_closed():
+                ultra_safe_log_print("   ⚠️  Page is closed, cannot check challenge iframe")
+                return {
+                    "token": None,
+                    "response": None,
+                    "site_key": site_key,
+                    "solved_at": time.time(),
+                    "method": "failed_page_closed"
+                }
+        except:
+            return {
+                "token": None,
+                "response": None,
+                "site_key": site_key,
+                "solved_at": time.time(),
+                "method": "failed_page_closed"
+            }
+        
         challenge_exists = await self.page.evaluate("""
             () => {
                 const challengeIframes = document.querySelectorAll('iframe[title*="challenge"], iframe[src*="bframe"]');
@@ -733,6 +812,174 @@ class LocalCaptchaSolver:
         except Exception:
             return f"P0_fallback_{int(time.time())}"
     
+    async def solve_hashcash(self, page) -> Dict[str, Any]:
+        """
+        Solve Hashcash CAPTCHA (RSForm Pro Hashcash).
+        Hashcash is a proof-of-work system that requires clicking a button and waiting for computation.
+        """
+        result = {
+            "solved": False,
+            "token": None,
+            "error": None
+        }
+        
+        try:
+            if not page or page.is_closed():
+                result["error"] = "Page not available"
+                return result
+            
+            ultra_safe_log_print("🔐 Attempting to solve Hashcash CAPTCHA...")
+            
+            # Find the Hashcash button
+            hashcash_button = await page.query_selector('button[data-rsfp-hashcash], button[data-hashcash-level], button[id*="Captacha"][data-hashcash], button[data-hashcash-name]')
+            
+            if not hashcash_button:
+                # Try alternative selectors
+                hashcash_button = await page.query_selector('button:has-text("I am not a robot"), button.hashcash, button[class*="hashcash"]')
+            
+            if not hashcash_button:
+                ultra_safe_log_print("   ⚠️  Hashcash button not found")
+                result["error"] = "Hashcash button not found"
+                return result
+            
+            ultra_safe_log_print("   ✅ Hashcash button found")
+            
+            # Scroll button into view
+            await hashcash_button.scroll_into_view_if_needed()
+            await asyncio.sleep(0.5)
+            
+            # Get hashcash name for verification
+            hashcash_name = await hashcash_button.evaluate("""
+                (btn) => {
+                    return btn.getAttribute('data-hashcash-name') || 
+                           btn.getAttribute('name') || 
+                           'form[Captacha]';
+                }
+            """)
+            
+            # Check if hidden input already exists with value (truly solved)
+            hidden_input = await page.query_selector(f'input[name="{hashcash_name}"], input[name*="Captacha"]')
+            if hidden_input:
+                input_value = await hidden_input.get_attribute('value')
+                if input_value and input_value.strip():
+                    ultra_safe_log_print(f"   ✅ Hashcash already solved (hidden input has value: {input_value[:20]}...)")
+                    result["solved"] = True
+                    result["token"] = input_value
+                    return result
+            
+            # Always click the button - Hashcash requires a click to activate
+            ultra_safe_log_print("   🖱️  Clicking Hashcash button to activate...")
+            try:
+                # Try multiple click methods to ensure it works
+                await hashcash_button.click(timeout=5000)
+                ultra_safe_log_print("   ✅ Hashcash button clicked (Playwright click)")
+            except Exception as e:
+                ultra_safe_log_print(f"   ⚠️  Playwright click failed: {str(e)[:50]}, trying JavaScript click...")
+                # Try JavaScript click as fallback
+                try:
+                    await hashcash_button.evaluate("(btn) => { btn.click(); btn.dispatchEvent(new Event('click', { bubbles: true })); }")
+                    ultra_safe_log_print("   ✅ Hashcash button clicked (JavaScript click)")
+                except Exception as e2:
+                    ultra_safe_log_print(f"   ⚠️  JavaScript click also failed: {str(e2)[:50]}")
+                    # Last resort: direct DOM click
+                    await page.evaluate("""
+                        () => {
+                            const btn = document.querySelector('button[data-rsfp-hashcash], button[data-hashcash-level], button[id*="Captacha"][data-hashcash]');
+                            if (btn) {
+                                btn.click();
+                                const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+                                btn.dispatchEvent(event);
+                            }
+                        }
+                    """)
+                    ultra_safe_log_print("   ✅ Hashcash button clicked (DOM click)")
+            
+            # Wait a moment for the click to register
+            await asyncio.sleep(1)
+            
+            # Wait for the Hashcash to complete (checkmark appears)
+            # Hashcash typically takes 1-5 seconds depending on difficulty level
+            max_wait = 30  # Maximum 30 seconds
+            check_interval = 0.5  # Check every 0.5 seconds
+            waited = 0
+            
+            while waited < max_wait:
+                await asyncio.sleep(check_interval)
+                waited += check_interval
+                
+                # Check if solved
+                is_solved = await hashcash_button.evaluate("""
+                    (btn) => {
+                        const svg = btn.querySelector('svg');
+                        if (!svg) return false;
+                        
+                        // Check if checkmark path is visible
+                        const checkPath = svg.querySelector('path.hashcash__check');
+                        if (checkPath) {
+                            const style = window.getComputedStyle(checkPath);
+                            if (style.display !== 'none' && style.visibility !== 'hidden') {
+                                return true;
+                            }
+                        }
+                        
+                        // Check classes
+                        if (btn.classList.contains('hashcash__solved') || 
+                            btn.classList.contains('hashcash-solved')) {
+                            return true;
+                        }
+                        
+                        // Check if pending class is removed
+                        if (!btn.classList.contains('hashcash__pending')) {
+                            return true;
+                        }
+                        
+                        // Check if hidden input field is created with hashcash value
+                        const hashcashName = btn.getAttribute('data-hashcash-name') || 
+                                          btn.getAttribute('name') || 
+                                          'form[Captacha]';
+                        const hiddenInput = document.querySelector(`input[name="${hashcashName}"], input[name*="Captacha"]`);
+                        if (hiddenInput && hiddenInput.value && hiddenInput.value.length > 0) {
+                            return true;
+                        }
+                        
+                        return false;
+                    }
+                """)
+                
+                if is_solved:
+                    # Wait a bit more to ensure hidden input is created
+                    await asyncio.sleep(1)
+                    
+                    # Verify hidden input exists with value
+                    hidden_input = await page.query_selector(f'input[name="{hashcash_name}"], input[name*="Captacha"]')
+                    if hidden_input:
+                        input_value = await hidden_input.get_attribute('value')
+                        if input_value and input_value.strip():
+                            ultra_safe_log_print(f"   ✅ Hashcash solved after {waited:.1f} seconds")
+                            ultra_safe_log_print(f"   ✅ Hashcash value verified in hidden input: {input_value[:30]}...")
+                            result["solved"] = True
+                            result["token"] = input_value
+                            return result
+                        else:
+                            ultra_safe_log_print(f"   ⏳ Hashcash appears solved but hidden input has no value yet, continuing to wait...")
+                    else:
+                        ultra_safe_log_print(f"   ⏳ Hashcash appears solved but hidden input not found yet, continuing to wait...")
+                
+                # Log progress every 5 seconds
+                if int(waited) % 5 == 0 and waited > 0:
+                    ultra_safe_log_print(f"   ⏳ Waiting for Hashcash to complete... ({int(waited)}s)")
+            
+            # Timeout
+            ultra_safe_log_print(f"   ⚠️  Hashcash solving timeout after {max_wait} seconds")
+            result["error"] = f"Timeout after {max_wait} seconds"
+            return result
+            
+        except Exception as e:
+            error_msg = str(e)[:100]
+            ultra_safe_log_print(f"   ❌ Hashcash solving error: {error_msg}")
+            result["error"] = error_msg
+            return result
+    
     async def detect_and_solve_captcha(self, page) -> Dict[str, Any]:
         """Detect and attempt to solve any CAPTCHA on the page."""
         result = {
@@ -757,13 +1004,25 @@ class LocalCaptchaSolver:
             
             if captcha_type == "recaptcha":
                 # Only solve Google reCAPTCHA (with audio challenge support)
-                solution = await self.solve_recaptcha_v2(site_key, page.url)
-                result.update({
-                    "solved": True,
-                    "type": "recaptcha",
-                    "token": solution.get("token"),
-                    "method": "local_heuristic"
-                })
+                try:
+                    solution = await self.solve_recaptcha_v2(site_key, page.url)
+                    result.update({
+                        "solved": solution.get("success", False),
+                        "type": "recaptcha",
+                        "token": solution.get("token"),
+                        "method": "local_heuristic"
+                    })
+                except Exception as e:
+                    error_msg = str(e)
+                    if "RECAPTCHA_RATE_LIMIT" in error_msg:
+                        # Re-raise to trigger browser restart
+                        raise
+                    # Other errors, mark as not solved
+                    result.update({
+                        "solved": False,
+                        "type": "recaptcha",
+                        "method": "failed"
+                    })
             elif captcha_type == "hcaptcha":
                 # Skip hCaptcha as requested
                 ultra_safe_log_print("   ⏭️  Skipping hCaptcha (not supported)")
@@ -779,6 +1038,15 @@ class LocalCaptchaSolver:
                     "solved": False,
                     "type": "turnstile",
                     "method": "skipped"
+                })
+            elif captcha_type == "hashcash":
+                # Solve Hashcash CAPTCHA (RSForm Pro Hashcash)
+                hashcash_result = await self.solve_hashcash(page)
+                result.update({
+                    "solved": hashcash_result.get("solved", False),
+                    "type": "hashcash",
+                    "token": hashcash_result.get("token"),
+                    "method": "button_click"
                 })
             else:
                 # For unknown CAPTCHA types, skip
@@ -811,37 +1079,85 @@ class LocalCaptchaSolver:
             detect_script = """
                 () => {
                     try {
-                        // Check for reCAPTCHA
-                        const recaptchaIframes = document.querySelectorAll('iframe[src*="recaptcha"], iframe[title*="reCAPTCHA"]');
-                        const grecaptchaElement = document.querySelector('.g-recaptcha');
+                        // STRICT reCAPTCHA detection - only detect actual CAPTCHA widgets
+                        // Check for actual reCAPTCHA widget (div with g-recaptcha class and data-sitekey)
+                        const grecaptchaElement = document.querySelector('.g-recaptcha[data-sitekey]');
+                        
+                        // Check for reCAPTCHA response field (hidden textarea)
                         const recaptchaResponse = document.querySelector('textarea[name="g-recaptcha-response"]');
                         
-                        if (recaptchaIframes.length > 0 || grecaptchaElement || recaptchaResponse) {
+                        // Check for reCAPTCHA iframes - but only if they're part of a CAPTCHA widget
+                        // Must be inside a form or near a .g-recaptcha element
+                        const recaptchaIframes = Array.from(document.querySelectorAll('iframe[src*="recaptcha"], iframe[title*="reCAPTCHA"]'));
+                        const validRecaptchaIframes = recaptchaIframes.filter(iframe => {
+                            // Check if iframe is visible
+                            if (!iframe.offsetParent) return false;
+                            
+                            // Check if it's near a CAPTCHA widget
+                            const parent = iframe.closest('form, .g-recaptcha, [data-sitekey]');
+                            if (parent) return true;
+                            
+                            // Check if it's an anchor iframe (checkbox) or bframe (challenge)
+                            const src = iframe.src || '';
+                            if (src.includes('recaptcha/api2/anchor') || 
+                                src.includes('recaptcha/enterprise/anchor') ||
+                                src.includes('recaptcha/api2/bframe') ||
+                                src.includes('recaptcha/enterprise/bframe')) {
+                                return true;
+                            }
+                            
+                            return false;
+                        });
+                        
+                        // Only detect if we have actual CAPTCHA elements
+                        if (grecaptchaElement || recaptchaResponse || validRecaptchaIframes.length > 0) {
                             let siteKey = '';
                             const siteKeyElement = document.querySelector('[data-sitekey]');
                             if (siteKeyElement) {
                                 siteKey = siteKeyElement.getAttribute('data-sitekey') || '';
                             }
-                            return { present: true, type: 'recaptcha', site_key: siteKey, confidence: 0.9 };
+                            // Only return present: true if we have a site key or response field
+                            if (siteKey || recaptchaResponse || grecaptchaElement) {
+                                return { present: true, type: 'recaptcha', site_key: siteKey, confidence: 0.9 };
+                            }
                         }
                         
-                        // Check for hCaptcha
-                        const hcaptchaIframes = document.querySelectorAll('iframe[src*="hcaptcha.com"]');
-                        const hcaptchaElement = document.querySelector('.h-captcha');
+                        // STRICT hCaptcha detection
+                        const hcaptchaElement = document.querySelector('.h-captcha[data-sitekey]');
+                        const hcaptchaResponse = document.querySelector('textarea[name="h-captcha-response"]');
+                        const hcaptchaIframes = Array.from(document.querySelectorAll('iframe[src*="hcaptcha.com"]'));
+                        const validHcaptchaIframes = hcaptchaIframes.filter(iframe => {
+                            if (!iframe.offsetParent) return false;
+                            const parent = iframe.closest('form, .h-captcha, [data-sitekey]');
+                            return parent !== null;
+                        });
                         
-                        if (hcaptchaIframes.length > 0 || hcaptchaElement) {
+                        if (hcaptchaElement || hcaptchaResponse || validHcaptchaIframes.length > 0) {
                             let siteKey = '';
                             const siteKeyElement = document.querySelector('[data-sitekey]');
                             if (siteKeyElement) {
                                 siteKey = siteKeyElement.getAttribute('data-sitekey') || '';
                             }
-                            return { present: true, type: 'hcaptcha', site_key: siteKey, confidence: 0.9 };
+                            if (siteKey || hcaptchaResponse || hcaptchaElement) {
+                                return { present: true, type: 'hcaptcha', site_key: siteKey, confidence: 0.9 };
+                            }
                         }
                         
                         // Check for Cloudflare Turnstile
                         const turnstileIframes = document.querySelectorAll('iframe[src*="challenges.cloudflare.com"]');
                         if (turnstileIframes.length > 0) {
                             return { present: true, type: 'turnstile', site_key: '', confidence: 0.8 };
+                        }
+                        
+                        // Check for Hashcash CAPTCHA (RSForm Pro Hashcash)
+                        const hashcashButton = document.querySelector('button[data-rsfp-hashcash], button[data-hashcash-level], button[id*="Captacha"][data-hashcash]');
+                        const hashcashElements = document.querySelectorAll('[data-rsfp-hashcash], [data-hashcash-level]');
+                        if (hashcashButton || hashcashElements.length > 0) {
+                            let hashcashName = '';
+                            if (hashcashButton) {
+                                hashcashName = hashcashButton.getAttribute('data-hashcash-name') || hashcashButton.getAttribute('name') || '';
+                            }
+                            return { present: true, type: 'hashcash', site_key: '', confidence: 0.95, hashcash_name: hashcashName };
                         }
                         
                         // Check for generic CAPTCHA elements
@@ -1455,35 +1771,91 @@ class UltimatePlaywrightManager:
         if not self.page:
             return result
         
+        # Validate page is still open before starting
         try:
-            # Detect CAPTCHAs
-            captcha_info = await self.captcha_solver.detect_captcha_type(self.page)
+            if self.page.is_closed():
+                ultra_safe_log_print("⚠️  Page is closed, cannot handle CAPTCHAs")
+                return result
+        except:
+            ultra_safe_log_print("⚠️  Cannot verify page status")
+            return result
+        
+        try:
+            # Detect CAPTCHAs with strict detection
+            try:
+                captcha_info = await self.captcha_solver.detect_captcha_type(self.page)
+            except Exception as e:
+                ultra_safe_log_print(f"⚠️  CAPTCHA detection failed: {str(e)[:50]}")
+                return result
             
             if not captcha_info.get("present"):
+                ultra_safe_log_print("ℹ️  No CAPTCHA detected - skipping CAPTCHA handling")
                 return result
             
             result["captchas_detected"] = 1
             result["captcha_type"] = captcha_info.get("type")
             
-            # Attempt to solve
-            solution = await self.captcha_solver.detect_and_solve_captcha(self.page)
+            # Validate page is still open before solving
+            try:
+                if self.page.is_closed():
+                    ultra_safe_log_print("⚠️  Page closed before CAPTCHA solving")
+                    return result
+            except:
+                pass
             
-            if solution.get("solved"):
+            # Attempt to solve (may raise RECAPTCHA_RATE_LIMIT exception)
+            solution = None
+            try:
+                solution = await self.captcha_solver.detect_and_solve_captcha(self.page)
+            except Exception as solve_error:
+                error_msg = str(solve_error)
+                # Check if page closed during solving
+                try:
+                    if self.page.is_closed():
+                        ultra_safe_log_print("⚠️  Page closed during CAPTCHA solving")
+                        return result
+                except:
+                    pass
+                
+                # Re-raise rate limit errors
+                if "RECAPTCHA_RATE_LIMIT" in error_msg:
+                    raise
+                ultra_safe_log_print(f"⚠️  CAPTCHA solving error: {error_msg[:50]}")
+                return result
+            
+            if solution and solution.get("solved"):
+                # Validate page is still open before injection
+                try:
+                    if self.page.is_closed():
+                        ultra_safe_log_print("⚠️  Page closed before CAPTCHA injection")
+                        return result
+                except:
+                    pass
+                
                 # Inject solution
-                injected = await self.captcha_solver.inject_captcha_solution(self.page, solution)
-                if injected:
-                    result["captchas_solved"] = 1
-                    result["solutions"].append(solution)
-                    ultra_safe_log_print("✅ CAPTCHA solved and injected locally")
-                else:
-                    ultra_safe_log_print("⚠️  CAPTCHA solved but injection failed")
+                try:
+                    injected = await self.captcha_solver.inject_captcha_solution(self.page, solution)
+                    if injected:
+                        result["captchas_solved"] = 1
+                        result["solutions"].append(solution)
+                        ultra_safe_log_print("✅ CAPTCHA solved and injected locally")
+                    else:
+                        ultra_safe_log_print("⚠️  CAPTCHA solved but injection failed")
+                except Exception as inject_error:
+                    ultra_safe_log_print(f"⚠️  CAPTCHA injection error: {str(inject_error)[:50]}")
             else:
                 ultra_safe_log_print("⚠️  CAPTCHA detected but could not solve locally")
             
             return result
             
         except Exception as e:
-            ultra_safe_log_print(f"⚠️  CAPTCHA handling failed: {str(e)[:50]}")
+            error_msg = str(e)
+            # Check if page closed
+            try:
+                if self.page and not self.page.is_closed():
+                    ultra_safe_log_print(f"⚠️  CAPTCHA handling failed: {error_msg[:50]}")
+            except:
+                ultra_safe_log_print("⚠️  CAPTCHA handling failed (page may be closed)")
             return result
     
     async def cleanup(self):
@@ -1731,6 +2103,312 @@ async def handle_banners_and_popups(page) -> int:
         # Continue anyway - don't fail the whole process
     
     return banners_closed
+
+async def extract_wpforms_fields(page, form_load_timestamp: Optional[float] = None) -> Dict[str, Any]:
+    """
+    Extract all WPForms-specific fields from the form.
+    Returns a dictionary with all fields needed for WPForms submission.
+    """
+    if not page or page.is_closed():
+        return {}
+    
+    try:
+        wpforms_data = await page.evaluate("""
+            (formLoadTimestamp) => {
+                const result = {
+                    is_wpforms: false,
+                    token: null,
+                    token_time: null,
+                    form_id: null,
+                    post_id: null,
+                    page_id: null,
+                    page_url: null,
+                    page_title: null,
+                    url_referer: null,
+                    start_timestamp: formLoadTimestamp ? Math.floor(formLoadTimestamp) : null,
+                    end_timestamp: null,
+                    submit: null,
+                    hidden_fields: {}
+                };
+                
+                // Check if this is a WPForms form
+                const forms = document.querySelectorAll('form');
+                let wpformsForm = null;
+                
+                for (const form of forms) {
+                    // Check for WPForms indicators
+                    if (form.id && form.id.includes('wpforms-form')) {
+                        wpformsForm = form;
+                        result.is_wpforms = true;
+                        break;
+                    }
+                    if (form.className && form.className.includes('wpforms-form')) {
+                        wpformsForm = form;
+                        result.is_wpforms = true;
+                        break;
+                    }
+                    if (form.dataset.formid || form.dataset.token) {
+                        wpformsForm = form;
+                        result.is_wpforms = true;
+                        break;
+                    }
+                    // Check for wpforms fields
+                    const hasWpformsFields = form.querySelector('input[name*="wpforms"]');
+                    if (hasWpformsFields) {
+                        wpformsForm = form;
+                        result.is_wpforms = true;
+                        break;
+                    }
+                }
+                
+                if (!wpformsForm) {
+                    return result;
+                }
+                
+                // Check if WPForms uses AJAX submission
+                result.uses_ajax = wpformsForm.classList.contains('wpforms-ajax-form') || 
+                                   wpformsForm.classList.contains('wpforms-form') ||
+                                   wpformsForm.hasAttribute('data-token');
+                
+                // Get AJAX URL (usually /wp-admin/admin-ajax.php)
+                if (result.uses_ajax) {
+                    // Try to find AJAX URL from wpforms settings
+                    if (window.wpforms && window.wpforms.settings) {
+                        result.ajax_url = window.wpforms.settings.ajaxurl || '/wp-admin/admin-ajax.php';
+                    } else {
+                        // Default WPForms AJAX endpoint
+                        result.ajax_url = '/wp-admin/admin-ajax.php';
+                    }
+                }
+                
+                // Extract data-token and data-token-time from form
+                if (wpformsForm.dataset.token) {
+                    result.token = wpformsForm.dataset.token;
+                }
+                if (wpformsForm.dataset.tokenTime) {
+                    result.token_time = parseInt(wpformsForm.dataset.tokenTime) || null;
+                }
+                
+                // Extract form ID from data-formid or form ID attribute
+                if (wpformsForm.dataset.formid) {
+                    result.form_id = wpformsForm.dataset.formid;
+                } else if (wpformsForm.id) {
+                    const formIdMatch = wpformsForm.id.match(/wpforms-form-(\d+)/);
+                    if (formIdMatch) {
+                        result.form_id = formIdMatch[1];
+                    }
+                }
+                
+                // Extract all hidden fields
+                const hiddenInputs = wpformsForm.querySelectorAll('input[type="hidden"]');
+                hiddenInputs.forEach(input => {
+                    const name = input.name || input.id;
+                    const value = input.value || '';
+                    
+                    if (name) {
+                        result.hidden_fields[name] = value;
+                        
+                        // Extract specific WPForms fields
+                        if (name.includes('wpforms[id]') || name === 'wpforms[id]') {
+                            result.form_id = result.form_id || value;
+                        } else if (name.includes('wpforms[post_id]') || name === 'wpforms[post_id]') {
+                            result.post_id = value;
+                        } else if (name === 'page_id') {
+                            result.page_id = value;
+                        } else if (name === 'page_url') {
+                            result.page_url = value;
+                        } else if (name === 'page_title') {
+                            result.page_title = value;
+                        } else if (name === 'url_referer') {
+                            result.url_referer = value;
+                        } else if (name.includes('wpforms[token]') || name === 'wpforms[token]') {
+                            result.token = result.token || value;
+                        }
+                    }
+                });
+                
+                // If token not found in hidden fields, try to get from data-token
+                if (!result.token && wpformsForm.dataset.token) {
+                    result.token = wpformsForm.dataset.token;
+                }
+                
+                // Get page info if not in hidden fields
+                if (!result.page_url) {
+                    result.page_url = window.location.href;
+                }
+                if (!result.page_title) {
+                    result.page_title = document.title || '';
+                }
+                
+                // Generate end_timestamp (current time in seconds)
+                result.end_timestamp = Math.floor(Date.now() / 1000);
+                
+                // If start_timestamp not provided, use a reasonable default (5 seconds before end)
+                if (!result.start_timestamp) {
+                    result.start_timestamp = result.end_timestamp - 5;
+                }
+                
+                // Set submit field (WPForms uses 'wpforms-submit' for AJAX, not form ID)
+                result.submit = 'wpforms-submit';
+                
+                return result;
+            }
+        """, form_load_timestamp)
+        
+        return wpforms_data
+    except Exception as e:
+        ultra_safe_log_print(f"   ⚠️  Error extracting WPForms fields: {str(e)[:100]}")
+        return {}
+
+
+async def inject_wpforms_fields(page, wpforms_data: Dict[str, Any]) -> bool:
+    """
+    Inject all WPForms fields into the form before submission.
+    This ensures the POST payload has all required fields.
+    """
+    if not page or page.is_closed() or not wpforms_data.get('is_wpforms'):
+        return False
+    
+    try:
+        success = await page.evaluate("""
+            (wpformsData) => {
+                try {
+                    const forms = document.querySelectorAll('form');
+                    let wpformsForm = null;
+                    
+                    // Find WPForms form
+                    for (const form of forms) {
+                        if (form.id && form.id.includes('wpforms-form')) {
+                            wpformsForm = form;
+                            break;
+                        }
+                        if (form.className && form.className.includes('wpforms-form')) {
+                            wpformsForm = form;
+                            break;
+                        }
+                        if (form.dataset.formid || form.dataset.token) {
+                            wpformsForm = form;
+                            break;
+                        }
+                        const hasWpformsFields = form.querySelector('input[name*="wpforms"]');
+                        if (hasWpformsFields) {
+                            wpformsForm = form;
+                            break;
+                        }
+                    }
+                    
+                    if (!wpformsForm) {
+                        return false;
+                    }
+                    
+                    // Inject wpforms[token] from data-token
+                    if (wpformsData.token) {
+                        let tokenInput = wpformsForm.querySelector('input[name="wpforms[token]"]');
+                        if (!tokenInput) {
+                            // Create the input if it doesn't exist
+                            tokenInput = document.createElement('input');
+                            tokenInput.type = 'hidden';
+                            tokenInput.name = 'wpforms[token]';
+                            wpformsForm.appendChild(tokenInput);
+                        }
+                        tokenInput.value = wpformsData.token;
+                    }
+                    
+                    // Inject start_timestamp
+                    if (wpformsData.start_timestamp) {
+                        let startInput = wpformsForm.querySelector('input[name="start_timestamp"]');
+                        if (!startInput) {
+                            startInput = document.createElement('input');
+                            startInput.type = 'hidden';
+                            startInput.name = 'start_timestamp';
+                            wpformsForm.appendChild(startInput);
+                        }
+                        startInput.value = wpformsData.start_timestamp.toString();
+                    }
+                    
+                    // Inject end_timestamp
+                    if (wpformsData.end_timestamp) {
+                        let endInput = wpformsForm.querySelector('input[name="end_timestamp"]');
+                        if (!endInput) {
+                            endInput = document.createElement('input');
+                            endInput.type = 'hidden';
+                            endInput.name = 'end_timestamp';
+                            wpformsForm.appendChild(endInput);
+                        }
+                        endInput.value = wpformsData.end_timestamp.toString();
+                    }
+                    
+                    // Inject wpforms[id] if we have form_id
+                    if (wpformsData.form_id) {
+                        let formIdInput = wpformsForm.querySelector('input[name="wpforms[id]"]');
+                        if (!formIdInput) {
+                            formIdInput = document.createElement('input');
+                            formIdInput.type = 'hidden';
+                            formIdInput.name = 'wpforms[id]';
+                            wpformsForm.appendChild(formIdInput);
+                        }
+                        formIdInput.value = wpformsData.form_id;
+                    }
+                    
+                    // Inject wpforms[submit]
+                    if (wpformsData.submit) {
+                        let submitInput = wpformsForm.querySelector('input[name="wpforms[submit]"]');
+                        if (!submitInput) {
+                            submitInput = document.createElement('input');
+                            submitInput.type = 'hidden';
+                            submitInput.name = 'wpforms[submit]';
+                            wpformsForm.appendChild(submitInput);
+                        }
+                        submitInput.value = wpformsData.submit;
+                    }
+                    
+                    // Inject action field for AJAX submission
+                    if (wpformsData.uses_ajax) {
+                        let actionInput = wpformsForm.querySelector('input[name="action"]');
+                        if (!actionInput) {
+                            actionInput = document.createElement('input');
+                            actionInput.type = 'hidden';
+                            actionInput.name = 'action';
+                            wpformsForm.appendChild(actionInput);
+                        }
+                        actionInput.value = 'wpforms_submit';
+                    }
+                    
+                    // Inject other hidden fields if they don't exist
+                    for (const [name, value] of Object.entries(wpformsData.hidden_fields || {})) {
+                        if (name && value) {
+                            let existingInput = wpformsForm.querySelector(`input[name="${name}"]`);
+                            if (!existingInput) {
+                                existingInput = document.createElement('input');
+                                existingInput.type = 'hidden';
+                                existingInput.name = name;
+                                wpformsForm.appendChild(existingInput);
+                            }
+                            existingInput.value = value;
+                        }
+                    }
+                    
+                    // Update form data attributes if needed
+                    if (wpformsData.token && !wpformsForm.dataset.token) {
+                        wpformsForm.setAttribute('data-token', wpformsData.token);
+                    }
+                    if (wpformsData.token_time && !wpformsForm.dataset.tokenTime) {
+                        wpformsForm.setAttribute('data-token-time', wpformsData.token_time.toString());
+                    }
+                    
+                    return true;
+                } catch (e) {
+                    console.error('Error injecting WPForms fields:', e);
+                    return false;
+                }
+            }
+        """, wpforms_data)
+        
+        return success
+    except Exception as e:
+        ultra_safe_log_print(f"   ⚠️  Error injecting WPForms fields: {str(e)[:100]}")
+        return False
+
 
 async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, Any]:
     """ULTRA-RESILIENT simple form filling that cannot fail."""
@@ -2379,67 +3057,136 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
     if not page or page.is_closed():
         return result
     
-    # Check if this is a search form and skip it, or look for contact form
-    is_search_form = False
+    # Find all forms and identify the contact form (skip search forms)
     contact_form_found = False
+    target_form = None
     try:
-        form_info = await page.evaluate("""
+        forms_info = await page.evaluate("""
             () => {
-                const form = document.querySelector('form');
-                if (!form) return { found: false };
+                const allForms = Array.from(document.querySelectorAll('form'));
+                if (allForms.length === 0) return { found: false, forms: [] };
                 
-                const method = (form.method || 'get').toLowerCase();
-                const action = form.action || '';
-                const formText = form.textContent.toLowerCase();
-                const formId = (form.id || '').toLowerCase();
-                const formClass = (form.className || '').toLowerCase();
+                const formsData = [];
                 
-                // Check if it's a search form
-                const isSearch = method === 'get' && (
-                    formText.includes('search') ||
-                    formId.includes('search') ||
-                    formClass.includes('search') ||
-                    action.includes('search') ||
-                    form.querySelector('input[type="search"]') ||
-                    form.querySelector('input[name*="search"]') ||
-                    form.querySelector('input[name*="q"]')
-                );
-                
-                // Check if it's a contact form
-                const isContact = (
-                    formText.includes('contact') ||
-                    formId.includes('contact') ||
-                    formClass.includes('contact') ||
-                    action.includes('contact') ||
-                    form.querySelector('input[name*="email"]') ||
-                    form.querySelector('input[name*="name"]') ||
-                    form.querySelector('textarea[name*="message"]')
-                );
+                for (const form of allForms) {
+                    const method = (form.method || 'get').toLowerCase();
+                    const action = form.action || '';
+                    const formText = form.textContent.toLowerCase();
+                    const formId = (form.id || '').toLowerCase();
+                    const formClass = (form.className || '').toLowerCase();
+                    const role = form.getAttribute('role') || '';
+                    
+                    // Check if it's a search form
+                    const isSearch = (
+                        role === 'search' ||
+                        (method === 'get' && (
+                            formText.includes('search') ||
+                            formId.includes('search') ||
+                            formClass.includes('search') ||
+                            action.includes('search') ||
+                            form.querySelector('input[type="search"]') ||
+                            form.querySelector('input[name*="search"]') ||
+                            form.querySelector('input[name*="q"]') ||
+                            form.querySelector('input[name="s"]')
+                        ))
+                    );
+                    
+                    // Check if it's a contact form
+                    const isContact = (
+                        formText.includes('contact') ||
+                        formId.includes('contact') ||
+                        formClass.includes('contact') ||
+                        action.includes('contact') ||
+                        form.querySelector('input[name*="email"]') ||
+                        form.querySelector('input[name*="name"]') ||
+                        form.querySelector('textarea[name*="message"]') ||
+                        form.querySelector('textarea[name*="comment"]') ||
+                        form.querySelector('input[type="email"]') ||
+                        (method === 'post' && !isSearch)
+                    );
+                    
+                    formsData.push({
+                        method: method,
+                        action: form.action ? new URL(form.action, window.location.href).href : window.location.href,
+                        isSearch: isSearch,
+                        isContact: isContact,
+                        hasEmail: !!form.querySelector('input[type="email"], input[name*="email"]'),
+                        hasName: !!form.querySelector('input[name*="name"]'),
+                        hasMessage: !!form.querySelector('textarea'),
+                        isPost: method === 'post',
+                        formIndex: formsData.length
+                    });
+                }
                 
                 return {
                     found: true,
-                    method: method,
-                    action: form.action ? new URL(form.action, window.location.href).href : window.location.href,
-                    isSearch: isSearch,
-                    isContact: isContact
+                    forms: formsData,
+                    totalForms: allForms.length
                 };
             }
         """)
         
-        if form_info.get('found'):
-            if form_info.get('isSearch'):
-                ultra_safe_log_print("   ⏭️  Skipping search form (GET method)")
-                result["submission_attempted"] = False
-                result["submission_success"] = False
-                return result
+        if forms_info.get('found'):
+            total_forms = forms_info.get('totalForms', 0)
+            ultra_safe_log_print(f"   🔍 Found {total_forms} form(s) on page")
             
-            if form_info.get('isContact'):
-                contact_form_found = True
-                ultra_safe_log_print("   ✅ Contact form detected")
+            forms_data = forms_info.get('forms', [])
             
-            form_action_url = form_info.get('action', page.url)
-            ultra_safe_log_print(f"   📋 Form action URL: {form_action_url[:80]}")
-            ultra_safe_log_print(f"   📋 Form method: {form_info.get('method', 'get').upper()}")
+            # First, try to find a contact form
+            contact_form_index = None
+            for i, form_data in enumerate(forms_data):
+                if form_data.get('isContact'):
+                    contact_form_index = i
+                    contact_form_found = True
+                    ultra_safe_log_print(f"   ✅ Contact form detected (form #{i+1})")
+                    break
+            
+            # If no contact form found, look for any POST form that's not a search form
+            if contact_form_index is None:
+                for i, form_data in enumerate(forms_data):
+                    if form_data.get('isPost') and not form_data.get('isSearch'):
+                        contact_form_index = i
+                        ultra_safe_log_print(f"   ✅ Found POST form (form #{i+1}) - likely contact form")
+                        break
+            
+            # If still no form found, look for any form with email field
+            if contact_form_index is None:
+                for i, form_data in enumerate(forms_data):
+                    if form_data.get('hasEmail') and not form_data.get('isSearch'):
+                        contact_form_index = i
+                        ultra_safe_log_print(f"   ✅ Found form with email field (form #{i+1}) - likely contact form")
+                        break
+            
+            # Skip search forms
+            search_forms_count = sum(1 for f in forms_data if f.get('isSearch'))
+            if search_forms_count > 0:
+                ultra_safe_log_print(f"   ⏭️  Skipping {search_forms_count} search form(s)")
+            
+            if contact_form_index is not None:
+                target_form_data = forms_data[contact_form_index]
+                form_action_url = target_form_data.get('action', page.url)
+                form_method = target_form_data.get('method', 'get')
+                ultra_safe_log_print(f"   📋 Form action URL: {form_action_url[:80]}")
+                ultra_safe_log_print(f"   📋 Form method: {form_method.upper()}")
+                
+                # Store form index for later use
+                target_form = contact_form_index
+            else:
+                ultra_safe_log_print("   ⚠️  No suitable contact form found")
+                # Try to find contact page link
+                contact_link = await page.evaluate("""
+                    () => {
+                        const links = Array.from(document.querySelectorAll('a[href*="contact"]'));
+                        if (links.length > 0) {
+                            return links[0].href;
+                        }
+                        return null;
+                    }
+                """)
+                if contact_link:
+                    ultra_safe_log_print(f"   🔗 Found contact link: {contact_link[:80]}")
+                    ultra_safe_log_print("   ⚠️  Please navigate to contact page manually or update URL")
+                form_action_url = page.url
         else:
             # No form found, try to find contact page link
             ultra_safe_log_print("   ⚠️  No form found on page, looking for contact page...")
@@ -2461,6 +3208,20 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
             form_action_url = page.url
         except:
             form_action_url = ""
+    
+    # Store target form index in window for JavaScript access
+    if target_form is not None:
+        await page.evaluate(f"window.__targetFormIndex = {target_form};")
+    else:
+        await page.evaluate("window.__targetFormIndex = null;")
+    
+    # If no target form found, return early
+    if target_form is None and not contact_form_found:
+        ultra_safe_log_print("   ⚠️  No contact form found to submit")
+        result["submission_attempted"] = False
+        result["submission_success"] = False
+        result["error"] = "No contact form found"
+        return result
     
     # Track POST and GET requests and responses (GET for contact forms)
     post_requests = []
@@ -2499,16 +3260,46 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     except:
                         pass
                     
-                    # If it's to the form domain OR contains form field names, it's form data
-                    if is_form_domain or 'name=' in post_data.lower() or 'email=' in post_data.lower() or 'message=' in post_data.lower() or '_token=' in post_data.lower():
-                        nonlocal form_submission_data
-                        form_submission_data = {
-                            "url": request.url,
-                            "data_preview": post_data[:500] if len(post_data) > 500 else post_data,
-                            "data_length": len(post_data)
-                        }
-                        ultra_safe_log_print(f"   📦 Form data detected in POST to {request.url[:80]}:")
-                        ultra_safe_log_print(f"      {post_data[:300]}...")
+                    # Exclude CSS/JS files and other non-form resources FIRST
+                    url_lower = request.url.lower()
+                    excluded_extensions = ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2', '.ttf', '.eot', '.ico', '.map']
+                    excluded_paths = ['wp-includes', 'wp-content', '/static/', '/assets/', '/css/', '/js/', '/wp-json/', '/api/', '/dist/', '/build/']
+                    is_excluded_resource = any(ext in url_lower for ext in excluded_extensions) or any(path in url_lower for path in excluded_paths)
+                    
+                    # If it's an excluded resource, skip immediately
+                    if is_excluded_resource:
+                        pass  # Don't capture this
+                    else:
+                        # Check if URL matches form action (exact match preferred)
+                        url_matches_form = False
+                        if form_action_url:
+                            form_base = form_action_url.split('?')[0].rstrip('/')
+                            req_base = request.url.split('?')[0].rstrip('/')
+                            url_matches_form = req_base == form_base
+                        
+                        # Check if it's a form endpoint (but not a resource file)
+                        is_form_endpoint = False
+                        if not any(ext in url_lower for ext in excluded_extensions):
+                            is_form_endpoint = any(kw in url_lower for kw in ['/contact', '/submit', '/form', '/message', '/send', '/mail'])
+                        
+                        # Check for form fields in POST data
+                        has_form_fields = any(field in post_data.lower() for field in ['name=', 'email=', 'message=', 'subject=', 'phone=', 'wpforms', 'form[', 'contact', 'submit', 'g-recaptcha-response'])
+                        
+                        # Only capture if:
+                        # 1. URL exactly matches form action OR
+                        # 2. (Is form endpoint AND has form fields) OR
+                        # 3. (Is form domain AND has form fields)
+                        should_capture = url_matches_form or (is_form_endpoint and has_form_fields) or (is_form_domain and has_form_fields)
+                        
+                        if should_capture:
+                            nonlocal form_submission_data
+                            form_submission_data = {
+                                "url": request.url,
+                                "data_preview": post_data[:500] if len(post_data) > 500 else post_data,
+                                "data_length": len(post_data)
+                            }
+                            ultra_safe_log_print(f"   📦 Form data detected in POST to {request.url[:80]}:")
+                            ultra_safe_log_print(f"      {post_data[:300]}...")
             except:
                 pass
             
@@ -2675,9 +3466,90 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     return values;
                 }
                 
+                // Function to inject WPForms fields into FormData
+                function injectWPFormsFields(formData) {
+                    if (!window.__wpformsData || !window.__wpformsData.is_wpforms) {
+                        return formData;
+                    }
+                    
+                    const wpforms = window.__wpformsData;
+                    
+                    // If it's FormData, append WPForms fields
+                    if (formData instanceof FormData) {
+                        if (wpforms.token) {
+                            formData.set('wpforms[token]', wpforms.token);
+                        }
+                        if (wpforms.start_timestamp) {
+                            formData.set('start_timestamp', wpforms.start_timestamp.toString());
+                        }
+                        if (wpforms.end_timestamp) {
+                            formData.set('end_timestamp', wpforms.end_timestamp.toString());
+                        }
+                        if (wpforms.form_id) {
+                            formData.set('wpforms[id]', wpforms.form_id);
+                        }
+                        if (wpforms.submit) {
+                            formData.set('wpforms[submit]', wpforms.submit);
+                        }
+                        // Add action field for AJAX submission
+                        if (wpforms.uses_ajax) {
+                            formData.set('action', 'wpforms_submit');
+                        }
+                        // Inject other hidden fields
+                        if (wpforms.hidden_fields) {
+                            Object.keys(wpforms.hidden_fields).forEach(key => {
+                                if (key && wpforms.hidden_fields[key]) {
+                                    formData.set(key, wpforms.hidden_fields[key]);
+                                }
+                            });
+                        }
+                        return formData;
+                    }
+                    
+                    // If it's a string (URL-encoded or multipart), append WPForms fields
+                    if (typeof formData === 'string') {
+                        const params = new URLSearchParams(formData);
+                        if (wpforms.token) {
+                            params.set('wpforms[token]', wpforms.token);
+                        }
+                        if (wpforms.start_timestamp) {
+                            params.set('start_timestamp', wpforms.start_timestamp.toString());
+                        }
+                        if (wpforms.end_timestamp) {
+                            params.set('end_timestamp', wpforms.end_timestamp.toString());
+                        }
+                        if (wpforms.form_id) {
+                            params.set('wpforms[id]', wpforms.form_id);
+                        }
+                        if (wpforms.submit) {
+                            params.set('wpforms[submit]', wpforms.submit);
+                        }
+                        // Inject other hidden fields
+                        if (wpforms.hidden_fields) {
+                            Object.keys(wpforms.hidden_fields).forEach(key => {
+                                if (key && wpforms.hidden_fields[key]) {
+                                    params.set(key, wpforms.hidden_fields[key]);
+                                }
+                            });
+                        }
+                        return params.toString();
+                    }
+                    
+                    return formData;
+                }
+                
                 // Function to inject field values into request body
                 function injectFieldValues(body, fieldValues) {
-                    if (!body || !fieldValues || Object.keys(fieldValues).length === 0) {
+                    if (!body) {
+                        return body;
+                    }
+                    
+                    // First, inject WPForms fields if available
+                    if (window.__wpformsData && window.__wpformsData.is_wpforms) {
+                        body = injectWPFormsFields(body);
+                    }
+                    
+                    if (!fieldValues || Object.keys(fieldValues).length === 0) {
                         return body;
                     }
                     
@@ -2710,13 +3582,17 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         const fieldValues = getFormFieldValues();
                         window.__formFieldValues = fieldValues;
                         
-                        // Inject field values into request body if it's empty or missing fields
+                        // Inject WPForms fields and field values into request body
                         if (options.body) {
                             const originalBody = options.body;
                             const injectedBody = injectFieldValues(originalBody, fieldValues);
                             if (injectedBody !== originalBody) {
                                 options.body = injectedBody;
-                                console.log('🔧 Injected field values into fetch request:', fieldValues);
+                                if (window.__wpformsData && window.__wpformsData.is_wpforms) {
+                                    console.log('🔧 Injected WPForms fields into fetch request');
+                                } else {
+                                    console.log('🔧 Injected field values into fetch request:', fieldValues);
+                                }
                             }
                         } else {
                             // If no body, create one with field values
@@ -2776,12 +3652,16 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         const fieldValues = getFormFieldValues();
                         window.__formFieldValues = fieldValues;
                         
-                        // Inject field values into request data if it's empty or missing fields
+                        // Inject WPForms fields and field values into request data
                         let finalData = data;
                         if (data) {
                             finalData = injectFieldValues(data, fieldValues);
                             if (finalData !== data) {
-                                console.log('🔧 Injected field values into XHR request:', fieldValues);
+                                if (window.__wpformsData && window.__wpformsData.is_wpforms) {
+                                    console.log('🔧 Injected WPForms fields into XHR request');
+                                } else {
+                                    console.log('🔧 Injected field values into XHR request:', fieldValues);
+                                }
                             }
                         } else {
                             // If no data, create it with field values
@@ -2834,7 +3714,56 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
     # Check for Next.js form actions or other submission mechanisms
     form_action_info = await page.evaluate("""
         () => {
-            const form = document.querySelector('form');
+            // Get the target form (skip search forms)
+            let form = null;
+            if (typeof window.__targetFormIndex !== 'undefined' && window.__targetFormIndex !== null) {
+                const allForms = Array.from(document.querySelectorAll('form'));
+                const nonSearchForms = allForms.filter((f) => {
+                    const method = (f.method || 'get').toLowerCase();
+                    const role = f.getAttribute('role') || '';
+                    const formText = f.textContent.toLowerCase();
+                    const formId = (f.id || '').toLowerCase();
+                    const formClass = (f.className || '').toLowerCase();
+                    const action = f.action || '';
+                    
+                    const isSearch = role === 'search' || (method === 'get' && (
+                        formText.includes('search') ||
+                        formId.includes('search') ||
+                        formClass.includes('search') ||
+                        action.includes('search') ||
+                        f.querySelector('input[type="search"]') ||
+                        f.querySelector('input[name*="search"]') ||
+                        f.querySelector('input[name*="q"]') ||
+                        f.querySelector('input[name="s"]')
+                    ));
+                    
+                    return !isSearch;
+                });
+                
+                if (nonSearchForms.length > window.__targetFormIndex) {
+                    form = nonSearchForms[window.__targetFormIndex];
+                }
+            }
+            
+            // Fallback to first non-search form
+            if (!form) {
+                const allForms = Array.from(document.querySelectorAll('form'));
+                const nonSearchForms = allForms.filter((f) => {
+                    const method = (f.method || 'get').toLowerCase();
+                    const role = f.getAttribute('role') || '';
+                    return role !== 'search' && !(method === 'get' && (
+                        f.textContent.toLowerCase().includes('search') ||
+                        f.className.toLowerCase().includes('search') ||
+                        f.querySelector('input[type="search"]')
+                    ));
+                });
+                if (nonSearchForms.length > 0) {
+                    form = nonSearchForms[0];
+                } else {
+                    form = document.querySelector('form');
+                }
+            }
+            
             if (!form) return { has_form: false };
             
             const action = form.getAttribute('action') || '';
@@ -2875,7 +3804,56 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
     try:
         form_verification = await page.evaluate("""
             () => {
-                const form = document.querySelector('form');
+                // Get the target form (skip search forms)
+                let form = null;
+                if (typeof window.__targetFormIndex !== 'undefined' && window.__targetFormIndex !== null) {
+                    const allForms = Array.from(document.querySelectorAll('form'));
+                    const nonSearchForms = allForms.filter((f) => {
+                        const method = (f.method || 'get').toLowerCase();
+                        const role = f.getAttribute('role') || '';
+                        const formText = f.textContent.toLowerCase();
+                        const formId = (f.id || '').toLowerCase();
+                        const formClass = (f.className || '').toLowerCase();
+                        const action = f.action || '';
+                        
+                        const isSearch = role === 'search' || (method === 'get' && (
+                            formText.includes('search') ||
+                            formId.includes('search') ||
+                            formClass.includes('search') ||
+                            action.includes('search') ||
+                            f.querySelector('input[type="search"]') ||
+                            f.querySelector('input[name*="search"]') ||
+                            f.querySelector('input[name*="q"]') ||
+                            f.querySelector('input[name="s"]')
+                        ));
+                        
+                        return !isSearch;
+                    });
+                    
+                    if (nonSearchForms.length > window.__targetFormIndex) {
+                        form = nonSearchForms[window.__targetFormIndex];
+                    }
+                }
+                
+                // Fallback to first non-search form
+                if (!form) {
+                    const allForms = Array.from(document.querySelectorAll('form'));
+                    const nonSearchForms = allForms.filter((f) => {
+                        const method = (f.method || 'get').toLowerCase();
+                        const role = f.getAttribute('role') || '';
+                        return role !== 'search' && !(method === 'get' && (
+                            f.textContent.toLowerCase().includes('search') ||
+                            f.className.toLowerCase().includes('search') ||
+                            f.querySelector('input[type="search"]')
+                        ));
+                    });
+                    if (nonSearchForms.length > 0) {
+                        form = nonSearchForms[0];
+                    } else {
+                        form = document.querySelector('form');
+                    }
+                }
+                
                 if (!form) return { found: false };
                 
                 const fields = {
@@ -3040,36 +4018,61 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         ultra_safe_log_print(f"   🔍 CAPTCHA status: solved={captcha_solved}, response present={captcha_check.get('hasRecaptchaResponse') or captcha_check.get('hasHcaptchaResponse')}")
                     
                     if not captcha_solved:
-                        ultra_safe_log_print("   ⚠️  CAPTCHA not solved yet, attempting to solve...")
-                        # Try to solve CAPTCHA using the solver
+                        ultra_safe_log_print("   ⚠️  CAPTCHA not solved yet, attempting to solve (with timeout)...")
+                        # Try to solve CAPTCHA using the solver with timeout to prevent hanging
                         try:
-                            solver = LocalCaptchaSolver(page=page)
-                            solution = await solver.detect_and_solve_captcha(page)
-                            if solution.get("solved"):
-                                injected = await solver.inject_captcha_solution(page, solution)
-                                if injected:
-                                    ultra_safe_log_print("   ✅ CAPTCHA solved before submission")
-                                    await asyncio.sleep(2)  # Wait for CAPTCHA to be processed
-                                    
-                                    # Verify CAPTCHA response is now present
-                                    captcha_verified = await page.evaluate("""
-                                        () => {
-                                            const recaptchaResponse = document.querySelector('#g-recaptcha-response');
-                                            return recaptchaResponse && recaptchaResponse.value && recaptchaResponse.value.length > 0;
-                                        }
-                                    """)
-                                    if captcha_verified:
-                                        ultra_safe_log_print("   ✅ CAPTCHA response verified in form")
-                                    else:
-                                        ultra_safe_log_print("   ⚠️  CAPTCHA response not found in form after injection")
-                                else:
-                                    ultra_safe_log_print("   ⚠️  CAPTCHA solved but injection failed")
+                            # Validate page is still open
+                            if page.is_closed():
+                                ultra_safe_log_print("   ⚠️  Page is closed, skipping CAPTCHA solving")
                             else:
-                                ultra_safe_log_print("   ⚠️  Could not solve CAPTCHA")
+                                solver = LocalCaptchaSolver(page=page)
+                                # Set a short timeout for CAPTCHA solving (10 seconds max)
+                                try:
+                                    solution = await asyncio.wait_for(
+                                        solver.detect_and_solve_captcha(page),
+                                        timeout=10.0
+                                    )
+                                    if solution and solution.get("solved"):
+                                        # Validate page is still open before injection
+                                        if not page.is_closed():
+                                            injected = await solver.inject_captcha_solution(page, solution)
+                                            if injected:
+                                                ultra_safe_log_print("   ✅ CAPTCHA solved before submission")
+                                                await asyncio.sleep(2)  # Wait for CAPTCHA to be processed
+                                                
+                                                # Verify CAPTCHA response is now present
+                                                if not page.is_closed():
+                                                    captcha_verified = await page.evaluate("""
+                                                        () => {
+                                                            const recaptchaResponse = document.querySelector('#g-recaptcha-response');
+                                                            return recaptchaResponse && recaptchaResponse.value && recaptchaResponse.value.length > 0;
+                                                        }
+                                                    """)
+                                                    if captcha_verified:
+                                                        ultra_safe_log_print("   ✅ CAPTCHA response verified in form")
+                                                    else:
+                                                        ultra_safe_log_print("   ⚠️  CAPTCHA response not found in form after injection")
+                                            else:
+                                                ultra_safe_log_print("   ⚠️  CAPTCHA solved but injection failed")
+                                        else:
+                                            ultra_safe_log_print("   ⚠️  Page closed during CAPTCHA injection")
+                                    else:
+                                        ultra_safe_log_print("   ⚠️  Could not solve CAPTCHA (will proceed with submission anyway)")
+                                except asyncio.TimeoutError:
+                                    ultra_safe_log_print("   ⚠️  CAPTCHA solving timed out (10s), proceeding with submission anyway")
+                                except Exception as solve_error:
+                                    error_msg = str(solve_error)
+                                    # Check if page closed
+                                    try:
+                                        if page.is_closed():
+                                            ultra_safe_log_print("   ⚠️  Page closed during CAPTCHA solving")
+                                        else:
+                                            ultra_safe_log_print(f"   ⚠️  CAPTCHA solving failed: {error_msg[:50]}")
+                                    except:
+                                        ultra_safe_log_print("   ⚠️  CAPTCHA solving failed (page may be closed)")
                         except Exception as e:
-                            ultra_safe_log_print(f"   ⚠️  CAPTCHA solving failed: {str(e)[:50]}")
-                            import traceback
-                            ultra_safe_log_print(f"   📋 Traceback: {traceback.format_exc()[:200]}")
+                            ultra_safe_log_print(f"   ⚠️  CAPTCHA solving error: {str(e)[:50]}")
+                            ultra_safe_log_print("   ℹ️  Proceeding with form submission anyway")
                     else:
                         ultra_safe_log_print("   ✅ CAPTCHA is solved or not present")
                     
@@ -3091,17 +4094,44 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     
                     if not captcha_token_check.get('valid'):
                         ultra_safe_log_print(f"   ⚠️  CAPTCHA token validation failed: {captcha_token_check.get('reason')}")
-                        ultra_safe_log_print("   🔄 Attempting to solve CAPTCHA again...")
+                        ultra_safe_log_print("   🔄 Attempting to solve CAPTCHA again (with timeout)...")
                         try:
-                            solver = LocalCaptchaSolver(page=page)
-                            solution = await solver.detect_and_solve_captcha(page)
-                            if solution.get("solved"):
-                                injected = await solver.inject_captcha_solution(page, solution)
-                                if injected:
-                                    ultra_safe_log_print("   ✅ CAPTCHA re-solved and injected")
-                                    await asyncio.sleep(2)
+                            # Validate page is still open
+                            if page.is_closed():
+                                ultra_safe_log_print("   ⚠️  Page is closed, skipping CAPTCHA re-solving")
+                            else:
+                                solver = LocalCaptchaSolver(page=page)
+                                # Set a short timeout (5 seconds max) for re-solving
+                                try:
+                                    solution = await asyncio.wait_for(
+                                        solver.detect_and_solve_captcha(page),
+                                        timeout=5.0
+                                    )
+                                    if solution and solution.get("solved"):
+                                        # Validate page is still open before injection
+                                        if not page.is_closed():
+                                            injected = await solver.inject_captcha_solution(page, solution)
+                                            if injected:
+                                                ultra_safe_log_print("   ✅ CAPTCHA re-solved and injected")
+                                                await asyncio.sleep(2)
+                                        else:
+                                            ultra_safe_log_print("   ⚠️  Page closed during CAPTCHA re-solving")
+                                    else:
+                                        ultra_safe_log_print("   ⚠️  CAPTCHA re-solving failed (will proceed anyway)")
+                                except asyncio.TimeoutError:
+                                    ultra_safe_log_print("   ⚠️  CAPTCHA re-solving timed out (5s), proceeding with submission")
+                                except Exception as re_solve_error:
+                                    error_msg = str(re_solve_error)
+                                    try:
+                                        if page.is_closed():
+                                            ultra_safe_log_print("   ⚠️  Page closed during CAPTCHA re-solving")
+                                        else:
+                                            ultra_safe_log_print(f"   ⚠️  CAPTCHA re-solving failed: {error_msg[:50]}")
+                                    except:
+                                        ultra_safe_log_print("   ⚠️  CAPTCHA re-solving failed")
                         except Exception as e:
-                            ultra_safe_log_print(f"   ⚠️  CAPTCHA re-solving failed: {str(e)[:50]}")
+                            ultra_safe_log_print(f"   ⚠️  CAPTCHA re-solving error: {str(e)[:50]}")
+                            ultra_safe_log_print("   ℹ️  Proceeding with form submission anyway")
                     else:
                         ultra_safe_log_print(f"   ✅ CAPTCHA token validated (length: {captcha_token_check.get('token_length')})")
                     
@@ -3146,24 +4176,277 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         for issue in issues:
                             ultra_safe_log_print(f"      - {issue}")
                         
-                        # If CAPTCHA is the only issue, try to solve it one more time
+                        # If CAPTCHA is the only issue, try to solve it one more time (with very short timeout)
                         if len(issues) == 1 and 'CAPTCHA' in issues[0]:
-                            ultra_safe_log_print("   🔄 Attempting to solve CAPTCHA one more time...")
+                            ultra_safe_log_print("   🔄 Attempting to solve CAPTCHA one more time (with timeout)...")
                             try:
-                                solver = LocalCaptchaSolver(page=page)
-                                solution = await solver.detect_and_solve_captcha(page)
-                                if solution.get("solved"):
-                                    injected = await solver.inject_captcha_solution(page, solution)
-                                    if injected:
-                                        ultra_safe_log_print("   ✅ CAPTCHA solved")
-                                        await asyncio.sleep(2)
-                            except:
-                                pass
+                                # Validate page is still open
+                                if page.is_closed():
+                                    ultra_safe_log_print("   ⚠️  Page is closed, skipping final CAPTCHA attempt")
+                                else:
+                                    solver = LocalCaptchaSolver(page=page)
+                                    # Set a very short timeout (3 seconds max) for final attempt
+                                    try:
+                                        solution = await asyncio.wait_for(
+                                            solver.detect_and_solve_captcha(page),
+                                            timeout=3.0
+                                        )
+                                        if solution and solution.get("solved"):
+                                            if not page.is_closed():
+                                                injected = await solver.inject_captcha_solution(page, solution)
+                                                if injected:
+                                                    ultra_safe_log_print("   ✅ CAPTCHA solved")
+                                                    await asyncio.sleep(2)
+                                    except asyncio.TimeoutError:
+                                        ultra_safe_log_print("   ⚠️  Final CAPTCHA attempt timed out (3s), proceeding with submission")
+                                    except Exception as final_error:
+                                        try:
+                                            if page.is_closed():
+                                                ultra_safe_log_print("   ⚠️  Page closed during final CAPTCHA attempt")
+                                            else:
+                                                ultra_safe_log_print(f"   ⚠️  Final CAPTCHA attempt failed: {str(final_error)[:50]}")
+                                        except:
+                                            pass
+                            except Exception as e:
+                                ultra_safe_log_print(f"   ⚠️  Final CAPTCHA attempt error: {str(e)[:50]}")
+                                ultra_safe_log_print("   ℹ️  Proceeding with form submission anyway")
                     
-                    # Don't clear - we want to track the POST/GET
-                    result["submission_attempted"] = True
-                    result["method_used"] = "button_click"
-                    ultra_safe_log_print("   📤 Submitting form...")
+                    # Get the target form element (skip search forms)
+                    target_form_element = None
+                    if target_form is not None:
+                        # Get the specific form by index
+                        target_form_element = await page.evaluate(f"""
+                            () => {{
+                                const allForms = Array.from(document.querySelectorAll('form'));
+                                const searchForms = allForms.filter((form, index) => {{
+                                    const method = (form.method || 'get').toLowerCase();
+                                    const role = form.getAttribute('role') || '';
+                                    const formText = form.textContent.toLowerCase();
+                                    const formId = (form.id || '').toLowerCase();
+                                    const formClass = (form.className || '').toLowerCase();
+                                    const action = form.action || '';
+                                    
+                                    return role === 'search' || (method === 'get' && (
+                                        formText.includes('search') ||
+                                        formId.includes('search') ||
+                                        formClass.includes('search') ||
+                                        action.includes('search') ||
+                                        form.querySelector('input[type="search"]') ||
+                                        form.querySelector('input[name*="search"]') ||
+                                        form.querySelector('input[name*="q"]') ||
+                                        form.querySelector('input[name="s"]')
+                                    ));
+                                }});
+                                
+                                // Filter out search forms
+                                const nonSearchForms = allForms.filter((form, index) => {{
+                                    const method = (form.method || 'get').toLowerCase();
+                                    const role = form.getAttribute('role') || '';
+                                    const formText = form.textContent.toLowerCase();
+                                    const formId = (form.id || '').toLowerCase();
+                                    const formClass = (form.className || '').toLowerCase();
+                                    const action = form.action || '';
+                                    
+                                    const isSearch = role === 'search' || (method === 'get' && (
+                                        formText.includes('search') ||
+                                        formId.includes('search') ||
+                                        formClass.includes('search') ||
+                                        action.includes('search') ||
+                                        form.querySelector('input[type="search"]') ||
+                                        form.querySelector('input[name*="search"]') ||
+                                        form.querySelector('input[name*="q"]') ||
+                                        form.querySelector('input[name="s"]')
+                                    ));
+                                    
+                                    return !isSearch;
+                                }});
+                                
+                                if (nonSearchForms.length > {target_form}) {{
+                                    return nonSearchForms[{target_form}];
+                                }}
+                                return null;
+                            }}
+                        """)
+                    
+                    # Check if this is WPForms with AJAX - submit via AJAX instead
+                    wpforms_ajax_check = await page.evaluate("""
+                        () => {
+                            if (window.__wpformsData && window.__wpformsData.is_wpforms && window.__wpformsData.uses_ajax) {
+                                return {
+                                    is_wpforms_ajax: true,
+                                    ajax_url: window.__wpformsData.ajax_url || '/wp-admin/admin-ajax.php'
+                                };
+                            }
+                            return { is_wpforms_ajax: false };
+                        }
+                    """)
+                    
+                    if wpforms_ajax_check.get('is_wpforms_ajax'):
+                        ultra_safe_log_print("   🔑 WPForms AJAX detected - submitting via AJAX endpoint")
+                        ajax_url = wpforms_ajax_check.get('ajax_url', '/wp-admin/admin-ajax.php')
+                        
+                        # Build absolute URL
+                        from urllib.parse import urljoin
+                        absolute_ajax_url = urljoin(page.url, ajax_url)
+                        ultra_safe_log_print(f"   📤 AJAX URL: {absolute_ajax_url}")
+                        
+                        # Submit via AJAX using fetch
+                        ajax_result = await page.evaluate("""
+                            async (ajaxUrl) => {
+                                try {
+                                    const form = document.querySelector('form.wpforms-form, form[data-formid]');
+                                    if (!form) {
+                                        return { success: false, error: 'Form not found' };
+                                    }
+                                    
+                                    // Build FormData from form
+                                    const formData = new FormData(form);
+                                    
+                                    // Ensure all WPForms fields are included
+                                    if (window.__wpformsData) {
+                                        const wpforms = window.__wpformsData;
+                                        if (wpforms.token) {
+                                            formData.set('wpforms[token]', wpforms.token);
+                                        }
+                                        if (wpforms.start_timestamp) {
+                                            formData.set('start_timestamp', wpforms.start_timestamp.toString());
+                                        }
+                                        if (wpforms.end_timestamp) {
+                                            formData.set('end_timestamp', wpforms.end_timestamp.toString());
+                                        }
+                                        if (wpforms.form_id) {
+                                            formData.set('wpforms[id]', wpforms.form_id);
+                                        }
+                                        formData.set('wpforms[submit]', 'wpforms-submit');
+                                        formData.set('action', 'wpforms_submit');
+                                    }
+                                    
+                                    // Submit via fetch
+                                    const response = await fetch(ajaxUrl, {
+                                        method: 'POST',
+                                        body: formData,
+                                        credentials: 'same-origin'
+                                    });
+                                    
+                                    const responseText = await response.text();
+                                    
+                                    return {
+                                        success: response.ok,
+                                        status: response.status,
+                                        response: responseText.substring(0, 500)
+                                    };
+                                } catch (e) {
+                                    return { success: false, error: e.message };
+                                }
+                            }
+                        """, absolute_ajax_url)
+                        
+                        if ajax_result.get('success'):
+                            ultra_safe_log_print(f"   ✅ WPForms AJAX submission successful: {ajax_result.get('status')}")
+                            result["submission_attempted"] = True
+                            result["submission_success"] = True
+                            result["method_used"] = "wpforms_ajax"
+                            result["form_submission_detected"] = True
+                        else:
+                            ultra_safe_log_print(f"   ⚠️  WPForms AJAX submission failed: {ajax_result.get('error', 'Unknown error')}")
+                            # Fall through to regular button click
+                            result["submission_attempted"] = True
+                            result["method_used"] = "button_click"
+                            ultra_safe_log_print("   📤 Falling back to button click...")
+                    else:
+                        # Don't clear - we want to track the POST/GET
+                        result["submission_attempted"] = True
+                        result["method_used"] = "button_click"
+                        ultra_safe_log_print("   📤 Submitting form...")
+                        
+                        # Always click submit button at least once, even if CAPTCHA solving failed
+                        try:
+                            # Find submit button in the target form (skip search forms)
+                            submit_button = None
+                            if target_form is not None:
+                                # Build selector for the target form
+                                form_selector = await page.evaluate(f"""
+                                    () => {{
+                                        const allForms = Array.from(document.querySelectorAll('form'));
+                                        const nonSearchForms = allForms.filter((f) => {{
+                                            const method = (f.method || 'get').toLowerCase();
+                                            const role = f.getAttribute('role') || '';
+                                            const formText = f.textContent.toLowerCase();
+                                            const formId = (f.id || '').toLowerCase();
+                                            const formClass = (f.className || '').toLowerCase();
+                                            const action = f.action || '';
+                                            
+                                            const isSearch = role === 'search' || (method === 'get' && (
+                                                formText.includes('search') ||
+                                                formId.includes('search') ||
+                                                formClass.includes('search') ||
+                                                action.includes('search') ||
+                                                f.querySelector('input[type="search"]') ||
+                                                f.querySelector('input[name*="search"]') ||
+                                                f.querySelector('input[name*="q"]') ||
+                                                f.querySelector('input[name="s"]')
+                                            ));
+                                            
+                                            return !isSearch;
+                                        }});
+                                        
+                                        if (nonSearchForms.length > {target_form}) {{
+                                            const targetForm = nonSearchForms[{target_form}];
+                                            if (targetForm.id) {{
+                                                return `#${{targetForm.id}} button[type="submit"], #${{targetForm.id}} input[type="submit"]`;
+                                            }} else if (targetForm.className) {{
+                                                const classes = targetForm.className.split(' ').filter(c => c).join('.');
+                                                return `form.${{classes}} button[type="submit"], form.${{classes}} input[type="submit"]`;
+                                            }} else {{
+                                                const formIndex = Array.from(document.querySelectorAll('form')).indexOf(targetForm);
+                                                return `form:nth-of-type(${{formIndex + 1}}) button[type="submit"], form:nth-of-type(${{formIndex + 1}}) input[type="submit"]`;
+                                            }}
+                                        }}
+                                        return null;
+                                    }}
+                                """)
+                                
+                                if form_selector:
+                                    submit_button = await page.query_selector(form_selector)
+                            
+                            # If still no button found, try to find any submit button (but skip search forms)
+                            if not submit_button:
+                                submit_button = await page.query_selector('form:not([role="search"]) button[type="submit"], form:not([role="search"]) input[type="submit"], button:has-text("Submit"), button:has-text("Send")')
+                            
+                            # If still no button found, try to find any submit button
+                            if not submit_button:
+                                submit_button = await page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Send"), form button:not([type="button"])')
+                            
+                            if submit_button:
+                                ultra_safe_log_print("   ✅ Submit button found, clicking...")
+                                try:
+                                    await submit_button.click(timeout=10000)
+                                    ultra_safe_log_print("   ✅ Submit button clicked")
+                                    result["submission_attempted"] = True
+                                    await asyncio.sleep(2)  # Wait for submission to process
+                                except Exception as click_error:
+                                    ultra_safe_log_print(f"   ⚠️  Submit button click failed: {str(click_error)[:50]}")
+                                    # Try JavaScript click as fallback
+                                    try:
+                                        await submit_button.evaluate("(btn) => btn.click()")
+                                        ultra_safe_log_print("   ✅ Submit button clicked via JavaScript")
+                                        result["submission_attempted"] = True
+                                        await asyncio.sleep(2)
+                                    except:
+                                        ultra_safe_log_print("   ⚠️  JavaScript click also failed")
+                            else:
+                                ultra_safe_log_print("   ⚠️  Submit button not found, trying form.submit()...")
+                                # Fallback to form.submit()
+                                try:
+                                    await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
+                                    ultra_safe_log_print("   ✅ Form submitted via form.submit()")
+                                    result["submission_attempted"] = True
+                                    await asyncio.sleep(2)
+                                except Exception as submit_error:
+                                    ultra_safe_log_print(f"   ⚠️  form.submit() failed: {str(submit_error)[:50]}")
+                        except Exception as e:
+                            ultra_safe_log_print(f"   ⚠️  Form submission error: {str(e)[:50]}")
+                            result["submission_attempted"] = True  # Mark as attempted even if it failed
                     
                     # For GET forms, ensure all fields have names and construct URL if needed
                     if form_method == "GET" or form_method == "get":
@@ -3978,7 +5261,11 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
         for req in post_requests:
             url_lower = req['url'].lower()
             excluded = ['google-analytics', 'googletagmanager', 'clarity', 'facebook', 'twitter', 'doubleclick', 'getnitropack']
-            if not any(ex in url_lower for ex in excluded):
+            # Also exclude CSS/JS files and other resources
+            excluded_extensions = ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2', '.ttf', '.eot', '.ico', '.map']
+            excluded_paths = ['wp-includes', 'wp-content', '/static/', '/assets/', '/css/', '/js/', '/wp-json/', '/api/', '/dist/', '/build/']
+            is_excluded_resource = any(ext in url_lower for ext in excluded_extensions) or any(path in url_lower for path in excluded_paths)
+            if not any(ex in url_lower for ex in excluded) and not is_excluded_resource:
                 # Check if URL matches form domain
                 try:
                     from urllib.parse import urlparse
@@ -4263,6 +5550,8 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         # Step 3: Navigate to URL (cannot fail)
         ultra_safe_log_print(f"🌐 Navigating to URL: {url}")
+        # Track form load timestamp for WPForms
+        form_load_timestamp = time.time()
         navigation_success = await playwright_manager.navigate(url)
         
         try:
@@ -4290,6 +5579,22 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             lambda: playwright_manager.page.url,
             default_return=url
         )
+        
+        # Extract WPForms fields right after navigation (to get form load timestamp)
+        wpforms_data = {}
+        try:
+            wpforms_data = await extract_wpforms_fields(playwright_manager.page, form_load_timestamp)
+            if wpforms_data.get('is_wpforms'):
+                ultra_safe_log_print("🔑 WPForms detected - extracted form fields")
+                if wpforms_data.get('token'):
+                    ultra_safe_log_print(f"   🔑 Token: {wpforms_data['token'][:20]}...")
+                if wpforms_data.get('form_id'):
+                    ultra_safe_log_print(f"   📋 Form ID: {wpforms_data['form_id']}")
+                if wpforms_data.get('start_timestamp'):
+                    ultra_safe_log_print(f"   ⏰ Start timestamp: {wpforms_data['start_timestamp']}")
+                result["wpforms_data"] = wpforms_data
+        except Exception as e:
+            ultra_safe_log_print(f"   ⚠️  Could not extract WPForms fields: {str(e)[:50]}")
         
         # Step 3.5: Handle banners, popups, and cookie consent (CRITICAL - must be done before form interaction)
         ultra_safe_log_print("")
@@ -4463,9 +5768,187 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             pass
         
         ultra_safe_log_print("🔐 Checking for CAPTCHAs (using LOCAL solver)...")
-        captcha_result = await playwright_manager.handle_captchas()
-        result["captcha_result"] = captcha_result
-        result["steps_completed"].append("captcha_handled")
+        
+        # First, do a quick check to see if CAPTCHA is actually present
+        quick_captcha_check = await playwright_manager.page.evaluate("""
+            () => {
+                // Quick strict check for actual CAPTCHA widgets
+                const hasRecaptcha = document.querySelector('.g-recaptcha[data-sitekey]') || 
+                                     document.querySelector('textarea[name="g-recaptcha-response"]');
+                const hasHcaptcha = document.querySelector('.h-captcha[data-sitekey]') || 
+                                    document.querySelector('textarea[name="h-captcha-response"]');
+                const hasHashcash = document.querySelector('button[data-rsfp-hashcash], button[data-hashcash-level]');
+                
+                return {
+                    has_captcha: !!(hasRecaptcha || hasHcaptcha || hasHashcash),
+                    has_recaptcha: !!hasRecaptcha,
+                    has_hcaptcha: !!hasHcaptcha,
+                    has_hashcash: !!hasHashcash
+                };
+            }
+        """)
+        
+        if not quick_captcha_check.get('has_captcha'):
+            ultra_safe_log_print("ℹ️  No CAPTCHA detected on page - skipping CAPTCHA handling")
+            captcha_result = {
+                "captchas_detected": 0,
+                "captchas_solved": 0,
+                "solutions": []
+            }
+            result["captcha_result"] = captcha_result
+            result["steps_completed"].append("captcha_handled")
+        else:
+            # CAPTCHA detected, proceed with handling
+            ultra_safe_log_print(f"🔐 CAPTCHA detected: reCAPTCHA={quick_captcha_check.get('has_recaptcha')}, hCaptcha={quick_captcha_check.get('has_hcaptcha')}, Hashcash={quick_captcha_check.get('has_hashcash')}")
+        
+        # Check for rate limit error in reCAPTCHA challenge iframe BEFORE attempting to solve
+        try:
+            rate_limit_in_iframe = await playwright_manager.page.evaluate("""
+                () => {
+                    // Check for the specific HTML structure in challenge iframe
+                    // Look for: <div class="rc-doscaptcha-header-text">Try again later</div>
+                    const challengeIframes = document.querySelectorAll('iframe[title*="challenge"], iframe[src*="bframe"], iframe[src*="recaptcha/api2/bframe"]');
+                    for (const iframe of challengeIframes) {
+                        try {
+                            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                            if (iframeDoc) {
+                                // Check for the specific class structure
+                                const headerText = iframeDoc.querySelector('.rc-doscaptcha-header-text');
+                                if (headerText) {
+                                    const headerTextContent = headerText.textContent || headerText.innerText || '';
+                                    if (headerTextContent.toLowerCase().includes('try again later')) {
+                                        return true;
+                                    }
+                                }
+                                
+                                // Also check body text
+                                const bodyText = iframeDoc.querySelector('.rc-doscaptcha-body-text');
+                                if (bodyText) {
+                                    const bodyTextContent = bodyText.textContent || bodyText.innerText || '';
+                                    const bodyTextLower = bodyTextContent.toLowerCase();
+                                    if (bodyTextLower.includes('automated queries') || 
+                                        bodyTextLower.includes('can\'t process your request')) {
+                                        return true;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Cross-origin, try alternative
+                        }
+                    }
+                    
+                    // Also check page text
+                    const pageText = document.body.innerText || document.body.textContent || '';
+                    const errorMessages = [
+                        'Try again later',
+                        'automated queries',
+                        'can\'t process your request',
+                        'Your computer or network may be sending automated queries'
+                    ];
+                    const textLower = pageText.toLowerCase();
+                    return errorMessages.some(msg => textLower.includes(msg.toLowerCase()));
+                }
+            """)
+            if rate_limit_in_iframe:
+                ultra_safe_log_print("   ⚠️  reCAPTCHA rate limit error detected in challenge iframe")
+                ultra_safe_log_print("   🔄 Closing browser and restarting ENTIRE process from beginning...")
+                
+                # Close current browser session
+                try:
+                    await playwright_manager.cleanup()
+                    ultra_safe_log_print("   ✅ Browser closed")
+                except:
+                    pass
+                
+                # Wait before restarting
+                wait_time = 10
+                ultra_safe_log_print(f"   ⏳ Waiting {wait_time} seconds before restarting browser...")
+                await asyncio.sleep(wait_time)
+                
+                # Restart browser
+                ultra_safe_log_print("   🔄 Restarting browser...")
+                playwright_ready = await playwright_manager.start()
+                if playwright_ready:
+                    ultra_safe_log_print(f"   🌐 Navigating back to URL: {url}")
+                    nav_success = await playwright_manager.navigate(url)
+                    if nav_success:
+                        await asyncio.sleep(3)
+                        await handle_banners_and_popups(playwright_manager.page)
+                        ultra_safe_log_print("   ✅ Browser restarted, will restart from form finding...")
+                        # Return a special flag to restart the entire process
+                        raise Exception("RECAPTCHA_RATE_LIMIT_RESTART_FULL")
+        except Exception as e:
+            if "RECAPTCHA_RATE_LIMIT_RESTART_FULL" in str(e):
+                raise  # Re-raise to trigger full restart
+            pass  # Continue if check fails
+        
+        # Try to handle CAPTCHAs with retry on rate limit (only if CAPTCHA was detected)
+        if quick_captcha_check.get('has_captcha'):
+            max_captcha_retries = 2
+            captcha_result = None
+            for captcha_retry in range(max_captcha_retries):
+                try:
+                    captcha_result = await playwright_manager.handle_captchas()
+                    result["captcha_result"] = captcha_result
+                    result["steps_completed"].append("captcha_handled")
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    error_msg = str(e)
+                    if "RECAPTCHA_RATE_LIMIT" in error_msg or "rate limit" in error_msg.lower():
+                        ultra_safe_log_print(f"   ⚠️  reCAPTCHA rate limit detected (attempt {captcha_retry + 1}/{max_captcha_retries})")
+                        ultra_safe_log_print("   🔄 Closing browser and restarting to bypass rate limit...")
+                        
+                        # Close current browser session
+                        try:
+                            await playwright_manager.cleanup()
+                            ultra_safe_log_print("   ✅ Browser closed")
+                        except:
+                            pass
+                        
+                        # Wait before restarting (give Google time to reset)
+                        wait_time = 10 + (captcha_retry * 5)  # 10s, 15s, etc.
+                        ultra_safe_log_print(f"   ⏳ Waiting {wait_time} seconds before restarting browser...")
+                        await asyncio.sleep(wait_time)
+                        
+                        # Restart browser
+                        ultra_safe_log_print("   🔄 Restarting browser...")
+                        playwright_ready = await playwright_manager.start()
+                        if not playwright_ready:
+                            ultra_safe_log_print("   ❌ Failed to restart browser")
+                            break
+                        
+                        # Navigate back to the URL
+                        ultra_safe_log_print(f"   🌐 Navigating back to URL: {url}")
+                        nav_success = await playwright_manager.navigate(url)
+                        if not nav_success:
+                            ultra_safe_log_print("   ❌ Failed to navigate back to URL")
+                            break
+                        
+                        # Wait for page to load
+                        await asyncio.sleep(3)
+                        
+                        # Handle banners again after restart
+                        await handle_banners_and_popups(playwright_manager.page)
+                        
+                        ultra_safe_log_print("   ✅ Browser restarted, retrying CAPTCHA solving...")
+                        continue  # Retry CAPTCHA solving
+                    elif "RECAPTCHA_RATE_LIMIT_RESTART_FULL" in error_msg:
+                        # Full restart required - re-raise to trigger restart from beginning
+                        ultra_safe_log_print("   ⚠️  Full restart required due to rate limit")
+                        raise  # Re-raise to trigger full restart
+                    else:
+                        # Other error, just log and break
+                        ultra_safe_log_print(f"   ⚠️  CAPTCHA handling error: {error_msg[:100]}")
+                        break
+        
+            if captcha_result is None:
+                # Create empty result if all retries failed
+                captcha_result = {
+                    "captchas_detected": 0,
+                    "captchas_solved": 0,
+                    "solutions": []
+                }
+                result["captcha_result"] = captcha_result
         
         try:
             if heartbeat_file_path and heartbeat_file_path.exists():
@@ -4516,12 +5999,86 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         ultra_safe_log_print("🔐 STEP 5.5: Re-checking CAPTCHAs after form fill...")
         ultra_safe_log_print("-" * 80)
-        captcha_result_after = await playwright_manager.handle_captchas()
-        if captcha_result_after.get("captchas_solved", 0) > 0:
+        captcha_result_after = None
+        
+        # Quick check: Skip CAPTCHA re-check if page is already closed
+        page_valid_for_captcha = True
+        try:
+            if not playwright_manager.page:
+                page_valid_for_captcha = False
+                ultra_safe_log_print("⚠️  Page is None, skipping CAPTCHA re-check")
+            elif playwright_manager.page.is_closed():
+                page_valid_for_captcha = False
+                ultra_safe_log_print("⚠️  Page is closed, skipping CAPTCHA re-check")
+        except Exception as e:
+            page_valid_for_captcha = False
+            ultra_safe_log_print(f"⚠️  Cannot verify page status: {str(e)[:50]}")
+        
+        if not page_valid_for_captcha:
+            captcha_result_after = {
+                "captchas_detected": 0,
+                "captchas_solved": 0,
+                "solutions": []
+            }
+            ultra_safe_log_print("ℹ️  Skipping CAPTCHA re-check, proceeding to form submission")
+        else:
+            # Set a timeout for CAPTCHA re-check to prevent hanging
+            try:
+                captcha_result_after = await asyncio.wait_for(
+                    playwright_manager.handle_captchas(),
+                    timeout=30.0  # Max 30 seconds for CAPTCHA re-check
+                )
+            except asyncio.TimeoutError:
+                ultra_safe_log_print("⚠️  CAPTCHA re-check timed out (30s), proceeding to form submission")
+                captcha_result_after = {
+                    "captchas_detected": 0,
+                    "captchas_solved": 0,
+                    "solutions": []
+                }
+            except Exception as e:
+                error_msg = str(e)
+                ultra_safe_log_print(f"⚠️  CAPTCHA re-check error: {error_msg[:50]}")
+                # Check if page closed during CAPTCHA handling
+                try:
+                    if playwright_manager.page and playwright_manager.page.is_closed():
+                        ultra_safe_log_print("⚠️  Page closed during CAPTCHA re-check")
+                    else:
+                        ultra_safe_log_print("ℹ️  CAPTCHA re-check failed but page is still open, proceeding to submission")
+                except:
+                    pass
+                captcha_result_after = {
+                    "captchas_detected": 0,
+                    "captchas_solved": 0,
+                    "solutions": []
+                }
+        
+        if captcha_result_after and captcha_result_after.get("captchas_solved", 0) > 0:
             ultra_safe_log_print(f"✅ CAPTCHA solved after form fill: {captcha_result_after.get('captchas_solved')} solved")
-            result["captcha_result"] = captcha_result_after
+            # Aggregate CAPTCHA counts instead of replacing
+            if "captcha_result" in result:
+                result["captcha_result"]["captchas_solved"] = result["captcha_result"].get("captchas_solved", 0) + captcha_result_after.get("captchas_solved", 0)
+                result["captcha_result"]["captchas_detected"] = max(
+                    result["captcha_result"].get("captchas_detected", 0),
+                    captcha_result_after.get("captchas_detected", 0)
+                )
+                if captcha_result_after.get("solutions"):
+                    result["captcha_result"]["solutions"].extend(captcha_result_after.get("solutions", []))
+            else:
+                result["captcha_result"] = captcha_result_after
         else:
             ultra_safe_log_print("ℹ️  No additional CAPTCHAs found after form fill")
+        
+        # Validate page is still open before proceeding to submission
+        try:
+            if not playwright_manager.page:
+                ultra_safe_log_print("⚠️  Page is None after CAPTCHA re-check")
+            elif playwright_manager.page.is_closed():
+                ultra_safe_log_print("⚠️  Page closed after CAPTCHA re-check - cannot proceed to submission")
+            else:
+                ultra_safe_log_print("✅ Page is still open, proceeding to form submission")
+        except Exception as e:
+            ultra_safe_log_print(f"⚠️  Error checking page status: {str(e)[:50]}")
+        
         ultra_safe_log_print("")
         
         # Step 6: Form submission (cannot fail)
@@ -4534,11 +6091,226 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         except:
             pass
         
+                # Extract and inject WPForms fields before submission
+        try:
+            # Re-extract WPForms fields to get updated end_timestamp
+            # Use form_load_timestamp from earlier in the function (captured at navigation)
+            wpforms_data = await extract_wpforms_fields(playwright_manager.page, form_load_timestamp)
+            
+            if wpforms_data.get('is_wpforms'):
+                ultra_safe_log_print("🔑 WPForms detected - preparing form submission")
+                
+                # Update end_timestamp to current time
+                wpforms_data['end_timestamp'] = int(time.time())
+                
+                # Inject all WPForms fields into the form DOM
+                injection_success = await inject_wpforms_fields(playwright_manager.page, wpforms_data)
+                
+                # Also store WPForms data in JavaScript global for AJAX interception
+                # And intercept WPForms submit handler directly
+                await playwright_manager.page.evaluate("""
+                    (wpformsData) => {
+                        window.__wpformsData = wpformsData;
+                        
+                        // Intercept WPForms submit handler if it exists
+                        if (window.wpforms && window.wpforms.submitForm) {
+                            const originalSubmit = window.wpforms.submitForm;
+                            window.wpforms.submitForm = function(formId, $form) {
+                                // Inject WPForms fields before submission
+                                const form = $form && $form[0] ? $form[0] : document.querySelector('form[data-formid="' + formId + '"]');
+                                if (form) {
+                                    // Ensure all WPForms fields are in the form
+                                    if (wpformsData.token) {
+                                        let tokenInput = form.querySelector('input[name="wpforms[token]"]');
+                                        if (!tokenInput) {
+                                            tokenInput = document.createElement('input');
+                                            tokenInput.type = 'hidden';
+                                            tokenInput.name = 'wpforms[token]';
+                                            form.appendChild(tokenInput);
+                                        }
+                                        tokenInput.value = wpformsData.token;
+                                    }
+                                    if (wpformsData.start_timestamp) {
+                                        let startInput = form.querySelector('input[name="start_timestamp"]');
+                                        if (!startInput) {
+                                            startInput = document.createElement('input');
+                                            startInput.type = 'hidden';
+                                            startInput.name = 'start_timestamp';
+                                            form.appendChild(startInput);
+                                        }
+                                        startInput.value = wpformsData.start_timestamp.toString();
+                                    }
+                                    if (wpformsData.end_timestamp) {
+                                        let endInput = form.querySelector('input[name="end_timestamp"]');
+                                        if (!endInput) {
+                                            endInput = document.createElement('input');
+                                            endInput.type = 'hidden';
+                                            endInput.name = 'end_timestamp';
+                                            form.appendChild(endInput);
+                                        }
+                                        endInput.value = wpformsData.end_timestamp.toString();
+                                    }
+                                    if (wpformsData.form_id) {
+                                        let formIdInput = form.querySelector('input[name="wpforms[id]"]');
+                                        if (!formIdInput) {
+                                            formIdInput = document.createElement('input');
+                                            formIdInput.type = 'hidden';
+                                            formIdInput.name = 'wpforms[id]';
+                                            form.appendChild(formIdInput);
+                                        }
+                                        formIdInput.value = wpformsData.form_id;
+                                    }
+                                    if (wpformsData.submit) {
+                                        let submitInput = form.querySelector('input[name="wpforms[submit]"]');
+                                        if (!submitInput) {
+                                            submitInput = document.createElement('input');
+                                            submitInput.type = 'hidden';
+                                            submitInput.name = 'wpforms[submit]';
+                                            form.appendChild(submitInput);
+                                        }
+                                        submitInput.value = wpformsData.submit;
+                                    }
+                                }
+                                return originalSubmit.apply(this, arguments);
+                            };
+                        }
+                        
+                        // Also intercept jQuery form submit if WPForms uses it
+                        if (window.jQuery && window.jQuery.fn) {
+                            const $ = window.jQuery;
+                            const originalSerialize = $.fn.serialize;
+                            $.fn.serialize = function() {
+                                const form = this[0];
+                                if (form && form.tagName === 'FORM' && form.classList.contains('wpforms-form')) {
+                                    // Ensure WPForms fields are in form before serialization
+                                    if (wpformsData.token) {
+                                        let tokenInput = form.querySelector('input[name="wpforms[token]"]');
+                                        if (!tokenInput) {
+                                            tokenInput = document.createElement('input');
+                                            tokenInput.type = 'hidden';
+                                            tokenInput.name = 'wpforms[token]';
+                                            form.appendChild(tokenInput);
+                                        }
+                                        tokenInput.value = wpformsData.token;
+                                    }
+                                    if (wpformsData.start_timestamp) {
+                                        let startInput = form.querySelector('input[name="start_timestamp"]');
+                                        if (!startInput) {
+                                            startInput = document.createElement('input');
+                                            startInput.type = 'hidden';
+                                            startInput.name = 'start_timestamp';
+                                            form.appendChild(startInput);
+                                        }
+                                        startInput.value = wpformsData.start_timestamp.toString();
+                                    }
+                                    if (wpformsData.end_timestamp) {
+                                        let endInput = form.querySelector('input[name="end_timestamp"]');
+                                        if (!endInput) {
+                                            endInput = document.createElement('input');
+                                            endInput.type = 'hidden';
+                                            endInput.name = 'end_timestamp';
+                                            form.appendChild(endInput);
+                                        }
+                                        endInput.value = wpformsData.end_timestamp.toString();
+                                    }
+                                }
+                                return originalSerialize.apply(this, arguments);
+                            };
+                        }
+                    }
+                """, wpforms_data)
+                
+                if injection_success:
+                    ultra_safe_log_print("   ✅ WPForms fields injected:")
+                    if wpforms_data.get('token'):
+                        ultra_safe_log_print(f"      🔑 wpforms[token]: {wpforms_data['token'][:20]}...")
+                    if wpforms_data.get('start_timestamp'):
+                        ultra_safe_log_print(f"      ⏰ start_timestamp: {wpforms_data['start_timestamp']}")
+                    if wpforms_data.get('end_timestamp'):
+                        ultra_safe_log_print(f"      ⏰ end_timestamp: {wpforms_data['end_timestamp']}")
+                    if wpforms_data.get('form_id'):
+                        ultra_safe_log_print(f"      📋 wpforms[id]: {wpforms_data['form_id']}")
+                    if wpforms_data.get('submit'):
+                        ultra_safe_log_print(f"      📤 wpforms[submit]: {wpforms_data['submit']}")
+                else:
+                    ultra_safe_log_print("   ⚠️  Failed to inject WPForms fields")
+            else:
+                ultra_safe_log_print("   ℹ️  Not a WPForms form (or WPForms not detected)")
+        except Exception as e:
+            ultra_safe_log_print(f"   ⚠️  Could not prepare WPForms fields: {str(e)[:50]}")
+        
         ultra_safe_log_print("📤 STEP 6: Submitting form...")
         ultra_safe_log_print("-" * 80)
-        submit_result = await ultra_simple_form_submit(playwright_manager.page)
-        result.update(submit_result)
-        result["steps_completed"].append("submission_attempted")
+        
+        # Ensure form submission happens even if CAPTCHA solving failed
+        # Validate page is still open before submission
+        page_valid = True
+        try:
+            if not playwright_manager.page:
+                page_valid = False
+                ultra_safe_log_print("⚠️  Page is None, cannot submit form")
+            elif playwright_manager.page.is_closed():
+                page_valid = False
+                ultra_safe_log_print("⚠️  Page is closed, cannot submit form")
+        except Exception as e:
+            ultra_safe_log_print(f"⚠️  Cannot verify page status: {str(e)[:50]}")
+            page_valid = False
+        
+        if not page_valid:
+            ultra_safe_log_print("⚠️  Cannot submit form - page is not available")
+            result["submission_attempted"] = False
+            result["submission_success"] = False
+            result["error"] = "Page closed or unavailable"
+        else:
+            # Always attempt submission at least once, even if CAPTCHA solving failed
+            ultra_safe_log_print("🔄 Attempting form submission (will proceed even if CAPTCHA solving failed)...")
+            
+            # First, try the normal submission flow with timeout
+            submit_result = None
+            try:
+                submit_result = await asyncio.wait_for(
+                    ultra_simple_form_submit(playwright_manager.page),
+                    timeout=30.0  # 30 second timeout for submission
+                )
+                result.update(submit_result)
+                result["steps_completed"].append("submission_attempted")
+                ultra_safe_log_print(f"✅ Form submission attempted: {submit_result.get('submission_attempted', False)}")
+            except asyncio.TimeoutError:
+                ultra_safe_log_print("⚠️  Form submission timed out (30s), trying direct button click...")
+                submit_result = {"submission_attempted": False}
+            except Exception as e:
+                error_msg = str(e)
+                ultra_safe_log_print(f"⚠️  Form submission error: {error_msg[:50]}")
+                submit_result = {"submission_attempted": False}
+            
+            # If submission wasn't attempted, try direct button click
+            if not submit_result or not submit_result.get("submission_attempted"):
+                ultra_safe_log_print("   ⚠️  Normal submission didn't work, trying direct button click...")
+                try:
+                    # Validate page is still open
+                    if playwright_manager.page and not playwright_manager.page.is_closed():
+                        submit_button = await playwright_manager.page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Send"), form button:not([type="button"])')
+                        if submit_button:
+                            ultra_safe_log_print("   ✅ Submit button found, clicking...")
+                            await submit_button.click(timeout=10000)
+                            ultra_safe_log_print("   ✅ Submit button clicked directly")
+                            result["submission_attempted"] = True
+                            await asyncio.sleep(2)
+                        else:
+                            ultra_safe_log_print("   ⚠️  Submit button not found, trying form.submit()...")
+                            # Try form.submit() as last resort
+                            await playwright_manager.page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
+                            ultra_safe_log_print("   ✅ Form submitted via form.submit()")
+                            result["submission_attempted"] = True
+                            await asyncio.sleep(2)
+                    else:
+                        ultra_safe_log_print("   ⚠️  Page is closed, cannot click submit button")
+                except Exception as e:
+                    ultra_safe_log_print(f"   ⚠️  Direct submission attempt failed: {str(e)[:50]}")
+                    # Still mark as attempted
+                    result["submission_attempted"] = True
+                    result["submission_success"] = False
+                    result["error"] = str(e)[:100]
         
         try:
             if heartbeat_file_path and heartbeat_file_path.exists():
@@ -4756,6 +6528,30 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                     os.fsync(f.fileno())
         except:
             pass
+        
+        # Check if we're in the middle of CAPTCHA solving before cleanup
+        try:
+            is_solving_captcha = await playwright_manager.page.evaluate("""
+                () => {
+                    // Check if CAPTCHA challenge iframe is still present
+                    const challengeIframes = document.querySelectorAll('iframe[title*="challenge"], iframe[src*="bframe"]');
+                    if (challengeIframes.length > 0) {
+                        return true;
+                    }
+                    // Check if we're waiting for token
+                    const recaptchaResponse = document.querySelector('#g-recaptcha-response');
+                    if (recaptchaResponse && (!recaptchaResponse.value || recaptchaResponse.value.length < 20)) {
+                        return true; // Still waiting for token
+                    }
+                    return false;
+                }
+            """) if playwright_manager.page and not playwright_manager.page.is_closed() else False
+        except:
+            is_solving_captcha = False
+        
+        if is_solving_captcha:
+            ultra_safe_log_print("⚠️  CAPTCHA solving still in progress, waiting a bit longer before cleanup...")
+            await asyncio.sleep(5)  # Give it a bit more time
         
         ultra_safe_log_print("🔒 Cleaning up resources...")
         await UltimateSafetyWrapper.execute_async(
@@ -5037,10 +6833,28 @@ async def main_async_with_ultimate_safety(args: argparse.Namespace) -> str:
         except:
             pass
         
-        result = await asyncio.wait_for(
-            run_ultra_resilient_submission(url, template_path),
-            timeout=timeout
-        )
+        # Wrap in retry loop for rate limit errors - restart entire process
+        max_restarts = 2
+        result = None
+        for restart_attempt in range(max_restarts + 1):
+            try:
+                result = await asyncio.wait_for(
+                    run_ultra_resilient_submission(url, template_path),
+                    timeout=timeout
+                )
+                break  # Success, exit retry loop
+            except Exception as e:
+                error_msg = str(e)
+                if "RECAPTCHA_RATE_LIMIT_RESTART_FULL" in error_msg and restart_attempt < max_restarts:
+                    ultra_safe_log_print(f"   ⚠️  Rate limit detected, restarting entire process (attempt {restart_attempt + 1}/{max_restarts + 1})")
+                    wait_time = 10 + (restart_attempt * 5)  # 10s, 15s, etc.
+                    ultra_safe_log_print(f"   ⏳ Waiting {wait_time} seconds before full restart...")
+                    await asyncio.sleep(wait_time)
+                    ultra_safe_log_print("   🔄 Restarting from beginning (form finding, CAPTCHA clicking, etc.)...")
+                    continue  # Retry from beginning
+                else:
+                    # Other error or max retries reached, re-raise
+                    raise
         
         # Update heartbeat - submission completed
         try:

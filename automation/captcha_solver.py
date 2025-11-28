@@ -177,6 +177,15 @@ class UltimateLocalCaptchaSolver:
             except asyncio.TimeoutError:
                 safe_log_print(f"⚠️  reCAPTCHA solving timeout after {self.max_wait_time} seconds")
                 return create_fallback_result(f"Local reCAPTCHA solving timeout after {self.max_wait_time}s", self.solver_name)
+            except Exception as e:
+                # Check if it's a rate limit error - re-raise it
+                error_msg = str(e)
+                if "RECAPTCHA_RATE_LIMIT" in error_msg:
+                    safe_log_print("   ⚠️  reCAPTCHA rate limit error detected - will trigger browser restart")
+                    raise  # Re-raise to trigger browser restart
+                # Other errors, continue with fallback
+                safe_log_print(f"⚠️  reCAPTCHA solving error: {error_msg[:100]}")
+                raise  # Re-raise to be handled by caller
             
             # Verify token is actually in the page before returning success
             if token:
@@ -215,7 +224,12 @@ class UltimateLocalCaptchaSolver:
             return result
             
         except Exception as e:
-            error_msg = f"Local reCAPTCHA catastrophic error: {str(e)[:200]}"
+            error_msg = str(e)
+            # Check if it's a rate limit error - re-raise it to trigger browser restart
+            if "RECAPTCHA_RATE_LIMIT" in error_msg:
+                safe_log_print("   ⚠️  reCAPTCHA rate limit error - re-raising to trigger browser restart")
+                raise  # Re-raise to trigger browser restart in handle_captchas
+            error_msg = f"Local reCAPTCHA catastrophic error: {error_msg[:200]}"
             safe_log_print(f"💥 {error_msg}")
             return create_fallback_result(error_msg, self.solver_name)
     
@@ -264,16 +278,103 @@ class UltimateLocalCaptchaSolver:
             safe_log_print(f"💥 {error_msg}")
             return create_fallback_result(error_msg, self.solver_name)
     
+    async def _check_recaptcha_rate_limit_error(self) -> bool:
+        """Check if reCAPTCHA is showing rate limit error (Try again later) in the challenge iframe."""
+        try:
+            if not self.page:
+                return False
+            
+            # Check if page is still valid before evaluating
+            try:
+                if self.page.is_closed():
+                    return False
+            except:
+                return False
+            
+            # Simplified rate limit check - avoid iframe access which causes syntax errors
+            # Just check page text for error messages
+            has_error = await self.page.evaluate("""
+                () => {
+                    try {
+                        // Check for rate limit error messages in page text
+                        const errorMessages = [
+                            'Try again later',
+                            'automated queries',
+                            'can\\'t process your request',
+                            'Your computer or network may be sending automated queries',
+                            'To protect our users'
+                        ];
+                        
+                        // Check page text
+                        const pageText = (document.body && (document.body.innerText || document.body.textContent)) || '';
+                        const pageTextLower = pageText.toLowerCase();
+                        for (let i = 0; i < errorMessages.length; i++) {
+                            const msg = errorMessages[i];
+                            if (pageTextLower.includes(msg.toLowerCase())) {
+                                return true;
+                            }
+                        }
+                        
+                        // Check for challenge iframe presence (but don't access content)
+                        const challengeIframes = document.querySelectorAll('iframe[title*="challenge"], iframe[src*="bframe"]');
+                        if (challengeIframes.length > 0) {
+                            // If challenge iframe exists, it might be a rate limit
+                            // But we can't access cross-origin content, so just return false
+                            // The actual rate limit will be detected when trying to interact
+                        }
+                        
+                        return false;
+                    } catch (e) {
+                        // If any error occurs, assume no rate limit (safer)
+                        return false;
+                    }
+                }
+            """)
+            
+            return has_error
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Error checking rate limit: {str(e)[:50]}")
+            return False
+    
     async def _solve_recaptcha_v2_comprehensive(self, site_key: str, page_url: str) -> Optional[str]:
         """Comprehensive reCAPTCHA v2 solving strategy with improved challenge detection."""
         try:
+            # Validate page is still open before starting
+            if not self.page:
+                safe_log_print("⚠️  Page not available for CAPTCHA solving")
+                return None
+            try:
+                if self.page.is_closed():
+                    safe_log_print("⚠️  Page is closed, cannot solve CAPTCHA")
+                    return None
+            except:
+                safe_log_print("⚠️  Cannot verify page status")
+                return None
+            
             safe_log_print("🔄 Starting comprehensive reCAPTCHA v2 solving...")
+            
+            # Check for rate limit error BEFORE attempting to solve
+            try:
+                rate_limit_detected = await self._check_recaptcha_rate_limit_error()
+            except Exception as e:
+                safe_log_print(f"   ⚠️  Error in rate limit check: {str(e)[:50]}")
+                rate_limit_detected = False
+            if rate_limit_detected:
+                safe_log_print("   ⚠️  reCAPTCHA rate limit detected: 'Try again later' error")
+                safe_log_print("   🔄 This requires browser restart - raising special error")
+                raise Exception("RECAPTCHA_RATE_LIMIT")
             
             # Strategy 1: Simple checkbox click (works for easy CAPTCHAs)
             safe_log_print("1. Attempting simple checkbox click...")
             token = await self._attempt_simple_checkbox()
             if token:
                 return token
+            
+            # Check for rate limit error after checkbox click
+            rate_limit_detected = await self._check_recaptcha_rate_limit_error()
+            if rate_limit_detected:
+                safe_log_print("   ⚠️  reCAPTCHA rate limit detected after checkbox click")
+                raise Exception("RECAPTCHA_RATE_LIMIT")
             
             # Check for challenge after checkbox click (wait longer with multiple attempts)
             safe_log_print("   1a. Checking for challenge after checkbox click (multiple attempts)...")
@@ -298,6 +399,12 @@ class UltimateLocalCaptchaSolver:
                     safe_log_print(f"   ⏳ No challenge detected yet (attempt {check_attempt + 1}/5)...")
             
             if challenge_iframe:
+                # Check for rate limit before attempting audio challenge
+                rate_limit_detected = await self._check_recaptcha_rate_limit_error()
+                if rate_limit_detected:
+                    safe_log_print("   ⚠️  reCAPTCHA rate limit detected before audio challenge")
+                    raise Exception("RECAPTCHA_RATE_LIMIT")
+                
                 safe_log_print("   🎧 Attempting to solve audio challenge...")
                 # Mark that we're in challenge mode
                 await self.page.evaluate("() => { window.__recaptchaInChallenge = true; }")
@@ -309,6 +416,12 @@ class UltimateLocalCaptchaSolver:
                 else:
                     await self.page.evaluate("() => { window.__recaptchaInChallenge = false; }")
                     safe_log_print("   ⚠️  Audio challenge solving failed, continuing with other strategies...")
+                    
+                    # Check for rate limit after audio challenge failure
+                    rate_limit_detected = await self._check_recaptcha_rate_limit_error()
+                    if rate_limit_detected:
+                        safe_log_print("   ⚠️  reCAPTCHA rate limit detected after audio challenge failure")
+                        raise Exception("RECAPTCHA_RATE_LIMIT")
             
             # Strategy 2: Find and interact with reCAPTCHA iframe
             safe_log_print("2. Searching for reCAPTCHA iframes...")
@@ -328,6 +441,12 @@ class UltimateLocalCaptchaSolver:
             
             challenge_iframe = await self._check_for_challenge_iframe()
             if challenge_iframe:
+                # Check for rate limit
+                rate_limit_detected = await self._check_recaptcha_rate_limit_error()
+                if rate_limit_detected:
+                    safe_log_print("   ⚠️  reCAPTCHA rate limit detected after iframe interaction")
+                    raise Exception("RECAPTCHA_RATE_LIMIT")
+                
                 safe_log_print("   ✅ Challenge iframe detected after iframe interaction!")
                 # Mark that we're in challenge mode
                 await self.page.evaluate("() => { window.__recaptchaInChallenge = true; }")
@@ -348,6 +467,12 @@ class UltimateLocalCaptchaSolver:
             await safe_async_sleep(3)
             challenge_iframe = await self._check_for_challenge_iframe()
             if challenge_iframe:
+                # Check for rate limit
+                rate_limit_detected = await self._check_recaptcha_rate_limit_error()
+                if rate_limit_detected:
+                    safe_log_print("   ⚠️  reCAPTCHA rate limit detected after JS triggers")
+                    raise Exception("RECAPTCHA_RATE_LIMIT")
+                
                 safe_log_print("   ✅ Challenge iframe detected after JS triggers!")
                 token = await self._handle_audio_challenge()
                 if token:
@@ -419,6 +544,15 @@ class UltimateLocalCaptchaSolver:
     async def _attempt_simple_checkbox(self) -> Optional[str]:
         """Attempt to solve by simply clicking the checkbox."""
         try:
+            # Validate page is still open
+            if not self.page:
+                return None
+            try:
+                if self.page.is_closed():
+                    return None
+            except:
+                return None
+            
             safe_log_print("🖱️  Looking for reCAPTCHA checkbox...")
             
             # Multiple selectors for reCAPTCHA checkbox
@@ -433,6 +567,9 @@ class UltimateLocalCaptchaSolver:
             
             for selector in recaptcha_selectors:
                 try:
+                    # Check page is still valid
+                    if self.page.is_closed():
+                        return None
                     element = await self.page.query_selector(selector)
                     if element:
                         safe_log_print(f"✅ Found reCAPTCHA element with selector: {selector}")
@@ -520,6 +657,15 @@ class UltimateLocalCaptchaSolver:
     async def _find_and_interact_recaptcha(self) -> Optional[str]:
         """Find reCAPTCHA iframes and interact with them."""
         try:
+            # Validate page is still open
+            if not self.page:
+                return None
+            try:
+                if self.page.is_closed():
+                    return None
+            except:
+                return None
+            
             # Look for all iframes that might contain reCAPTCHA
             iframes = await self.page.query_selector_all('iframe')
             safe_log_print(f"🔍 Found {len(iframes)} iframes, searching for reCAPTCHA...")
@@ -532,25 +678,71 @@ class UltimateLocalCaptchaSolver:
                     if any(term in src.lower() for term in ['recaptcha', 'google.com/recaptcha']):
                         safe_log_print("✅ Found reCAPTCHA iframe, attempting interaction...")
                         
-                        # Try to click the iframe
-                        await iframe.click()
-                        await safe_async_sleep(3)
+                        # Validate page is still open before interaction
+                        try:
+                            if self.page.is_closed():
+                                safe_log_print("⚠️  Page closed before iframe interaction")
+                                return None
+                        except:
+                            return None
                         
-                        # Check for token
-                        token = await self._get_recaptcha_token()
-                        if token:
-                            return token
+                        # Try to click the iframe
+                        try:
+                            await iframe.click(timeout=5000)
+                            await safe_async_sleep(3)
+                            
+                            # Validate page is still open after click
+                            try:
+                                if self.page.is_closed():
+                                    safe_log_print("⚠️  Page closed after iframe click")
+                                    return None
+                            except:
+                                return None
+                            
+                            # Check for token
+                            token = await self._get_recaptcha_token()
+                            if token:
+                                return token
+                        except Exception as click_error:
+                            safe_log_print(f"   ⚠️  Iframe click failed: {str(click_error)[:50]}")
                         
                         # Try to focus and press space/enter
-                        await iframe.focus()
-                        await self.page.keyboard.press('Space')
-                        await safe_async_sleep(2)
-                        
-                        token = await self._get_recaptcha_token()
-                        if token:
-                            return token
+                        try:
+                            # Validate page is still open
+                            try:
+                                if self.page.is_closed():
+                                    safe_log_print("⚠️  Page closed before keyboard interaction")
+                                    return None
+                            except:
+                                return None
                             
-                except Exception:
+                            await iframe.focus()
+                            await self.page.keyboard.press('Space')
+                            await safe_async_sleep(2)
+                            
+                            # Validate page is still open after keyboard
+                            try:
+                                if self.page.is_closed():
+                                    safe_log_print("⚠️  Page closed after keyboard interaction")
+                                    return None
+                            except:
+                                return None
+                            
+                            token = await self._get_recaptcha_token()
+                            if token:
+                                return token
+                        except Exception as keyboard_error:
+                            safe_log_print(f"   ⚠️  Keyboard interaction failed: {str(keyboard_error)[:50]}")
+                            
+                except Exception as e:
+                    safe_log_print(f"   ⚠️  Error processing iframe: {str(e)[:50]}")
+                    # Check if page is still open
+                    try:
+                        if self.page.is_closed():
+                            safe_log_print("⚠️  Page closed during iframe processing")
+                            return None
+                    except:
+                        return None
                     continue
             
             return None
@@ -637,19 +829,37 @@ class UltimateLocalCaptchaSolver:
                 }
                 """,
                 
-                # Try to find and click the recaptcha challenge
+                # Try to find and click the recaptcha challenge (avoid cross-origin errors)
                 """
                 () => {
-                    const frames = document.querySelectorAll('iframe');
-                    for (let frame of frames) {
-                        try {
-                            const src = frame.src || '';
-                            if (src.includes('recaptcha') && src.includes('anchor')) {
-                                frame.contentDocument.querySelector('#recaptcha-anchor')?.click();
+                    try {
+                        const frames = document.querySelectorAll('iframe');
+                        for (let i = 0; i < frames.length; i++) {
+                            try {
+                                const frame = frames[i];
+                                if (!frame) continue;
+                                const src = frame.src || '';
+                                if (src.includes('recaptcha') && src.includes('anchor')) {
+                                    try {
+                                        const frameDoc = frame.contentDocument;
+                                        if (frameDoc) {
+                                            const anchor = frameDoc.querySelector('#recaptcha-anchor');
+                                            if (anchor && anchor.click) {
+                                                anchor.click();
+                                            }
+                                        }
+                                    } catch(e) {
+                                        // Cross-origin, skip
+                                    }
+                                }
+                            } catch(e) {
+                                // Skip this frame
                             }
-                        } catch(e) {}
+                        }
+                        return true;
+                    } catch(e) {
+                        return false;
                     }
-                    return true;
                 }
                 """
             ]
@@ -760,6 +970,15 @@ class UltimateLocalCaptchaSolver:
     async def _check_for_challenge_iframe(self):
         """Check for challenge iframe with multiple selectors and wait strategies."""
         try:
+            # Validate page is still open
+            if not self.page:
+                return None
+            try:
+                if self.page.is_closed():
+                    return None
+            except:
+                return None
+            
             # Try multiple selectors
             selectors = [
                 'iframe[title*="challenge"]',
@@ -1051,54 +1270,58 @@ class UltimateLocalCaptchaSolver:
                 safe_log_print("   ⚠️  Could not submit audio answer after 5 attempts")
                 return None
             
-            # Step 4: Wait and check for token (multiple checks with longer waits)
+            # Step 4: Wait and check for token (optimized - check more frequently, shorter total wait)
             safe_log_print("   ⏳ Waiting for CAPTCHA token after audio challenge...")
-            for check_attempt in range(15):
-                await safe_async_sleep(3)  # Wait 3 seconds between checks
+            
+            # Wait a moment for the answer to be processed
+            await safe_async_sleep(2)
+            
+            # Check more frequently (every 1 second) but for shorter total time (20 seconds max)
+            max_checks = 20
+            check_interval = 1  # Check every 1 second
+            for check_attempt in range(max_checks):
+                await safe_async_sleep(check_interval)
                 
-                # Check if checkbox expired during wait
-                if await self._check_checkbox_expired():
-                    safe_log_print(f"   ⚠️  Checkbox expired during wait (check {check_attempt + 1}), clicking again...")
-                    clicked = await self._click_recaptcha_checkbox_again()
-                    if clicked:
-                        # Wait a bit and check if challenge appeared again
-                        await safe_async_sleep(5)
-                        challenge_iframe = await self._check_for_challenge_iframe()
-                        if challenge_iframe:
-                            safe_log_print("   🔄 Challenge appeared again, restarting audio challenge...")
-                            # Restart the audio challenge process
-                            frame = await challenge_iframe.content_frame()
-                            if frame:
-                                audio_switched = await self._switch_to_audio_challenge(frame)
-                                if audio_switched:
-                                    await safe_async_sleep(5)
-                                    # Retry audio solving
-                                    audio_text = await self._solve_audio_challenge(frame)
-                                    if audio_text:
-                                        submitted = await self._submit_audio_answer(frame, audio_text)
-                                        if submitted:
-                                            safe_log_print("   ✅ Audio challenge restarted and solved after checkbox re-click")
-                                            # Continue waiting for token
-                
+                # Check for token first (most common case)
                 token = await self._get_recaptcha_token()
                 if token:
                     # Verify it's not a fake token
                     is_fake = token.startswith('03AOLTBLR_') and len(token.split('_')) == 3
                     if not is_fake:
-                        safe_log_print(f"   ✅ Audio challenge solved successfully! Real token received (after {check_attempt + 1} checks)")
+                        safe_log_print(f"   ✅ Audio challenge solved successfully! Real token received (after {check_attempt + 1} seconds)")
                         return token
                     else:
-                        safe_log_print(f"   ⚠️  Token received but appears fake, continuing to wait...")
-                if check_attempt < 14:
-                    if check_attempt % 3 == 0:  # Log every 3rd check
-                        safe_log_print(f"   ⏳ Token not ready yet (check {check_attempt + 1}/15)...")
+                        # Fake token - continue waiting
+                        if check_attempt % 5 == 0:  # Log every 5 seconds
+                            safe_log_print(f"   ⏳ Token received but appears fake, continuing to wait... ({check_attempt + 1}s)")
+                
+                # Check if checkbox expired during wait (less frequently to save time)
+                if check_attempt > 0 and check_attempt % 5 == 0:  # Check every 5 seconds
+                    if await self._check_checkbox_expired():
+                        safe_log_print(f"   ⚠️  Checkbox expired during wait (check {check_attempt + 1}), clicking again...")
+                        clicked = await self._click_recaptcha_checkbox_again()
+                        if clicked:
+                            await safe_async_sleep(3)
+                            challenge_iframe = await self._check_for_challenge_iframe()
+                            if challenge_iframe:
+                                safe_log_print("   🔄 Challenge appeared again, but continuing to check for token...")
+                                # Don't restart - just continue checking for token
+                
+                # Log progress every 5 seconds
+                if check_attempt > 0 and check_attempt % 5 == 0:
+                    safe_log_print(f"   ⏳ Token not ready yet ({check_attempt + 1}/{max_checks} seconds)...")
             
-            safe_log_print("   ⚠️  Token not received after audio challenge submission (waited 45 seconds)")
-            # Final check
+            safe_log_print(f"   ⚠️  Token not received after audio challenge submission (waited {max_checks} seconds)")
+            # Final check with a bit more wait
+            await safe_async_sleep(2)
             token = await self._get_recaptcha_token()
             if token:
-                safe_log_print("   ✅ Token found on final check!")
-                return token
+                is_fake = token.startswith('03AOLTBLR_') and len(token.split('_')) == 3
+                if not is_fake:
+                    safe_log_print("   ✅ Token found on final check!")
+                    return token
+                else:
+                    safe_log_print("   ⚠️  Token found but appears fake")
             return None
             
         except Exception as e:
