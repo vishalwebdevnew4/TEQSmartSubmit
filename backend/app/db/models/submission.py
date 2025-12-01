@@ -26,14 +26,16 @@ class SubmissionLog(Base):
     __tablename__ = "submission_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    domain_id: Mapped[int] = mapped_column(ForeignKey("domains.id", ondelete="CASCADE"), nullable=False)
-    template_id: Mapped[Optional[int]] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"))
+    url: Mapped[str] = mapped_column(String(512), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=SubmissionStatus.PENDING)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    domain_id: Mapped[Optional[int]] = mapped_column(ForeignKey("domains.id", ondelete="SET NULL"), nullable=True)
+    template_id: Mapped[Optional[int]] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"), nullable=True)
+    admin_id: Mapped[Optional[int]] = mapped_column(ForeignKey("admins.id", ondelete="SET NULL"), nullable=True)
 
-    domain: Mapped["Domain"] = relationship("Domain", back_populates="submissions")
+    domain: Mapped[Optional["Domain"]] = relationship("Domain", back_populates="submissions")
     template: Mapped[Optional["Template"]] = relationship("Template", back_populates="submission_logs")
+    admin: Mapped[Optional["Admin"]] = relationship("Admin", back_populates="submissions")
 

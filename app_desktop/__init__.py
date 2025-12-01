@@ -1,0 +1,2 @@
+"""TEQSmartSubmit Desktop Application."""
+

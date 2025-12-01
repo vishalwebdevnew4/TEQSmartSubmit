@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
@@ -8,6 +9,7 @@ const geistSans = localFont({
   variable: "--font-geist-sans",
   weight: "100 900",
 });
+
 const geistMono = localFont({
   src: "./fonts/GeistMonoVF.woff",
   variable: "--font-geist-mono",
@@ -22,11 +24,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: {
+  children: ReactNode;
+}) {
   return (
     <html lang="en">
+      <head></head>
       <body className={`${geistSans.variable} ${geistMono.variable} bg-slate-950 text-slate-100 antialiased`}>
         <AuthProvider>{children}</AuthProvider>
       </body>

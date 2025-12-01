@@ -1,97 +1,95 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const format = searchParams.get("format") || "csv";
-    const status = searchParams.get("status");
-    const startDate = searchParams.get("startDate");
-    const endDate = searchParams.get("endDate");
-    const domainId = searchParams.get("domainId");
+export const dynamic = "force-dynamic";
 
-    const where: any = {};
-    if (status) where.status = status;
-    if (domainId) where.domainId = parseInt(domainId);
-    if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) {
-        const start = new Date(startDate);
-        // If it's just a date string (YYYY-MM-DD), set to start of day
-        if (startDate.split("T").length === 1) {
-          start.setHours(0, 0, 0, 0);
-        }
-        where.createdAt.gte = start;
-      }
-      if (endDate) {
-        const end = new Date(endDate);
-        // If it's just a date string (YYYY-MM-DD), set to end of day
-        if (endDate.split("T").length === 1) {
-          end.setHours(23, 59, 59, 999);
-        }
-        where.createdAt.lte = end;
-      }
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get("type") || "all";
+    const format = searchParams.get("format") || "json";
+
+    let data: any = {};
+
+    if (type === "all" || type === "businesses") {
+      data.businesses = await prisma.business.findMany({
+        include: {
+          deployments: true,
+          clients: true,
+          formSubmissions: true,
+        },
+      });
     }
 
-    const logs = await prisma.submissionLog.findMany({
-      where,
-      include: {
-        domain: {
-          select: {
-            url: true,
-          },
+    if (type === "all" || type === "deployments") {
+      data.deployments = await prisma.deploymentLog.findMany({
+        include: {
+          business: true,
+          templateVersion: true,
         },
-        template: {
-          select: {
-            name: true,
-          },
+      });
+    }
+
+    if (type === "all" || type === "clients") {
+      data.clients = await prisma.client.findMany({
+        include: {
+          business: true,
+          tracking: true,
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+      });
+    }
+
+    if (type === "all" || type === "submissions") {
+      data.submissions = await prisma.formSubmissionLog.findMany({
+        include: {
+          business: true,
+        },
+      });
+    }
 
     if (format === "csv") {
-      const csvHeaders = "ID,URL,Domain,Template,Status,Message,Created At,Finished At\n";
-      const csvRows = logs.map((log) => {
-        const escape = (str: string | null | undefined) => {
-          if (!str) return "";
-          return `"${String(str).replace(/"/g, '""')}"`;
-        };
-        return [
-          log.id,
-          escape(log.url),
-          escape(log.domain?.url || ""),
-          escape(log.template?.name || ""),
-          escape(log.status),
-          escape(log.message || ""),
-          escape(log.createdAt.toISOString()),
-          escape(log.finishedAt?.toISOString() || ""),
-        ].join(",");
-      });
-      const csv = csvHeaders + csvRows.join("\n");
-
+      // Convert to CSV
+      const csv = convertToCSV(data);
       return new NextResponse(csv, {
         headers: {
           "Content-Type": "text/csv",
-          "Content-Disposition": `attachment; filename="submission-logs-${new Date().toISOString().split("T")[0]}.csv"`,
+          "Content-Disposition": `attachment; filename="report-${Date.now()}.csv"`,
         },
       });
-    } else if (format === "json") {
-      return NextResponse.json(logs, {
-        headers: {
-          "Content-Disposition": `attachment; filename="submission-logs-${new Date().toISOString().split("T")[0]}.json"`,
-        },
-      });
-    } else {
-      return NextResponse.json({ detail: "Unsupported format. Use 'csv' or 'json'." }, { status: 400 });
     }
+
+    return NextResponse.json(data);
   } catch (error) {
+    console.error("Error exporting report:", error);
     return NextResponse.json(
-      { detail: (error as Error).message ?? "Unable to export logs." },
+      { error: "Failed to export report" },
       { status: 500 }
     );
   }
 }
 
+function convertToCSV(data: any): string {
+  // Simple CSV conversion
+  const lines: string[] = [];
+  
+  for (const [key, value] of Object.entries(data)) {
+    if (Array.isArray(value) && value.length > 0) {
+      lines.push(`\n=== ${key.toUpperCase()} ===\n`);
+      const headers = Object.keys(value[0]).join(",");
+      lines.push(headers);
+      
+      for (const item of value) {
+        const row = Object.values(item)
+          .map((v) => {
+            if (v === null || v === undefined) return "";
+            if (typeof v === "object") return JSON.stringify(v);
+            return String(v).replace(/,/g, ";");
+          })
+          .join(",");
+        lines.push(row);
+      }
+    }
+  }
+  
+  return lines.join("\n");
+}

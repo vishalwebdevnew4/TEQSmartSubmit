@@ -25,6 +25,9 @@ class Template(Base):
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
     domain_id: Mapped[Optional[int]] = mapped_column(ForeignKey("domains.id", ondelete="SET NULL"), nullable=True)
+    business_id: Mapped[Optional[int]] = mapped_column(ForeignKey("businesses.id", ondelete="SET NULL"), nullable=True)
 
     domain: Mapped[Optional["Domain"]] = relationship("Domain", back_populates="templates")
+    business: Mapped[Optional["Business"]] = relationship("Business", back_populates="templates")
     submission_logs: Mapped[List["SubmissionLog"]] = relationship("SubmissionLog", back_populates="template")
+    versions: Mapped[List["TemplateVersion"]] = relationship("TemplateVersion", back_populates="template", cascade="all, delete-orphan")

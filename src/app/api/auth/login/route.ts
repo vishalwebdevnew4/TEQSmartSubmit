@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.AUTH_JWT_SECRET ?? "change-me";
+const JWT_SECRET = process.env.JWT_SECRET || process.env.AUTH_JWT_SECRET || "change-me-in-production";
 const JWT_EXPIRES_IN = process.env.AUTH_JWT_EXPIRES ?? "1h";
 
 export async function POST(req: NextRequest) {

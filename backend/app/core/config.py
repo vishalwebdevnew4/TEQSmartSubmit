@@ -11,7 +11,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Pydantic settings for the application environment."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", env_prefix="TEQ_")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="TEQ_",
+        extra="ignore"  # Ignore extra environment variables
+    )
 
     app_name: str = "TEQSmartSubmit"
     environment: str = "development"

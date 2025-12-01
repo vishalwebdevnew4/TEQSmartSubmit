@@ -5,20 +5,49 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+import bcrypt
 from jose import jwt
-from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Try to use passlib, fall back to bcrypt directly if there's a compatibility issue
+try:
+    from passlib.context import CryptContext
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    USE_PASSLIB = True
+except Exception:
+    USE_PASSLIB = False
 
 
 def hash_password(password: str) -> str:
     """Return hashed representation of password."""
-    return pwd_context.hash(password)
+    if USE_PASSLIB:
+        try:
+            return pwd_context.hash(password)
+        except Exception:
+            # Fall back to bcrypt directly
+            pass
+    
+    # Use bcrypt directly
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        raise ValueError("Password is too long (maximum 72 bytes)")
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
     """Validate password against stored hash."""
-    return pwd_context.verify(password, hashed_password)
+    if USE_PASSLIB:
+        try:
+            return pwd_context.verify(password, hashed_password)
+        except Exception:
+            # Fall back to bcrypt directly
+            pass
+    
+    # Use bcrypt directly
+    password_bytes = password.encode('utf-8')
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
 def create_access_token(

@@ -1,0 +1,24 @@
+APP_NAME=TEQSmartSubmit
+ENVIRONMENT=production
+DEBUG=false
+SECRET_KEY=teq-admin-access
+ACCESS_TOKEN_EXPIRES_MINUTES=30
+JWT_ALGORITHM=HS256
+TEQ_ADMIN_REGISTRATION_TOKEN=teq-admin-access
+AUTH_JWT_SECRET="teq-admin-access"
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/teqsmartsubmitlocal"
+ADMIN_REGISTRATION_TOKEN=teq-admin-access
+SUBMISSION_DELAY_SECONDS=5.0
+RETRY_LIMIT=2
+PLAYWRIGHT_HEADLESS=true
+DEBUG_LOGS=true
+
+GOOGLE_PLACES_API_KEY=AIzaSyAH67LVuTo-EljDcxBP13GZ5BxM2YFiLXs
+
+OPENAI_API_KEY=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
+
+# Google Gemini API (Free AI Alternative)
+GOOGLE_AI_API_KEY=AIzaSyC56UbndpfOgdmCJ4UMe2UP-UI6kuJfgKU
+
+# Hugging Face Inference API (Free AI Alternative)
+HUGGINGFACE_API_KEY=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

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -20,8 +20,11 @@ class Domain(Base):
     url: Mapped[str] = mapped_column(String(512), unique=True, nullable=False)
     category: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    contact_page_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    contact_check_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    contact_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    contact_check_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     submissions: Mapped[List["SubmissionLog"]] = relationship(
         "SubmissionLog", back_populates="domain", cascade="all, delete-orphan"

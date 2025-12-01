@@ -11,9 +11,14 @@ model Admin {
   id           Int             @id @default(autoincrement())
   username     String          @unique
   passwordHash String
+  email        String?         @unique
+  role         String          @default("operator") // "admin", "operator", "viewer"
   isActive     Boolean         @default(true)
   createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @default(now()) @updatedAt
   submissions  SubmissionLog[]
+  tasks        Task[]
+  businesses   Business[]
 }
 
 model Domain {
@@ -31,15 +36,18 @@ model Domain {
 }
 
 model Template {
-  id            Int             @id @default(autoincrement())
-  name          String          @unique
+  id            Int                @id @default(autoincrement())
+  name          String             @unique
   description   String?
   fieldMappings Json
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
   domainId      Int?
-  domain        Domain?         @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  domain        Domain?            @relation(fields: [domainId], references: [id], onDelete: SetNull)
   submissions   SubmissionLog[]
+  versions      TemplateVersion[]
+  businessId    Int?
+  business      Business?          @relation(fields: [businessId], references: [id], onDelete: SetNull)
 }
 
 model SubmissionLog {
@@ -72,4 +80,133 @@ model ContactCheck {
   contactUrl String?
   message    String?
   checkedAt  DateTime @default(now())
+}
+
+model Business {
+  id              Int                @id @default(autoincrement())
+  name            String
+  phone           String?
+  address         String?
+  website         String?
+  googlePlacesUrl String?            @unique
+  googlePlacesId  String?            @unique
+  description     String?
+  categories      Json?              // Array of categories
+  reviews         Json?              // Reviews data
+  images          Json?              // Array of image URLs
+  rating          Float?
+  reviewCount     Int?
+  rawData         Json?              // Full Google Places API response
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @default(now()) @updatedAt
+  adminId         Int?
+  admin           Admin?             @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  templates       Template[]
+  clients         Client[]
+  deployments     DeploymentLog[]
+  formSubmissions FormSubmissionLog[]
+  tasks           Task[]
+}
+
+model TemplateVersion {
+  id          Int              @id @default(autoincrement())
+  templateId  Int
+  template    Template         @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  version     Int
+  content     Json             // Full template content (Next.js code, Tailwind config, etc.)
+  colorPalette Json?           // Generated color palette
+  typography  Json?            // Typography settings
+  aiCopyStyle String?          // "formal", "friendly", "marketing", "minimalist"
+  screenshotUrl String?        // URL to homepage screenshot
+  isActive    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  deployedAt  DateTime?
+  deployments DeploymentLog[]
+}
+
+model Client {
+  id            Int              @id @default(autoincrement())
+  businessId    Int
+  business      Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  email         String
+  name          String?
+  phone         String?
+  status        String           @default("pending") // "pending", "sent", "opened", "clicked", "converted"
+  emailSentAt   DateTime?
+  emailOpenedAt DateTime?
+  lastClickedAt DateTime?
+  previewUrl    String?
+  screenshotUrl String?
+  message       String?          // Personalized message sent
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @default(now()) @updatedAt
+  tracking      ClientTracking[]
+}
+
+model ClientTracking {
+  id          Int      @id @default(autoincrement())
+  clientId    Int
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  eventType   String   // "email_sent", "email_opened", "link_clicked", "download", "time_on_page"
+  eventData   Json?    // Additional event data
+  timestamp   DateTime @default(now())
+  ipAddress   String?
+  userAgent   String?
+  timeOnPage  Int?     // Seconds spent on preview page
+}
+
+model Task {
+  id          Int      @id @default(autoincrement())
+  taskType    String   // "google_places_fetch", "website_generate", "deploy", "form_submit", "email_send", "screenshot"
+  status      String   @default("pending") // "pending", "processing", "completed", "failed", "retrying"
+  priority    Int      @default(5) // 1-10, higher = more priority
+  inputData   Json?    // Task input parameters
+  resultData  Json?    // Task result/output
+  errorMessage String?
+  retryCount  Int      @default(0)
+  maxRetries  Int      @default(3)
+  adminId     Int?
+  admin       Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  businessId  Int?
+  business    Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  updatedAt   DateTime @default(now()) @updatedAt
+}
+
+model FormSubmissionLog {
+  id              Int      @id @default(autoincrement())
+  businessId      Int?
+  business        Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  domainUrl       String
+  contactPageUrl  String?
+  status          String   // "success", "failed", "pending", "retrying"
+  message         String?  // Submission message/content
+  responseHtml    String?  // Response HTML after submission
+  captchaType     String?  // "recaptcha", "hcaptcha", "2captcha", "none"
+  captchaSolved   Boolean  @default(false)
+  proxyUsed       String?
+  retryCount      Int      @default(0)
+  errorMessage    String?
+  submittedAt     DateTime?
+  createdAt       DateTime @default(now())
+  finishedAt      DateTime?
+}
+
+model DeploymentLog {
+  id              Int      @id @default(autoincrement())
+  businessId      Int
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  templateVersionId Int?
+  templateVersion TemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+  status          String   // "pending", "deploying", "success", "failed"
+  vercelUrl       String?
+  vercelDeploymentId String?
+  githubRepoUrl   String?
+  screenshotUrl   String?
+  errorMessage    String?
+  deployedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
 }

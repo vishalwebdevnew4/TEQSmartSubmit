@@ -18,6 +18,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
             url: true,
           },
         },
+        business: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        versions: {
+          orderBy: { version: "desc" },
+        },
       },
     });
 
