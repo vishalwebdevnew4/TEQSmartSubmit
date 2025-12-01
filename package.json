@@ -8,20 +8,29 @@
         "build": "next build",
         "start": "next start",
         "lint": "next lint",
-        "db:seed": "prisma db seed"
+        "db:seed": "prisma db seed",
+        "download-category": "node scripts/cli.js download-category",
+        "preview-template": "node scripts/cli.js preview-template",
+        "convert-template": "node scripts/cli.js convert-template",
+        "create-client-site": "node scripts/cli.js create-client-site",
+        "process-template": "node scripts/cli.js process-template"
     },
     "dependencies": {
         "@prisma/client": "^6.19.0",
         "@sentry/nextjs": "^8.0.0",
+        "adm-zip": "^0.5.16",
         "bcryptjs": "^2.4.3",
         "csv-parse": "^6.1.0",
+        "jsdom": "^23.2.0",
         "jsonwebtoken": "^9.0.2",
         "next": "^14.2.0",
+        "open": "^8.4.2",
         "react": "^18.3.0",
         "react-dom": "^18.3.0",
         "recharts": "^2.10.3"
     },
     "devDependencies": {
+        "@types/jsdom": "^27.0.0",
         "@types/node": "^20",
         "@types/react": "^18",
         "@types/react-dom": "^18",

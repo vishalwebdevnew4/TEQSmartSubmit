@@ -4,12 +4,13 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import fs from "fs/promises";
 import { tmpdir } from "os";
+import { processTemplateWithBusinessData } from "../process-template-handler";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const { businessId, copyStyle = "friendly" } = await request.json();
+    const { businessId, copyStyle = "friendly", templateCategory, templateName } = await request.json();
 
     if (!businessId) {
       return NextResponse.json(
@@ -38,7 +39,114 @@ export async function POST(request: Request) {
       website: business.website,
       description: business.description,
       categories: business.categories || [],
+      email: business.website ? `contact@${business.website.replace(/^https?:\/\//, '').split('/')[0]}` : undefined,
     };
+
+    // Declare templateFiles at the top level
+    let templateFiles: Record<string, string> = {};
+
+    // If template is selected, process it with business data
+    if (templateCategory && templateName) {
+      try {
+        // Process template with business data
+        const processed = await processTemplateWithBusinessData(
+          templateCategory,
+          templateName,
+          businessData
+        );
+
+        if (processed.success) {
+          // Use processed template instead of Python generator
+          templateFiles = {
+            "index.html": processed.html,
+            "about.html": processed.dynamicPages?.about || "",
+            "contact.html": processed.dynamicPages?.contact || "",
+          };
+          
+          // Create template version with processed content
+          const existingTemplate = await prisma.template.findFirst({
+            where: {
+              businessId: business.id,
+              name: {
+                startsWith: `${business.name} - Website Template`,
+              },
+            },
+          });
+
+          let template;
+          if (existingTemplate) {
+            template = await prisma.template.update({
+              where: { id: existingTemplate.id },
+              data: {
+                description: `Generated website for ${business.name} using ${templateName} template`,
+                updatedAt: new Date(),
+              },
+            });
+          } else {
+            const baseName = `${business.name} - Website Template`;
+            let templateNameUnique = baseName;
+            let counter = 1;
+            
+            while (await prisma.template.findUnique({ where: { name: templateNameUnique } })) {
+              templateNameUnique = `${baseName} (${counter})`;
+              counter++;
+            }
+            
+            template = await prisma.template.create({
+              data: {
+                name: templateNameUnique,
+                description: `Generated website for ${business.name} using ${templateName} template`,
+                fieldMappings: {},
+                businessId: business.id,
+              },
+            });
+          }
+
+          const existingVersions = await prisma.templateVersion.count({
+            where: { templateId: template.id },
+          });
+
+          const templateVersion = await prisma.templateVersion.create({
+            data: {
+              templateId: template.id,
+              version: existingVersions + 1,
+              content: {
+                ...templateFiles,
+                _metadata: {
+                  templateSource: `${templateCategory}/${templateName}`,
+                  logoUrl: processed.logoUrl,
+                  generatedAt: new Date().toISOString(),
+                  copyStyle: copyStyle,
+                },
+              },
+              colorPalette: {},
+              typography: {},
+              aiCopyStyle: copyStyle,
+              isActive: true,
+            },
+          });
+
+          await prisma.templateVersion.updateMany({
+            where: {
+              templateId: template.id,
+              id: { not: templateVersion.id },
+            },
+            data: { isActive: false },
+          });
+
+          return NextResponse.json({
+            success: true,
+            templateId: template.id,
+            templateVersionId: templateVersion.id,
+            isGptGenerated: false,
+            templateSource: `${templateCategory}/${templateName}`,
+          });
+        }
+      } catch (error) {
+        console.error("Error processing template:", error);
+        // Fall through to Python generator as fallback
+      }
+    }
 
     // Call Python website generator
     const scriptPath = path.join(process.cwd(), "backend", "app", "services", "website_generator.py");
@@ -106,8 +214,6 @@ export async function POST(request: Request) {
     }
 
     // Get template files from Python script response or read from disk
-    let templateFiles: Record<string, string> = {};
-    
     // First, try to get content from Python script response
     if (result.data?.content && typeof result.data.content === "object") {
       templateFiles = result.data.content;

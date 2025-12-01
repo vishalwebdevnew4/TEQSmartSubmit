@@ -1,0 +1,12 @@
+{
+  "name": "foodie",
+  "category": "restaurant",
+  "source": "github",
+  "sourceUrl": "https://github.com/codewithsadee/foodie/archive/refs/heads/master.zip",
+  "description": "Fully responsive fast food website - Premium template from codewithsadee",
+  "status": "downloaded",
+  "preview": "/templates/restaurant/foodie/index.html",
+  "downloadedAt": "2025-12-01T11:48:41.620Z",
+  "version": "1.0.0",
+  "premium": true
+}
