@@ -1,7 +1,10 @@
 /**
  * Contact page detection utility
  * Searches for contact page links in website header and footer
+ * Uses Playwright to verify contact page links for JavaScript-rendered sites
  */
+
+import { chromium, Browser, Page } from 'playwright';
 
 interface ContactCheckResult {
   found: boolean;
@@ -159,10 +162,29 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
       };
     }
 
-    const html = await response.text();
+    let html = await response.text();
 
-    // Find contact page links in header and footer
-    const contactUrl = findContactPageLink(html, origin);
+    // Check if page might be JavaScript-rendered (React, Vue, Angular, etc.)
+    const hasJSFramework = /react|vue|angular|__NEXT_DATA__|id=["']root["']|id=["']app["']|data-reactroot|_next/i.test(html);
+    const hasMinimalContent = html.length < 5000 && !/<body[^>]*>[\s\S]{100,}/i.test(html);
+    const hasNoContactLinks = !/contact/i.test(html.toLowerCase());
+
+    // Find contact page links in initial HTML
+    let contactUrl = findContactPageLink(html, origin);
+
+    // If page is JavaScript-rendered or no contact links found, use Playwright to get rendered HTML
+    if ((hasJSFramework || hasNoContactLinks) && !contactUrl) {
+      console.log(`[ContactDetector] JavaScript-rendered site detected or no contact links in static HTML, using Playwright to render page...`);
+      try {
+        html = await fetchHomepageWithPlaywright(baseUrl);
+        console.log(`[ContactDetector] Playwright rendered HTML (${html.length} chars)`);
+        // Try finding contact link again in rendered HTML
+        contactUrl = findContactPageLink(html, origin);
+      } catch (playwrightError: any) {
+        console.log(`[ContactDetector] Playwright failed: ${playwrightError.message}, using static HTML`);
+        // Continue with original HTML if Playwright fails
+      }
+    }
 
     if (!contactUrl) {
       return {
@@ -170,6 +192,21 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
         contactUrl: null,
         hasForm: false,
         message: "Contact page link not found in header or footer",
+        status: "not_found",
+      };
+    }
+
+    // Verify contact page link is accessible using Playwright
+    // This helps with JavaScript-rendered sites where links might be dynamically loaded
+    console.log(`[ContactDetector] Verifying contact page link with Playwright: ${contactUrl}`);
+    const isContactPageAccessible = await verifyContactPageWithPlaywright(contactUrl);
+    
+    if (!isContactPageAccessible) {
+      return {
+        found: false,
+        contactUrl: null,
+        hasForm: false,
+        message: "Contact page link found but page is not accessible",
         status: "not_found",
       };
     }
@@ -215,6 +252,135 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
       message: errorMessage,
       status: "error",
     };
+  }
+}
+
+/**
+ * Fetch homepage HTML using Playwright (for JavaScript-rendered sites)
+ */
+async function fetchHomepageWithPlaywright(url: string): Promise<string> {
+  let browser: Browser | null = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    
+    const page = await browser.newPage();
+    page.setDefaultTimeout(45000);
+    
+    // Navigate to the page
+    await page.goto(url, {
+      waitUntil: 'networkidle',
+      timeout: 45000,
+    });
+    
+    // Wait for page to fully load
+    console.log(`[ContactDetector] Waiting for homepage to fully load...`);
+    await sleep(5000); // Wait 5 seconds for initial content
+    
+    // Scroll to trigger lazy loading
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    await sleep(3000); // Wait after scroll
+    
+    // Get the rendered HTML
+    const html = await page.content();
+    return html;
+  } catch (error: any) {
+    console.log(`[ContactDetector] Playwright fetch failed: ${error.message}`);
+    throw error;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
+  }
+}
+
+/**
+ * Verify contact page link is accessible using Playwright
+ * This helps with JavaScript-rendered sites where links might be dynamically loaded
+ */
+async function verifyContactPageWithPlaywright(contactUrl: string): Promise<boolean> {
+  let browser: Browser | null = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    
+    const page = await browser.newPage();
+    page.setDefaultTimeout(30000); // 30 second timeout
+    
+    // Navigate to the contact page
+    const response = await page.goto(contactUrl, {
+      waitUntil: 'networkidle',
+      timeout: 30000,
+    });
+    
+    // Check if page loaded successfully
+    if (!response || !response.ok()) {
+      console.log(`[ContactDetector] Contact page returned ${response?.status() || 'no response'}`);
+      return false;
+    }
+    
+    // Wait for page to fully load - wait for network idle and additional time for dynamic content
+    console.log(`[ContactDetector] Waiting for page to fully load...`);
+    await sleep(5000); // Wait 5 seconds for initial content
+    
+    // Scroll to trigger lazy loading
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    await sleep(2000); // Wait after scroll
+    
+    // Try to wait for common contact form elements to appear (optional, won't fail if not found)
+    try {
+      await page.waitForSelector('form, input[type="email"], textarea, [name*="contact"], [name*="email"]', {
+        timeout: 10000,
+      }).catch(() => {
+        // Ignore if selectors not found - page might still be valid
+        console.log(`[ContactDetector] Form elements not found, but continuing verification`);
+      });
+    } catch {
+      // Continue even if form elements aren't found
+    }
+    
+    // Additional wait for any remaining dynamic content
+    await sleep(3000); // Final wait for any remaining content
+    
+    // Get the final URL (in case of redirects)
+    const finalUrl = page.url();
+    
+    // Check if we're still on a contact-related page (not redirected to 404, etc.)
+    const pageTitle = await page.title();
+    const pageContent = await page.content();
+    
+    // Check if page content suggests it's a contact page
+    const hasContactContent = /contact|get in touch|reach us|send message|write us/i.test(pageContent.toLowerCase());
+    const isContactPage = /contact|get-in-touch|reach-us|contactus/i.test(finalUrl) || 
+                          /contact|get-in-touch|reach-us|contactus/i.test(pageTitle) ||
+                          hasContactContent;
+    
+    console.log(`[ContactDetector] Contact page verified: ${finalUrl}, isContactPage: ${isContactPage}`);
+    
+    return isContactPage;
+  } catch (error: any) {
+    console.log(`[ContactDetector] Playwright verification failed: ${error.message}`);
+    return false;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
   }
 }
 
@@ -275,135 +441,160 @@ function findContactPageLink(html: string, origin: string): string | null {
 }
 
 async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
+  let browser: Browser | null = null;
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
+    // Use Playwright to get fully rendered HTML (handles JavaScript-rendered forms)
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    
+    const page = await browser.newPage();
+    page.setDefaultTimeout(30000); // 30 second timeout
+    
+    // Navigate to the contact page
+    const response = await page.goto(contactUrl, {
+      waitUntil: 'networkidle',
+      timeout: 30000,
+    });
+    
+    // Check if page loaded successfully
+    if (!response || !response.ok()) {
+      console.log(`[ContactDetector] Contact page returned ${response?.status() || 'no response'}`);
+      return false;
+    }
+    
+    // Wait for page to fully load - wait for network idle and additional time for dynamic content
+    console.log(`[ContactDetector] Waiting for contact page to fully load...`);
+    await sleep(5000); // Wait 5 seconds for initial content
+    
+    // Scroll to trigger lazy loading
+    await page.evaluate(() => {
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    await sleep(2000); // Wait after scroll
+    
+    // Try to wait for form elements to appear (optional, won't fail if not found)
     try {
-      const response = await fetchWithRetry(
-        contactUrl,
-        {
-          method: "GET",
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            Referer: contactUrl,
-          },
-          signal: controller.signal,
-          redirect: "follow",
-        },
-        1, // 1 retry
-        1000 // 1 second delay
-      );
-      clearTimeout(timeoutId);
+      await page.waitForSelector('form, input[type="email"], textarea, [name*="contact"], [name*="email"]', {
+        timeout: 10000,
+      }).catch(() => {
+        // Ignore if selectors not found - page might still be valid
+        console.log(`[ContactDetector] Form elements not found immediately, but continuing check`);
+      });
+    } catch {
+      // Continue even if form elements aren't found immediately
+    }
+    
+    // Additional wait for any remaining dynamic content
+    await sleep(3000); // Final wait for any remaining content
+    
+    // Get the fully rendered HTML
+    const html = await page.content();
 
-      if (!response.ok) {
-        return false;
-      }
+    // Check for form elements
+    const hasFormTag = /<form[^>]*>/i.test(html);
+    if (!hasFormTag) {
+      return false;
+    }
 
-      const html = await response.text();
+    // Extract all form fields (input, textarea, select)
+    const formFields = html.match(/<(input|textarea|select)[^>]*>/gi) || [];
+    
+    if (formFields.length === 0) {
+      return false;
+    }
 
-      // Check for form elements
-      const hasFormTag = /<form[^>]*>/i.test(html);
-      if (!hasFormTag) {
-        return false;
-      }
+    // Contact form field indicators (name, id, placeholder, label text)
+    const contactFormIndicators = [
+      // Field names
+      /name=["'](name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)/i,
+      /name=["'](email|e-mail|email_address|contact_email|your_email)/i,
+      /name=["'](message|msg|comment|comments|inquiry|enquiry|query|questions|feedback)/i,
+      /name=["'](subject|topic|subject_line)/i,
+      /name=["'](phone|telephone|tel|mobile|contact_phone|phone_number)/i,
+      // Field IDs
+      /id=["'](name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)/i,
+      /id=["'](email|e-mail|email_address|contact_email|your_email)/i,
+      /id=["'](message|msg|comment|comments|inquiry|enquiry|query|questions|feedback)/i,
+      /id=["'](subject|topic|subject_line)/i,
+      /id=["'](phone|telephone|tel|mobile|contact_phone|phone_number)/i,
+      // Placeholders
+      /placeholder=["']([^"']*(name|full name|your name|first name|last name)[^"']*)/i,
+      /placeholder=["']([^"']*(email|e-mail|your email|contact email)[^"']*)/i,
+      /placeholder=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback|tell us)[^"']*)/i,
+      /placeholder=["']([^"']*(subject|topic)[^"']*)/i,
+      /placeholder=["']([^"']*(phone|telephone|mobile|contact)[^"']*)/i,
+      // Labels (check nearby text)
+      /<label[^>]*>([^<]*(name|full name|your name|first name|last name)[^<]*)<\/label>/i,
+      /<label[^>]*>([^<]*(email|e-mail|your email|contact email)[^<]*)<\/label>/i,
+      /<label[^>]*>([^<]*(message|comment|inquiry|enquiry|query|question|feedback|tell us)[^<]*)<\/label>/i,
+      /<label[^>]*>([^<]*(subject|topic)[^<]*)<\/label>/i,
+      /<label[^>]*>([^<]*(phone|telephone|mobile|contact)[^<]*)<\/label>/i,
+    ];
 
-      // Extract all form fields (input, textarea, select)
-      const formFields = html.match(/<(input|textarea|select)[^>]*>/gi) || [];
-      
-      if (formFields.length === 0) {
-        return false;
-      }
+    // Non-contact form indicators (search, newsletter, login, etc.)
+    const nonContactFormIndicators = [
+      /name=["'](search|q|query|s)/i,
+      /id=["'](search|q|query|s)/i,
+      /placeholder=["']([^"']*(search|find|look for)[^"']*)/i,
+      /name=["'](newsletter|subscribe|email_signup|newsletter_email)/i,
+      /id=["'](newsletter|subscribe|email_signup|newsletter_email)/i,
+      /placeholder=["']([^"']*(newsletter|subscribe|sign up)[^"']*)/i,
+      /name=["'](username|user|login|password|pass)/i,
+      /id=["'](username|user|login|password|pass)/i,
+      /placeholder=["']([^"']*(username|login|password|sign in)[^"']*)/i,
+      /action=["']([^"']*\/(search|login|signin|signup|subscribe|newsletter)[^"']*)/i,
+      /<form[^>]*action=["']([^"']*\/(search|login|signin|signup|subscribe|newsletter)[^"']*)/i,
+    ];
 
-      // Contact form field indicators (name, id, placeholder, label text)
-      const contactFormIndicators = [
-        // Field names
-        /name=["'](name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)/i,
-        /name=["'](email|e-mail|email_address|contact_email|your_email)/i,
-        /name=["'](message|msg|comment|comments|inquiry|enquiry|query|questions|feedback)/i,
-        /name=["'](subject|topic|subject_line)/i,
-        /name=["'](phone|telephone|tel|mobile|contact_phone|phone_number)/i,
-        // Field IDs
-        /id=["'](name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)/i,
-        /id=["'](email|e-mail|email_address|contact_email|your_email)/i,
-        /id=["'](message|msg|comment|comments|inquiry|enquiry|query|questions|feedback)/i,
-        /id=["'](subject|topic|subject_line)/i,
-        /id=["'](phone|telephone|tel|mobile|contact_phone|phone_number)/i,
-        // Placeholders
-        /placeholder=["']([^"']*(name|full name|your name|first name|last name)[^"']*)/i,
-        /placeholder=["']([^"']*(email|e-mail|your email|contact email)[^"']*)/i,
-        /placeholder=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback|tell us)[^"']*)/i,
-        /placeholder=["']([^"']*(subject|topic)[^"']*)/i,
-        /placeholder=["']([^"']*(phone|telephone|mobile|contact)[^"']*)/i,
-        // Labels (check nearby text)
-        /<label[^>]*>([^<]*(name|full name|your name|first name|last name)[^<]*)<\/label>/i,
-        /<label[^>]*>([^<]*(email|e-mail|your email|contact email)[^<]*)<\/label>/i,
-        /<label[^>]*>([^<]*(message|comment|inquiry|enquiry|query|question|feedback|tell us)[^<]*)<\/label>/i,
-        /<label[^>]*>([^<]*(subject|topic)[^<]*)<\/label>/i,
-        /<label[^>]*>([^<]*(phone|telephone|mobile|contact)[^<]*)<\/label>/i,
-      ];
+    // Check if form has non-contact indicators (exclude these)
+    const hasNonContactIndicators = nonContactFormIndicators.some(pattern => 
+      pattern.test(html)
+    );
 
-      // Non-contact form indicators (search, newsletter, login, etc.)
-      const nonContactFormIndicators = [
-        /name=["'](search|q|query|s)/i,
-        /id=["'](search|q|query|s)/i,
-        /placeholder=["']([^"']*(search|find|look for)[^"']*)/i,
-        /name=["'](newsletter|subscribe|email_signup|newsletter_email)/i,
-        /id=["'](newsletter|subscribe|email_signup|newsletter_email)/i,
-        /placeholder=["']([^"']*(newsletter|subscribe|sign up)[^"']*)/i,
-        /name=["'](username|user|login|password|pass)/i,
-        /id=["'](username|user|login|password|pass)/i,
-        /placeholder=["']([^"']*(username|login|password|sign in)[^"']*)/i,
-        /action=["']([^"']*\/(search|login|signin|signup|subscribe|newsletter)[^"']*)/i,
-        /<form[^>]*action=["']([^"']*\/(search|login|signin|signup|subscribe|newsletter)[^"']*)/i,
-      ];
-
-      // Check if form has non-contact indicators (exclude these)
-      const hasNonContactIndicators = nonContactFormIndicators.some(pattern => 
-        pattern.test(html)
-      );
-
-      if (hasNonContactIndicators) {
-        // Check if it also has contact indicators (might be a mixed form)
-        const hasContactIndicators = contactFormIndicators.some(pattern => 
-          pattern.test(html)
-        );
-        
-        // If it has non-contact indicators but no contact indicators, it's not a contact form
-        if (!hasContactIndicators) {
-          return false;
-        }
-      }
-
-      // Check for contact form indicators
+    if (hasNonContactIndicators) {
+      // Check if it also has contact indicators (might be a mixed form)
       const hasContactIndicators = contactFormIndicators.some(pattern => 
         pattern.test(html)
       );
-
-      // Must have at least one contact form indicator
+      
+      // If it has non-contact indicators but no contact indicators, it's not a contact form
       if (!hasContactIndicators) {
         return false;
       }
-
-      // Check for email field specifically (contact forms usually have email)
-      const hasEmailField = /<(input|textarea)[^>]*(name|id|placeholder)=["']([^"']*email[^"']*)["']/i.test(html) ||
-                            /type=["']email["']/i.test(html);
-
-      // Check for message/comment field (contact forms usually have a message field)
-      const hasMessageField = /<(input|textarea)[^>]*(name|id|placeholder)=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback)[^"']*)["']/i.test(html);
-
-      // Contact form should have at least email OR message field
-      return hasEmailField || hasMessageField;
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      throw fetchError;
     }
+
+    // Check for contact form indicators
+    const hasContactIndicators = contactFormIndicators.some(pattern => 
+      pattern.test(html)
+    );
+
+    // Must have at least one contact form indicator
+    if (!hasContactIndicators) {
+      return false;
+    }
+
+    // Check for email field specifically (contact forms usually have email)
+    const hasEmailField = /<(input|textarea)[^>]*(name|id|placeholder)=["']([^"']*email[^"']*)["']/i.test(html) ||
+                          /type=["']email["']/i.test(html);
+
+    // Check for message/comment field (contact forms usually have a message field)
+    const hasMessageField = /<(input|textarea)[^>]*(name|id|placeholder)=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback)[^"']*)["']/i.test(html);
+
+    // Contact form should have at least email OR message field
+    return hasEmailField || hasMessageField;
   } catch (error: any) {
-    // Silently fail - if we can't check the form, assume no form
+    console.log(`[ContactDetector] Playwright form check failed: ${error.message}`);
     return false;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
   }
 }
 

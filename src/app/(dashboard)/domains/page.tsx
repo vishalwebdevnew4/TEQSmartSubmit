@@ -150,6 +150,48 @@ export default function DomainsPage() {
     } catch (error) {
       console.error("Failed to delete domain:", error);
       alert("Failed to delete domain");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleRecheckContact = async (domain: Domain) => {
+    if (processing) return;
+    
+    setProcessing(true);
+    try {
+      // Show a message that this may take up to 2 minutes (Playwright waits for page loading)
+      alert("Re-checking contact page... This may take up to 2 minutes. The system will use Playwright to verify the contact page link. Please wait.");
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes timeout (increased for Playwright waits)
+      
+      const response = await fetch("/api/domains/check-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domainIds: [domain.id] }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Re-check completed: ${data.message}`);
+        await fetchDomains();
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to re-check contact page");
+      }
+    } catch (error: any) {
+      console.error("Failed to re-check contact page:", error);
+      if (error.name === 'AbortError') {
+        alert("Request timed out. The check is taking longer than expected. Please try again.");
+      } else {
+        alert("Failed to re-check contact page: " + (error.message || "Unknown error"));
+      }
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -784,6 +826,14 @@ https://example3.com,marketing`;
                       )}
                     </td>
                     <td className="px-6 py-4 text-right text-xs text-slate-400">
+                      <button
+                        onClick={() => handleRecheckContact(domain)}
+                        disabled={processing}
+                        className="mr-3 hover:text-yellow-300 disabled:opacity-50"
+                        title="Re-check contact page"
+                      >
+                        Re-check
+                      </button>
                       <button
                         onClick={() => handleEdit(domain)}
                         className="mr-3 hover:text-indigo-300"
