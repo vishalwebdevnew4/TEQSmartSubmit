@@ -6392,9 +6392,10 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         all_logs.append("")
         all_logs.append("FINAL VERIFICATION:")
-        has_form_data = submit_result.get("form_submission_data") is not None
-        form_detected = submit_result.get("form_submission_detected", False)
-        submission_success = submit_result.get("submission_success", False)
+        # Use result instead of submit_result since result.update(submit_result) was called earlier
+        has_form_data = result.get("form_submission_data") is not None
+        form_detected = result.get("form_submission_detected", False)
+        submission_success = result.get("submission_success", False)
         
         all_logs.append(f"  Form submission detected: {form_detected}")
         all_logs.append(f"  Form data verified: {has_form_data}")
@@ -6417,11 +6418,12 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         # Determine final status - STRICT verification
         # CRITICAL: Only mark as success if fields were filled AND submission was verified
-        if submit_result.get("submission_success") and submit_result.get("form_submission_detected"):
+        # Use result instead of submit_result since result.update(submit_result) was called earlier
+        if result.get("submission_success") and result.get("form_submission_detected"):
             # Only mark as success if BOTH submission_success AND form_submission_detected are True
             # AND we have form_submission_data
             # AND fields were actually filled
-            has_form_data = submit_result.get("form_submission_data") is not None
+            has_form_data = result.get("form_submission_data") is not None
             if has_form_data and fields_filled > 0:
                 all_logs.append("✅ FINAL STATUS: SUCCESS - Form submitted with verified data")
                 result.update({
@@ -6442,11 +6444,11 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                     "status": "failed",
                     "message": "\n".join(all_logs)
                 })
-        elif submit_result.get("submission_attempted"):
+        elif result.get("submission_attempted"):
             # Submission was attempted but not verified
             # Check if fields were filled and submission was detected
-            form_detected = submit_result.get("form_submission_detected", False)
-            has_form_data = submit_result.get("form_submission_data") is not None
+            form_detected = result.get("form_submission_detected", False)
+            has_form_data = result.get("form_submission_data") is not None
             
             if fields_filled == 0 and fields_attempted == 0:
                 # No fields filled at all - this is a failure

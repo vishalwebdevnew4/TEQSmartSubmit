@@ -195,6 +195,75 @@ export default function DomainsPage() {
     }
   };
 
+  const handleBulkRecheck = async () => {
+    if (processing || selectedIds.length === 0) return;
+    
+    if (!confirm(`Re-check contact pages for ${selectedIds.length} selected domain(s)? This may take several minutes.`)) {
+      return;
+    }
+    
+    setProcessing(true);
+    try {
+      const response = await fetch("/api/domains/check-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domainIds: selectedIds }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Bulk re-check completed: ${data.message}`);
+        await fetchDomains();
+        setSelectedIds([]);
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to bulk re-check contact pages");
+      }
+    } catch (error: any) {
+      console.error("Failed to bulk re-check contact pages:", error);
+      alert("Failed to bulk re-check contact pages: " + (error.message || "Unknown error"));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleRecheckAll = async () => {
+    if (processing || filteredDomains.length === 0) return;
+    
+    const count = filteredDomains.length;
+    const message = filteredDomains.length === allDomains.length
+      ? `Re-check contact pages for ALL ${count} domain(s)? This may take a very long time.`
+      : `Re-check contact pages for ${count} filtered domain(s)? This may take a very long time.`;
+    
+    if (!confirm(message)) {
+      return;
+    }
+    
+    setProcessing(true);
+    try {
+      const domainIds = filteredDomains.map(d => d.id);
+      const response = await fetch("/api/domains/check-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domainIds }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Re-check all completed: ${data.message}`);
+        await fetchDomains();
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to re-check all contact pages");
+      }
+    } catch (error: any) {
+      console.error("Failed to re-check all contact pages:", error);
+      alert("Failed to re-check all contact pages: " + (error.message || "Unknown error"));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProcessing(true);
@@ -663,51 +732,85 @@ https://example3.com,marketing`;
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <button
-          onClick={handleAdd}
-          className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400"
-        >
-          Add Domain
-        </button>
-        <button
-          onClick={() => setShowUploadModal(true)}
-          className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
-        >
-          Upload CSV
-        </button>
-        <button
-          onClick={() => setShowBulkEnableModal(true)}
-          className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
-        >
-          Bulk Enable
-        </button>
-        <button
-          onClick={() => setShowBulkDisableModal(true)}
-          className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
-        >
-          Bulk Disable
-        </button>
-        <button
-          onClick={() => setShowBulkDeleteModal(true)}
-          className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20"
-          disabled={selectedIds.length === 0}
-        >
-          Bulk Delete
-        </button>
-        <button
-          onClick={() => setShowDeleteAllModal(true)}
-          className="rounded-lg border border-rose-700 px-4 py-2 text-xs font-medium text-rose-300 hover:bg-rose-700/20"
-          disabled={filteredDomains.length === 0}
-        >
-          Delete All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
-        </button>
-        <button
-          onClick={handleDownloadFailedDomains}
-          className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20"
-        >
-          Download Failed Domains
-        </button>
+      {/* Organized Button Groups */}
+      <div className="space-y-4">
+        {/* Add/Import Section */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Add/Import:</span>
+          <button
+            onClick={handleAdd}
+            className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 transition-colors"
+          >
+            Add Domain
+          </button>
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
+          >
+            Upload CSV
+          </button>
+        </div>
+
+        {/* Bulk Actions Section */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Bulk Actions:</span>
+          <button
+            onClick={() => setShowBulkEnableModal(true)}
+            className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
+          >
+            Bulk Enable
+          </button>
+          <button
+            onClick={() => setShowBulkDisableModal(true)}
+            className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
+          >
+            Bulk Disable
+          </button>
+          <button
+            onClick={handleBulkRecheck}
+            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={selectedIds.length === 0 || processing}
+          >
+            Bulk Recheck {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
+          </button>
+          <button
+            onClick={() => setShowBulkDeleteModal(true)}
+            className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={selectedIds.length === 0}
+          >
+            Bulk Delete
+          </button>
+        </div>
+
+        {/* Contact Check Section */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Contact Check:</span>
+          <button
+            onClick={handleRecheckAll}
+            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={filteredDomains.length === 0 || processing}
+          >
+            Recheck All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+          </button>
+        </div>
+
+        {/* Dangerous Actions Section */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Danger Zone:</span>
+          <button
+            onClick={handleDownloadFailedDomains}
+            className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20 transition-colors"
+          >
+            Download Failed Domains
+          </button>
+          <button
+            onClick={() => setShowDeleteAllModal(true)}
+            className="rounded-lg border border-rose-700 px-4 py-2 text-xs font-medium text-rose-300 hover:bg-rose-700/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={filteredDomains.length === 0}
+          >
+            Delete All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+          </button>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
@@ -758,7 +861,15 @@ https://example3.com,marketing`;
                       />
                     </td>
                     <td className="px-6 py-4 font-medium text-slate-100">
-                      <div>{domain.url}</div>
+                      <a 
+                        href={domain.url.startsWith('http') ? domain.url : `https://${domain.url}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-400 hover:text-indigo-300 text-blue"
+                        title={domain.url}
+                      >
+                        {domain.url}
+                      </a>
                       {templatePreview && (
                         <div className="mt-1 text-xs text-slate-400">
                           Templates: {templatePreview}

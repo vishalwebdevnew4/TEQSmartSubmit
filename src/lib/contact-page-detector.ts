@@ -86,17 +86,29 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
       }
     }
     const origin = url.origin;
+    
+    // If the provided URL is not the homepage, try the homepage first for better contact link detection
+    // But also keep the original URL as a fallback
+    const isHomepage = url.pathname === '/' || url.pathname === '';
+    const homepageUrl = `${origin}/`;
+    
+    console.log(`[ContactDetector] Checking contact page for domain: ${origin}`);
+    console.log(`[ContactDetector] Provided URL: ${baseUrl}, isHomepage: ${isHomepage}`);
 
-    // Fetch homepage with better error handling and retry logic
+    // Fetch homepage (or provided page) with better error handling and retry logic
+    // Prefer homepage for better contact link detection, but fallback to provided URL
     let response: Response;
+    let urlToFetch = isHomepage ? baseUrl : homepageUrl;
+    
     try {
       // Create abort controller for better timeout handling
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
       try {
+        console.log(`[ContactDetector] Fetching URL: ${urlToFetch}`);
         response = await fetchWithRetry(
-          baseUrl,
+          urlToFetch,
           {
             method: "GET",
             headers: {
@@ -171,18 +183,33 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
 
     // Find contact page links in initial HTML
     let contactUrl = findContactPageLink(html, origin);
+    console.log(`[ContactDetector] Contact URL found in initial HTML: ${contactUrl || 'none'}`);
 
     // If page is JavaScript-rendered or no contact links found, use Playwright to get rendered HTML
     if ((hasJSFramework || hasNoContactLinks) && !contactUrl) {
       console.log(`[ContactDetector] JavaScript-rendered site detected or no contact links in static HTML, using Playwright to render page...`);
       try {
-        html = await fetchHomepageWithPlaywright(baseUrl);
+        const playwrightUrl = isHomepage ? baseUrl : homepageUrl;
+        html = await fetchHomepageWithPlaywright(playwrightUrl);
         console.log(`[ContactDetector] Playwright rendered HTML (${html.length} chars)`);
         // Try finding contact link again in rendered HTML
         contactUrl = findContactPageLink(html, origin);
+        console.log(`[ContactDetector] Contact URL found in Playwright-rendered HTML: ${contactUrl || 'none'}`);
       } catch (playwrightError: any) {
         console.log(`[ContactDetector] Playwright failed: ${playwrightError.message}, using static HTML`);
         // Continue with original HTML if Playwright fails
+      }
+    }
+    
+    // If still no contact URL found and we tried a non-homepage, try the provided URL with Playwright
+    if (!contactUrl && !isHomepage) {
+      console.log(`[ContactDetector] No contact link found on homepage, trying provided URL with Playwright...`);
+      try {
+        html = await fetchHomepageWithPlaywright(baseUrl);
+        contactUrl = findContactPageLink(html, origin);
+        console.log(`[ContactDetector] Contact URL found in provided URL HTML: ${contactUrl || 'none'}`);
+      } catch (playwrightError: any) {
+        console.log(`[ContactDetector] Playwright on provided URL failed: ${playwrightError.message}`);
       }
     }
 
@@ -385,7 +412,7 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
 }
 
 function findContactPageLink(html: string, origin: string): string | null {
-  // Common contact page patterns
+  // Common contact page patterns - more comprehensive
   const contactPatterns = [
     /href=["']([^"']*\/contact[^"']*?)["']/gi,
     /href=["']([^"']*\/contact-us[^"']*?)["']/gi,
@@ -393,6 +420,8 @@ function findContactPageLink(html: string, origin: string): string | null {
     /href=["']([^"']*\/contact\.php[^"']*?)["']/gi,
     /href=["']([^"']*\/get-in-touch[^"']*?)["']/gi,
     /href=["']([^"']*\/reach-us[^"']*?)["']/gi,
+    /href=["']([^"']*\/contactus[^"']*?)["']/gi,
+    /href=["']([^"']*\/contact_page[^"']*?)["']/gi,
   ];
 
   // Extract header and footer sections
@@ -406,38 +435,56 @@ function findContactPageLink(html: string, origin: string): string | null {
     ...(navMatch || []),
   ].join(" ");
 
-  // Also search the full HTML as fallback
-  const searchText = sectionsToSearch || html;
+  // Helper function to find contact URL in text
+  const findContactInText = (text: string): string | null => {
+    for (const pattern of contactPatterns) {
+      const matches = [...text.matchAll(pattern)];
+      for (const match of matches) {
+        if (match[1]) {
+          let contactUrl = match[1].trim();
 
-  // Try each pattern
-  for (const pattern of contactPatterns) {
-    const matches = [...searchText.matchAll(pattern)];
-    for (const match of matches) {
-      if (match[1]) {
-        let contactUrl = match[1].trim();
-
-        // Handle relative URLs
-        if (contactUrl.startsWith("/")) {
-          contactUrl = origin + contactUrl;
-        } else if (!contactUrl.startsWith("http")) {
-          contactUrl = origin + "/" + contactUrl;
-        }
-
-        // Validate it's from the same domain
-        try {
-          const contactUrlObj = new URL(contactUrl);
-          const originObj = new URL(origin);
-          if (contactUrlObj.origin === originObj.origin) {
-            return contactUrl;
+          // Skip if it's clearly not a contact page (e.g., contains "contact-form" in wrong context)
+          if (contactUrl.includes('#') && !contactUrl.includes('/contact')) {
+            continue;
           }
-        } catch {
-          // Invalid URL, continue
+
+          // Handle relative URLs
+          if (contactUrl.startsWith("/")) {
+            contactUrl = origin + contactUrl;
+          } else if (!contactUrl.startsWith("http")) {
+            contactUrl = origin + "/" + contactUrl;
+          }
+
+          // Validate it's from the same domain
+          try {
+            const contactUrlObj = new URL(contactUrl);
+            const originObj = new URL(origin);
+            if (contactUrlObj.origin === originObj.origin) {
+              // Additional validation: URL should contain "contact" in path
+              const urlPath = contactUrlObj.pathname.toLowerCase();
+              if (urlPath.includes('contact') || urlPath.includes('get-in-touch') || urlPath.includes('reach-us')) {
+                return contactUrl;
+              }
+            }
+          } catch {
+            // Invalid URL, continue
+          }
         }
       }
     }
+    return null;
+  };
+
+  // First, try header/footer/nav sections (most reliable)
+  if (sectionsToSearch.trim()) {
+    const result = findContactInText(sectionsToSearch);
+    if (result) {
+      return result;
+    }
   }
 
-  return null;
+  // If not found in header/footer, search the full HTML as fallback
+  return findContactInText(html);
 }
 
 async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
