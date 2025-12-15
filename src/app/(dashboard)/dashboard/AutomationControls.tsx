@@ -39,6 +39,7 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const [averageTimePerDomain, setAverageTimePerDomain] = useState(0); // in seconds (static calculation)
+  const [recheckingContacts, setRecheckingContacts] = useState(false);
 
   const delaySeconds = 5;
   const retryLimit = 2;
@@ -619,6 +620,46 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
     handleStartRun(true); // Pass true to indicate test mode
   };
 
+  const handleRecheckAllContacts = async () => {
+    if (recheckingContacts) return;
+    
+    const allDomainIds = allDomains.map(d => d.id);
+    const count = allDomainIds.length;
+    
+    const message = `Re-check contact pages for ALL ${count} domain(s)? This may take a very long time.`;
+    
+    if (!confirm(message)) {
+      return;
+    }
+    
+    setRecheckingContacts(true);
+    try {
+      const response = await fetch("/api/domains/check-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domainIds: allDomainIds }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMessage(`Contact page re-check completed: ${data.message}`);
+        setStatus("success");
+        // Refresh domains by triggering a page reload or state update
+        window.location.reload();
+      } else {
+        const error = await response.json();
+        setMessage(`Failed to re-check contact pages: ${error.detail || "Unknown error"}`);
+        setStatus("error");
+      }
+    } catch (error: any) {
+      console.error("Failed to re-check all contact pages:", error);
+      setMessage(`Failed to re-check all contact pages: ${error.message || "Unknown error"}`);
+      setStatus("error");
+    } finally {
+      setRecheckingContacts(false);
+    }
+  };
+
   const currentStatusLabel =
     status === "running"
       ? "Running"
@@ -680,7 +721,7 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
           <button
             type="button"
             onClick={() => handleStartRun(false)}
-            disabled={!canRun || isRunning}
+            disabled={!canRun || isRunning || recheckingContacts}
             className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
           >
             {status === "running" || isRunning ? "Running…" : "Start Run"}
@@ -707,14 +748,25 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
             </>
           )}
           {!isRunning && (
-            <button
-              type="button"
-              disabled={!canRun}
-              onClick={handleTestDomain}
-              className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
-            >
-              Test Domain
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={!canRun}
+                onClick={handleTestDomain}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+              >
+                Test Domain
+              </button>
+              <button
+                type="button"
+                onClick={handleRecheckAllContacts}
+                disabled={recheckingContacts || allDomains.length === 0}
+                className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+                title="Re-check contact pages for all domains"
+              >
+                {recheckingContacts ? "Rechecking…" : "Recheck All Contacts"}
+              </button>
+            </>
           )}
         </div>
       </div>

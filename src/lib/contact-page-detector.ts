@@ -213,13 +213,83 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
       }
     }
 
+    // Track if we found the URL via common paths (already verified)
+    let foundViaCommonPath = false;
+    
+    // If no contact URL found in links, try common contact page paths directly
+    if (!contactUrl) {
+      console.log(`[ContactDetector] No contact link found, trying common contact page paths...`);
+      const commonContactPaths = [
+        '/p/contact-us.html', // Try this first as it's a common pattern
+        '/contact-us.html',
+        '/contact',
+        '/contact-us',
+        '/contact.html',
+        '/contact.php',
+        '/contactus',
+        '/get-in-touch',
+        '/reach-us',
+        '/contact-page',
+        '/contact_page',
+      ];
+      
+      // Try each common path to see if it exists and has a form
+      for (const path of commonContactPaths) {
+        const testUrl = `${origin}${path}`;
+        console.log(`[ContactDetector] Trying common path: ${testUrl}`);
+        
+        try {
+          // Verify it's a contact page and has a form using Playwright
+          console.log(`[ContactDetector] Checking accessibility for: ${testUrl}`);
+          const isAccessible = await verifyContactPageWithPlaywright(testUrl);
+          console.log(`[ContactDetector] Path ${testUrl} accessible: ${isAccessible}`);
+          
+          if (isAccessible) {
+            console.log(`[ContactDetector] Checking for form on: ${testUrl}`);
+            const hasForm = await checkContactPageHasForm(testUrl);
+            console.log(`[ContactDetector] Path ${testUrl} has form: ${hasForm}`);
+            
+            if (hasForm) {
+              contactUrl = testUrl;
+              foundViaCommonPath = true;
+              console.log(`[ContactDetector] ✅ Found contact page via common path: ${contactUrl}`);
+              break;
+            } else {
+              console.log(`[ContactDetector] ⚠️ Path ${testUrl} accessible but no form detected`);
+            }
+          } else {
+            console.log(`[ContactDetector] ⚠️ Path ${testUrl} not accessible or not a contact page`);
+          }
+        } catch (error: any) {
+          // Continue to next path if this one fails
+          console.log(`[ContactDetector] ❌ Path ${testUrl} failed: ${error.message}`);
+          if (error.stack) {
+            console.log(`[ContactDetector] Error stack: ${error.stack.substring(0, 200)}`);
+          }
+          continue;
+        }
+      }
+    }
+    
     if (!contactUrl) {
       return {
         found: false,
         contactUrl: null,
         hasForm: false,
-        message: "Contact page link not found in header or footer",
+        message: "Contact page link not found in header or footer, and common contact paths not accessible",
         status: "not_found",
+      };
+    }
+
+    // If we found via common path, we already verified it and checked for form
+    // So we can return success directly
+    if (foundViaCommonPath) {
+      return {
+        found: true,
+        contactUrl,
+        hasForm: true,
+        message: "Contact page found with contact form (via common path)",
+        status: "found",
       };
     }
 
@@ -297,10 +367,21 @@ async function fetchHomepageWithPlaywright(url: string): Promise<string> {
     page.setDefaultTimeout(45000);
     
     // Navigate to the page
-    await page.goto(url, {
-      waitUntil: 'networkidle',
-      timeout: 45000,
-    });
+    // Use 'domcontentloaded' which is faster and more reliable
+    try {
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded', // Faster and more reliable
+        timeout: 20000,
+      });
+    } catch (timeoutError: any) {
+      // If timeout, check if page still loaded
+      const currentUrl = page.url();
+      if (currentUrl && currentUrl !== 'about:blank') {
+        console.log(`[ContactDetector] Navigation timeout but page did load to ${currentUrl}, continuing...`);
+      } else {
+        throw timeoutError;
+      }
+    }
     
     // Wait for page to fully load
     console.log(`[ContactDetector] Waiting for homepage to fully load...`);
@@ -342,21 +423,37 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
     });
     
     const page = await browser.newPage();
-    page.setDefaultTimeout(30000); // 30 second timeout
+    page.setDefaultTimeout(20000); // 20 second timeout
     
     // Navigate to the contact page
-    const response = await page.goto(contactUrl, {
-      waitUntil: 'networkidle',
-      timeout: 30000,
-    });
+    // Use 'domcontentloaded' which is faster and more reliable than 'load' or 'networkidle'
+    let response;
+    try {
+      response = await page.goto(contactUrl, {
+        waitUntil: 'domcontentloaded', // Faster and more reliable
+        timeout: 20000,
+      });
+    } catch (timeoutError: any) {
+      // If timeout, check if page still loaded (sometimes page loads but network never idles)
+      console.log(`[ContactDetector] Navigation timeout, but checking if page loaded anyway...`);
+      const currentUrl = page.url();
+      if (currentUrl && currentUrl !== 'about:blank') {
+        // Page did navigate, just didn't finish loading - continue anyway
+        console.log(`[ContactDetector] Page did navigate to ${currentUrl}, continuing...`);
+        response = { ok: () => true, status: () => 200 } as any;
+      } else {
+        console.log(`[ContactDetector] Page did not navigate, timeout error: ${timeoutError.message}`);
+        return false;
+      }
+    }
     
     // Check if page loaded successfully
-    if (!response || !response.ok()) {
-      console.log(`[ContactDetector] Contact page returned ${response?.status() || 'no response'}`);
+    if (!response || (response.ok && !response.ok())) {
+      console.log(`[ContactDetector] Contact page returned ${response?.status?.() || 'no response'}`);
       return false;
     }
     
-    // Wait for page to fully load - wait for network idle and additional time for dynamic content
+    // Wait for page to fully load - wait for additional time for dynamic content
     console.log(`[ContactDetector] Waiting for page to fully load...`);
     await sleep(5000); // Wait 5 seconds for initial content
     
@@ -390,13 +487,19 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
     
     // Check if page content suggests it's a contact page
     const hasContactContent = /contact|get in touch|reach us|send message|write us/i.test(pageContent.toLowerCase());
+    const urlPath = new URL(finalUrl).pathname.toLowerCase();
     const isContactPage = /contact|get-in-touch|reach-us|contactus/i.test(finalUrl) || 
                           /contact|get-in-touch|reach-us|contactus/i.test(pageTitle) ||
+                          /contact|get-in-touch|reach-us|contactus/i.test(urlPath) ||
                           hasContactContent;
     
-    console.log(`[ContactDetector] Contact page verified: ${finalUrl}, isContactPage: ${isContactPage}`);
+    // If URL clearly indicates contact page (e.g., /p/contact-us.html), be more lenient
+    const isClearContactUrl = /\/p\/contact|\/contact-us|\/contact\.html|\/contact\.php/i.test(urlPath);
     
-    return isContactPage;
+    console.log(`[ContactDetector] Contact page verified: ${finalUrl}, isContactPage: ${isContactPage}, isClearContactUrl: ${isClearContactUrl}`);
+    
+    // Accept if it's clearly a contact URL or has contact content
+    return isContactPage || (isClearContactUrl && response.ok());
   } catch (error: any) {
     console.log(`[ContactDetector] Playwright verification failed: ${error.message}`);
     return false;
@@ -422,6 +525,8 @@ function findContactPageLink(html: string, origin: string): string | null {
     /href=["']([^"']*\/reach-us[^"']*?)["']/gi,
     /href=["']([^"']*\/contactus[^"']*?)["']/gi,
     /href=["']([^"']*\/contact_page[^"']*?)["']/gi,
+    /href=["']([^"']*\/p\/contact[^"']*?)["']/gi, // For /p/contact-us.html style URLs
+    /href=["']([^"']*\/p\/contact-us[^"']*?)["']/gi,
   ];
 
   // Extract header and footer sections
@@ -462,7 +567,8 @@ function findContactPageLink(html: string, origin: string): string | null {
             if (contactUrlObj.origin === originObj.origin) {
               // Additional validation: URL should contain "contact" in path
               const urlPath = contactUrlObj.pathname.toLowerCase();
-              if (urlPath.includes('contact') || urlPath.includes('get-in-touch') || urlPath.includes('reach-us')) {
+              if (urlPath.includes('contact') || urlPath.includes('get-in-touch') || urlPath.includes('reach-us') || 
+                  urlPath.includes('/p/contact') || urlPath.includes('/p/contact-us')) {
                 return contactUrl;
               }
             }
@@ -497,21 +603,37 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
     });
     
     const page = await browser.newPage();
-    page.setDefaultTimeout(30000); // 30 second timeout
+    page.setDefaultTimeout(20000); // 20 second timeout
     
     // Navigate to the contact page
-    const response = await page.goto(contactUrl, {
-      waitUntil: 'networkidle',
-      timeout: 30000,
-    });
+    // Use 'domcontentloaded' which is faster and more reliable
+    let response;
+    try {
+      response = await page.goto(contactUrl, {
+        waitUntil: 'domcontentloaded', // Faster and more reliable
+        timeout: 20000,
+      });
+    } catch (timeoutError: any) {
+      // If timeout, check if page still loaded (sometimes page loads but network never idles)
+      console.log(`[ContactDetector] Navigation timeout in form check, but checking if page loaded anyway...`);
+      const currentUrl = page.url();
+      if (currentUrl && currentUrl !== 'about:blank' && currentUrl.includes(contactUrl.split('/').pop() || '')) {
+        // Page did navigate, just didn't finish loading - continue anyway
+        console.log(`[ContactDetector] Page did navigate to ${currentUrl}, continuing form check...`);
+        response = { ok: () => true, status: () => 200 } as any;
+      } else {
+        console.log(`[ContactDetector] Page did not navigate, timeout error: ${timeoutError.message}`);
+        return false;
+      }
+    }
     
     // Check if page loaded successfully
-    if (!response || !response.ok()) {
-      console.log(`[ContactDetector] Contact page returned ${response?.status() || 'no response'}`);
+    if (!response || (response.ok && !response.ok())) {
+      console.log(`[ContactDetector] Contact page returned ${response?.status?.() || 'no response'}`);
       return false;
     }
     
-    // Wait for page to fully load - wait for network idle and additional time for dynamic content
+    // Wait for page to fully load - wait for additional time for dynamic content
     console.log(`[ContactDetector] Waiting for contact page to fully load...`);
     await sleep(5000); // Wait 5 seconds for initial content
     
@@ -536,7 +658,83 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
     // Additional wait for any remaining dynamic content
     await sleep(3000); // Final wait for any remaining content
     
-    // Get the fully rendered HTML
+    // Use Playwright to evaluate form fields directly (more reliable than regex)
+    const formInfo = await page.evaluate(() => {
+      const forms = Array.from(document.querySelectorAll('form'));
+      if (forms.length === 0) return null;
+      
+      for (const form of forms) {
+        const inputs = Array.from(form.querySelectorAll('input, textarea, select'));
+        const fields = inputs
+          .filter(f => {
+            const type = (f as HTMLInputElement).type?.toLowerCase();
+            return type !== 'submit' && type !== 'button' && type !== 'hidden' && type !== 'reset';
+          })
+          .map(f => {
+            const name = (f as HTMLInputElement).name || (f as HTMLElement).id || '';
+            const type = (f as HTMLInputElement).type?.toLowerCase() || '';
+            const placeholder = (f as HTMLInputElement).placeholder || '';
+            const label = f.closest('label')?.textContent || 
+                        (f.previousElementSibling?.tagName === 'LABEL' ? f.previousElementSibling.textContent : '') ||
+                        '';
+            
+            return {
+              name: name.toLowerCase(),
+              type: type,
+              placeholder: placeholder.toLowerCase(),
+              label: label.toLowerCase(),
+              tagName: f.tagName.toLowerCase()
+            };
+          });
+        
+        if (fields.length === 0) continue;
+        
+        // Check for contact form indicators
+        let hasName = false;
+        let hasEmail = false;
+        let hasMessage = false;
+        let hasPhone = false;
+        
+        for (const field of fields) {
+          const combined = `${field.name} ${field.placeholder} ${field.label}`;
+          
+          if (/name|fullname|firstname|lastname|your.?name/i.test(combined)) hasName = true;
+          if (/email|e-mail/i.test(combined) || field.type === 'email') hasEmail = true;
+          if (/message|comment|inquiry|enquiry|query|question|feedback|tell.?us/i.test(combined) || field.tagName === 'textarea') hasMessage = true;
+          if (/phone|telephone|tel|mobile/i.test(combined)) hasPhone = true;
+        }
+        
+        // Check if it's a non-contact form (search, newsletter, login)
+        const isSearch = fields.some(f => /search|q|query|s/i.test(f.name + f.placeholder + f.label));
+        const isNewsletter = fields.some(f => /newsletter|subscribe|sign.?up/i.test(f.name + f.placeholder + f.label));
+        const isLogin = fields.some(f => /username|user|login|password|pass/i.test(f.name + f.placeholder + f.label));
+        
+        if (isSearch || (isNewsletter && !hasName && !hasMessage) || isLogin) {
+          continue; // Skip this form
+        }
+        
+        // Contact form should have at least email OR (name + message) OR (email + message)
+        if (hasEmail || (hasName && hasMessage) || (hasEmail && hasMessage) || (hasEmail && hasName) || (hasMessage && fields.length >= 2)) {
+          return {
+            found: true,
+            hasName,
+            hasEmail,
+            hasMessage,
+            hasPhone,
+            fieldCount: fields.length
+          };
+        }
+      }
+      
+      return null;
+    });
+    
+    if (formInfo && formInfo.found) {
+      console.log(`[ContactDetector] Form detected via Playwright evaluation: name=${formInfo.hasName}, email=${formInfo.hasEmail}, message=${formInfo.hasMessage}, fields=${formInfo.fieldCount}`);
+      return true;
+    }
+    
+    // Fallback to HTML regex check if Playwright evaluation didn't find it
     const html = await page.content();
 
     // Check for form elements
@@ -623,14 +821,31 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
     }
 
     // Check for email field specifically (contact forms usually have email)
-    const hasEmailField = /<(input|textarea)[^>]*(name|id|placeholder)=["']([^"']*email[^"']*)["']/i.test(html) ||
-                          /type=["']email["']/i.test(html);
+    // More flexible: check for email in any attribute or type
+    const hasEmailField = /<(input|textarea)[^>]*(name|id|placeholder|class|type)=["']([^"']*email[^"']*)["']/i.test(html) ||
+                          /type=["']email["']/i.test(html) ||
+                          /<input[^>]*type=["']email["']/i.test(html);
 
     // Check for message/comment field (contact forms usually have a message field)
-    const hasMessageField = /<(input|textarea)[^>]*(name|id|placeholder)=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback)[^"']*)["']/i.test(html);
+    // More flexible: check for message/comment in any attribute
+    const hasMessageField = /<(input|textarea)[^>]*(name|id|placeholder|class)=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback)[^"']*)["']/i.test(html) ||
+                            /<textarea[^>]*>/i.test(html); // Textarea is often used for messages
 
-    // Contact form should have at least email OR message field
-    return hasEmailField || hasMessageField;
+    // Check for name field (contact forms often have name field)
+    const hasNameField = /<(input|textarea)[^>]*(name|id|placeholder|class)=["']([^"']*(name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)[^"']*)["']/i.test(html);
+
+    // Contact form should have at least:
+    // 1. Email field, OR
+    // 2. Message field (textarea or message/comment field), OR  
+    // 3. Name + Email combination (typical contact form)
+    // Also, if we're on a contact page and have a form with multiple fields, it's likely a contact form
+    const hasMultipleFields = formFields.length >= 2;
+    const isLikelyContactForm = (hasEmailField && hasMessageField) || 
+                                (hasEmailField && hasNameField) ||
+                                (hasEmailField && hasMultipleFields) ||
+                                (hasMessageField && hasMultipleFields);
+
+    return isLikelyContactForm || hasEmailField || hasMessageField;
   } catch (error: any) {
     console.log(`[ContactDetector] Playwright form check failed: ${error.message}`);
     return false;

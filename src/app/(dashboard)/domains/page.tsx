@@ -264,6 +264,51 @@ export default function DomainsPage() {
     }
   };
 
+  const handleRecheckFailed = async () => {
+    if (processing) return;
+    
+    // Filter domains with failed contact checks (error or not_found status)
+    const failedDomains = filteredDomains.filter(
+      d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found"
+    );
+    
+    if (failedDomains.length === 0) {
+      alert("No failed contact checks found to re-check.");
+      return;
+    }
+    
+    const count = failedDomains.length;
+    const message = `Re-check contact pages for ${count} failed domain(s)? This may take some time.`;
+    
+    if (!confirm(message)) {
+      return;
+    }
+    
+    setProcessing(true);
+    try {
+      const domainIds = failedDomains.map(d => d.id);
+      const response = await fetch("/api/domains/check-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domainIds }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Re-check failed completed: ${data.message}`);
+        await fetchDomains();
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to re-check failed contact pages");
+      }
+    } catch (error: any) {
+      console.error("Failed to re-check failed contact pages:", error);
+      alert("Failed to re-check failed contact pages: " + (error.message || "Unknown error"));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProcessing(true);
@@ -791,6 +836,14 @@ https://example3.com,marketing`;
             disabled={filteredDomains.length === 0 || processing}
           >
             Recheck All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+          </button>
+          <button
+            onClick={handleRecheckFailed}
+            className="rounded-lg border border-amber-600 px-4 py-2 text-xs font-medium text-amber-400 hover:bg-amber-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={processing || filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length === 0}
+            title="Re-check only domains with failed contact checks (error or not_found status)"
+          >
+            Recheck Failed ({filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length})
           </button>
         </div>
 

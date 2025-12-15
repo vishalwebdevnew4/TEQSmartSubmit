@@ -14,6 +14,7 @@ export default function SettingsPage() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
+  const [recheckingContacts, setRecheckingContacts] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -61,6 +62,56 @@ export default function SettingsPage() {
   const handleEdit = (key: string, currentValue: string) => {
     setEditingKey(key);
     setEditValue(currentValue);
+  };
+
+  const handleRecheckAllContacts = async () => {
+    if (recheckingContacts) return;
+    
+    // Fetch all domain IDs
+    try {
+      const domainsResponse = await fetch("/api/domains");
+      if (!domainsResponse.ok) {
+        alert("Failed to fetch domains");
+        return;
+      }
+      
+      const domainsData = await domainsResponse.json();
+      const allDomainIds = domainsData.domains?.map((d: any) => d.id) || [];
+      const count = allDomainIds.length;
+      
+      if (count === 0) {
+        alert("No domains found to re-check");
+        return;
+      }
+      
+      const message = `Re-check contact pages for ALL ${count} domain(s)? This may take a very long time.`;
+      
+      if (!confirm(message)) {
+        return;
+      }
+      
+      setRecheckingContacts(true);
+      
+      const response = await fetch("/api/domains/check-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domainIds: allDomainIds }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        alert(`Contact page re-check completed: ${data.message}`);
+        window.location.reload();
+      } else {
+        const error = await response.json();
+        alert(`Failed to re-check contact pages: ${error.detail || "Unknown error"}`);
+      }
+    } catch (error: any) {
+      console.error("Failed to re-check all contact pages:", error);
+      alert(`Failed to re-check all contact pages: ${error.message || "Unknown error"}`);
+    } finally {
+      setRecheckingContacts(false);
+    }
   };
 
   const getDefaultSettings = () => [
@@ -245,6 +296,32 @@ export default function SettingsPage() {
           </ul>
         </section>
       </div>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
+        <h3 className="text-lg font-semibold text-white mb-4">Quick Actions</h3>
+        <div className="space-y-3">
+          <button
+            onClick={handleRecheckAllContacts}
+            disabled={recheckingContacts}
+            className="w-full rounded-lg border border-blue-600 px-4 py-3 text-sm font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {recheckingContacts ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                <span>Rechecking All Contact Pages...</span>
+              </>
+            ) : (
+              <>
+                <span>🔄</span>
+                <span>Recheck All Contact Pages</span>
+              </>
+            )}
+          </button>
+          <p className="text-xs text-slate-500 mt-2">
+            Re-check contact pages for all domains. This may take a long time depending on the number of domains.
+          </p>
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
         <h3 className="text-lg font-semibold text-white mb-4">System Information</h3>
