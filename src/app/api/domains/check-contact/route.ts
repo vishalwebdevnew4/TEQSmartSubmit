@@ -124,17 +124,15 @@ export async function POST(req: NextRequest) {
     const effectiveBatchDelay = batchDelay && batchDelay >= 0 ? batchDelay : DELAY_BETWEEN_BATCHES_MS;
     const effectiveConcurrent = concurrent && concurrent > 0 ? Math.min(concurrent, 10) : CONCURRENT_CHECKS;
 
-    // Limit total domains to prevent timeout (process max 1000 at a time)
-    const MAX_DOMAINS_PER_REQUEST = 1000;
-    if (domainsToCheck.length > MAX_DOMAINS_PER_REQUEST) {
-      return NextResponse.json({
-        detail: `Too many domains (${domainsToCheck.length}). Maximum ${MAX_DOMAINS_PER_REQUEST} domains per request. Please split into smaller batches.`,
-        maxDomains: MAX_DOMAINS_PER_REQUEST,
-        received: domainsToCheck.length,
-      }, { status: 400 });
+    // Auto-split large requests into chunks to prevent timeout
+    const MAX_DOMAINS_PER_CHUNK = 1000;
+    const totalDomains = domainsToCheck.length;
+    const needsAutoSplit = totalDomains > MAX_DOMAINS_PER_CHUNK;
+    
+    console.log(`[ContactCheck] Starting contact check for ${totalDomains} domains`);
+    if (needsAutoSplit) {
+      console.log(`[ContactCheck] Auto-splitting ${totalDomains} domains into chunks of ${MAX_DOMAINS_PER_CHUNK}`);
     }
-
-    console.log(`[ContactCheck] Starting contact check for ${domainsToCheck.length} domains`);
     console.log(`[ContactCheck] Batch size: ${effectiveBatchSize}, Delay: ${effectiveBatchDelay}ms, Concurrent: ${effectiveConcurrent}`);
 
     const results = {
@@ -151,62 +149,98 @@ export async function POST(req: NextRequest) {
         message: string;
       }>,
       batchesProcessed: 0,
-      totalBatches: Math.ceil(domainsToCheck.length / effectiveBatchSize),
+      totalBatches: 0,
+      chunksProcessed: 0,
+      totalChunks: needsAutoSplit ? Math.ceil(totalDomains / MAX_DOMAINS_PER_CHUNK) : 1,
     };
 
-    // Split domains into batches
-    const batches: Array<Array<{ id?: number; url: string }>> = [];
-    for (let i = 0; i < domainsToCheck.length; i += effectiveBatchSize) {
-      batches.push(domainsToCheck.slice(i, i + effectiveBatchSize));
+    // Auto-split into chunks if needed
+    const chunks: Array<Array<{ id?: number; url: string }>> = [];
+    if (needsAutoSplit) {
+      for (let i = 0; i < domainsToCheck.length; i += MAX_DOMAINS_PER_CHUNK) {
+        chunks.push(domainsToCheck.slice(i, i + MAX_DOMAINS_PER_CHUNK));
+      }
+    } else {
+      chunks.push(domainsToCheck);
     }
 
-    results.totalBatches = batches.length;
-    console.log(`[ContactCheck] Split into ${batches.length} batches`);
+    console.log(`[ContactCheck] Processing ${chunks.length} chunk(s) of domains`);
 
-    // Process each batch with delay between batches
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      
-      // Process the batch
-      const batchResults = await processBatch(batch, batchIndex, batches.length, effectiveConcurrent);
-      
-      // Update results
-      for (const result of batchResults) {
-        results.checked++;
+    // Process each chunk
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      const chunk = chunks[chunkIndex];
+      console.log(`[ContactCheck] Processing chunk ${chunkIndex + 1}/${chunks.length} (${chunk.length} domains)`);
+
+      // Split chunk into processing batches
+      const batches: Array<Array<{ id?: number; url: string }>> = [];
+      for (let i = 0; i < chunk.length; i += effectiveBatchSize) {
+        batches.push(chunk.slice(i, i + effectiveBatchSize));
+      }
+
+      results.totalBatches += batches.length;
+      console.log(`[ContactCheck] Chunk ${chunkIndex + 1} split into ${batches.length} batches`);
+
+      // Process each batch within the chunk
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const globalBatchIndex = results.batchesProcessed;
         
-        if (result.status === "found") {
-          results.found++;
-        } else if (result.status === "not_found") {
-          results.notFound++;
-        } else if (result.status === "no_form") {
-          results.noForm++;
-        } else {
-          results.errors++;
-        }
+        // Process the batch
+        const batchResults = await processBatch(batch, globalBatchIndex, results.totalBatches, effectiveConcurrent);
+        
+        // Update results
+        for (const result of batchResults) {
+          results.checked++;
+          
+          if (result.status === "found") {
+            results.found++;
+          } else if (result.status === "not_found") {
+            results.notFound++;
+          } else if (result.status === "no_form") {
+            results.noForm++;
+          } else {
+            results.errors++;
+          }
 
-        results.details.push({
-          domainId: result.domainId,
-          url: result.url,
-          status: result.status,
-          contactUrl: result.contactUrl,
-          message: result.message,
-        });
+          results.details.push({
+            domainId: result.domainId,
+            url: result.url,
+            status: result.status,
+            contactUrl: result.contactUrl,
+            message: result.message,
+          });
+        }
+        
+        results.batchesProcessed++;
+        
+        // Add delay between batches (except for the last batch in chunk)
+        if (batchIndex < batches.length - 1) {
+          console.log(`[ContactCheck] Batch ${globalBatchIndex + 1}/${results.totalBatches} completed. Waiting ${effectiveBatchDelay}ms before next batch...`);
+          await sleep(effectiveBatchDelay);
+        }
       }
       
-      results.batchesProcessed = batchIndex + 1;
+      results.chunksProcessed = chunkIndex + 1;
       
-      // Add delay between batches (except for the last batch)
-      if (batchIndex < batches.length - 1) {
-        console.log(`[ContactCheck] Batch ${batchIndex + 1}/${batches.length} completed. Waiting ${effectiveBatchDelay}ms before next batch...`);
-        await sleep(effectiveBatchDelay);
+      // Add longer delay between chunks (except for the last chunk)
+      if (chunkIndex < chunks.length - 1) {
+        const chunkDelay = effectiveBatchDelay * 3; // 3x delay between chunks
+        console.log(`[ContactCheck] Chunk ${chunkIndex + 1}/${chunks.length} completed. Waiting ${chunkDelay}ms before next chunk...`);
+        await sleep(chunkDelay);
       }
     }
 
     console.log(`[ContactCheck] Completed: ${results.checked} domains checked`);
 
+    const message = needsAutoSplit
+      ? `Checked ${results.checked} domains in ${results.chunksProcessed} chunk(s) and ${results.batchesProcessed} batches. Found: ${results.found}, Not Found: ${results.notFound}, No Form: ${results.noForm}, Errors: ${results.errors}`
+      : `Checked ${results.checked} domains in ${results.batchesProcessed} batches. Found: ${results.found}, Not Found: ${results.notFound}, No Form: ${results.noForm}, Errors: ${results.errors}`;
+
     return NextResponse.json({
-      message: `Checked ${results.checked} domains in ${results.batchesProcessed} batches. Found: ${results.found}, Not Found: ${results.notFound}, No Form: ${results.noForm}, Errors: ${results.errors}`,
+      message,
       ...results,
+      autoSplit: needsAutoSplit,
+      chunkSize: needsAutoSplit ? MAX_DOMAINS_PER_CHUNK : totalDomains,
     });
   } catch (error) {
     console.error("[ContactCheck] Error:", error);
