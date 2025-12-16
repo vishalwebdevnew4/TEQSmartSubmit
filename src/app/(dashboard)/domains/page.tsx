@@ -248,7 +248,17 @@ export default function DomainsPage() {
         body: JSON.stringify({ domainIds }),
       });
 
-      if (response.ok) {
+      if (response.status === 202) {
+        // 202 Accepted - processing in background
+        const data = await response.json();
+        alert(`Contact check started: ${data.message}\n\nProcessing ${data.totalDomains} domain(s) in the background. The page will refresh automatically in a few moments to show updated results.`);
+        // Refresh domains after a delay to show updated results
+        setTimeout(async () => {
+          await fetchDomains();
+          setProcessing(false);
+        }, 5000); // Refresh after 5 seconds
+        return;
+      } else if (response.ok) {
         const data = await response.json();
         alert(`Re-check all completed: ${data.message}`);
         await fetchDomains();
@@ -304,7 +314,7 @@ export default function DomainsPage() {
       return;
     }
     
-    setProcessing(true);
+      setProcessing(true);
     try {
       const domainIds = failedDomains.map(d => d.id);
       const response = await fetch("/api/domains/check-contact", {
@@ -313,7 +323,17 @@ export default function DomainsPage() {
         body: JSON.stringify({ domainIds }),
       });
 
-      if (response.ok) {
+      if (response.status === 202) {
+        // 202 Accepted - processing in background
+        const data = await response.json();
+        alert(`Contact check started: ${data.message}\n\nProcessing ${data.totalDomains} domain(s) in the background. The page will refresh automatically in a few moments to show updated results.`);
+        // Refresh domains after a delay to show updated results
+        setTimeout(async () => {
+          await fetchDomains();
+          setProcessing(false);
+        }, 5000); // Refresh after 5 seconds
+        return;
+      } else if (response.ok) {
         const data = await response.json();
         alert(`Re-check failed completed: ${data.message}`);
         await fetchDomains();

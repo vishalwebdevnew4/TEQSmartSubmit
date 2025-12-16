@@ -119,6 +119,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: "domainIds or urls array is required." }, { status: 400 });
     }
 
+    // Return immediately and process in background to prevent timeout
+    // This prevents the proxy from timing out
+    (async () => {
+      try {
+        await processContactChecksInBackground(
+          domainsToCheck,
+          batchSize,
+          batchDelay,
+          concurrent
+        );
+      } catch (error) {
+        console.error("[ContactCheck] Background processing error:", error);
+      }
+    })();
+
+    // Return immediately with 202 Accepted
+    return NextResponse.json({
+      status: "processing",
+      message: `Contact check started for ${domainsToCheck.length} domain(s). Processing in background...`,
+      totalDomains: domainsToCheck.length,
+    }, { status: 202 }); // 202 Accepted - request accepted but processing asynchronously
+  } catch (error) {
+    console.error("[ContactCheck] Error:", error);
+    return NextResponse.json(
+      { detail: (error as Error).message ?? "Unable to start contact page checks." },
+      { status: 500 }
+    );
+  }
+}
+
+// Background processing function
+async function processContactChecksInBackground(
+  domainsToCheck: Array<{ id?: number; url: string }>,
+  batchSize?: number,
+  batchDelay?: number,
+  concurrent?: number
+) {
+  try {
+
     // Use custom batch size if provided, otherwise use default
     const effectiveBatchSize = batchSize && batchSize > 0 ? Math.min(batchSize, 50) : BATCH_SIZE;
     const effectiveBatchDelay = batchDelay && batchDelay >= 0 ? batchDelay : DELAY_BETWEEN_BATCHES_MS;
@@ -129,7 +168,7 @@ export async function POST(req: NextRequest) {
     const totalDomains = domainsToCheck.length;
     const needsAutoSplit = totalDomains > MAX_DOMAINS_PER_CHUNK;
     
-    console.log(`[ContactCheck] Starting contact check for ${totalDomains} domains`);
+    console.log(`[ContactCheck] Background processing started for ${totalDomains} domains`);
     if (needsAutoSplit) {
       console.log(`[ContactCheck] Auto-splitting ${totalDomains} domains into chunks of ${MAX_DOMAINS_PER_CHUNK}`);
     }
@@ -230,38 +269,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.log(`[ContactCheck] Completed: ${results.checked} domains checked`);
-
-    const message = needsAutoSplit
-      ? `Checked ${results.checked} domains in ${results.chunksProcessed} chunk(s) and ${results.batchesProcessed} batches. Found: ${results.found}, Not Found: ${results.notFound}, No Form: ${results.noForm}, Errors: ${results.errors}`
-      : `Checked ${results.checked} domains in ${results.batchesProcessed} batches. Found: ${results.found}, Not Found: ${results.notFound}, No Form: ${results.noForm}, Errors: ${results.errors}`;
-
-    return NextResponse.json({
-      message,
-      ...results,
-      autoSplit: needsAutoSplit,
-      chunkSize: needsAutoSplit ? MAX_DOMAINS_PER_CHUNK : totalDomains,
-    });
+    console.log(`[ContactCheck] Background processing completed: ${results.checked} domains checked`);
+    console.log(`[ContactCheck] Results - Found: ${results.found}, Not Found: ${results.notFound}, No Form: ${results.noForm}, Errors: ${results.errors}`);
+    
   } catch (error) {
-    console.error("[ContactCheck] Error:", error);
-    
-    // Check if it's a timeout error
-    const errorMessage = (error as Error).message ?? "Unable to check contact pages.";
-    if (errorMessage.includes("timeout") || errorMessage.includes("502") || errorMessage.includes("504")) {
-      return NextResponse.json(
-        { 
-          detail: "Request timed out. The contact check is taking too long. Try reducing the number of domains or increasing batch delays.",
-          suggestion: "Split into smaller batches or use the Recheck Failed option for fewer domains.",
-          error: errorMessage
-        },
-        { status: 504 }
-      );
-    }
-    
-    return NextResponse.json(
-      { detail: errorMessage },
-      { status: 500 }
-    );
+    console.error("[ContactCheck] Background processing error:", error);
   }
 }
 
