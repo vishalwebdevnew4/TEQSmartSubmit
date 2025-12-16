@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { detectContactPage } from "@/lib/contact-page-detector";
 
+// Allow longer execution time for contact checks (5 minutes)
+export const maxDuration = 300;
+export const runtime = "nodejs";
+
 // Configuration for load balancing
 const BATCH_SIZE = parseInt(process.env.CONTACT_CHECK_BATCH_SIZE || "10"); // Process 10 domains per batch
 const DELAY_BETWEEN_BATCHES_MS = parseInt(process.env.CONTACT_CHECK_BATCH_DELAY || "2000"); // 2 seconds between batches
@@ -120,6 +124,16 @@ export async function POST(req: NextRequest) {
     const effectiveBatchDelay = batchDelay && batchDelay >= 0 ? batchDelay : DELAY_BETWEEN_BATCHES_MS;
     const effectiveConcurrent = concurrent && concurrent > 0 ? Math.min(concurrent, 10) : CONCURRENT_CHECKS;
 
+    // Limit total domains to prevent timeout (process max 1000 at a time)
+    const MAX_DOMAINS_PER_REQUEST = 1000;
+    if (domainsToCheck.length > MAX_DOMAINS_PER_REQUEST) {
+      return NextResponse.json({
+        detail: `Too many domains (${domainsToCheck.length}). Maximum ${MAX_DOMAINS_PER_REQUEST} domains per request. Please split into smaller batches.`,
+        maxDomains: MAX_DOMAINS_PER_REQUEST,
+        received: domainsToCheck.length,
+      }, { status: 400 });
+    }
+
     console.log(`[ContactCheck] Starting contact check for ${domainsToCheck.length} domains`);
     console.log(`[ContactCheck] Batch size: ${effectiveBatchSize}, Delay: ${effectiveBatchDelay}ms, Concurrent: ${effectiveConcurrent}`);
 
@@ -196,8 +210,22 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("[ContactCheck] Error:", error);
+    
+    // Check if it's a timeout error
+    const errorMessage = (error as Error).message ?? "Unable to check contact pages.";
+    if (errorMessage.includes("timeout") || errorMessage.includes("502") || errorMessage.includes("504")) {
+      return NextResponse.json(
+        { 
+          detail: "Request timed out. The contact check is taking too long. Try reducing the number of domains or increasing batch delays.",
+          suggestion: "Split into smaller batches or use the Recheck Failed option for fewer domains.",
+          error: errorMessage
+        },
+        { status: 504 }
+      );
+    }
+    
     return NextResponse.json(
-      { detail: (error as Error).message ?? "Unable to check contact pages." },
+      { detail: errorMessage },
       { status: 500 }
     );
   }

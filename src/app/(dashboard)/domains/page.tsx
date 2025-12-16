@@ -253,12 +253,32 @@ export default function DomainsPage() {
         alert(`Re-check all completed: ${data.message}`);
         await fetchDomains();
       } else {
-        const error = await response.json();
-        alert(error.detail || "Failed to re-check all contact pages");
+        let errorMessage = "Failed to re-check all contact pages";
+        try {
+          const error = await response.json();
+          errorMessage = error.detail || error.message || errorMessage;
+          if (error.suggestion) {
+            errorMessage += `\n\nSuggestion: ${error.suggestion}`;
+          }
+          if (error.maxDomains && error.received) {
+            errorMessage += `\n\nReceived ${error.received} domains, but maximum is ${error.maxDomains}. Please split into smaller batches.`;
+          }
+        } catch (parseError) {
+          // If response is not JSON (e.g., HTML error page), use status text
+          errorMessage = `Server error (${response.status}): ${response.statusText || "Request failed"}`;
+        }
+        alert(errorMessage);
       }
     } catch (error: any) {
       console.error("Failed to re-check all contact pages:", error);
-      alert("Failed to re-check all contact pages: " + (error.message || "Unknown error"));
+      let errorMessage = "Failed to re-check all contact pages";
+      if (error.message) {
+        errorMessage += ": " + error.message;
+      }
+      if (error.message?.includes("502") || error.message?.includes("504") || error.message?.includes("timeout")) {
+        errorMessage += "\n\nThe request timed out. Try checking fewer domains at once or split into smaller batches.";
+      }
+      alert(errorMessage);
     } finally {
       setProcessing(false);
     }
@@ -298,12 +318,29 @@ export default function DomainsPage() {
         alert(`Re-check failed completed: ${data.message}`);
         await fetchDomains();
       } else {
-        const error = await response.json();
-        alert(error.detail || "Failed to re-check failed contact pages");
+        let errorMessage = "Failed to re-check failed contact pages";
+        try {
+          const error = await response.json();
+          errorMessage = error.detail || error.message || errorMessage;
+          if (error.suggestion) {
+            errorMessage += `\n\nSuggestion: ${error.suggestion}`;
+          }
+        } catch (parseError) {
+          // If response is not JSON (e.g., HTML error page), use status text
+          errorMessage = `Server error (${response.status}): ${response.statusText || "Request failed"}`;
+        }
+        alert(errorMessage);
       }
     } catch (error: any) {
       console.error("Failed to re-check failed contact pages:", error);
-      alert("Failed to re-check failed contact pages: " + (error.message || "Unknown error"));
+      let errorMessage = "Failed to re-check failed contact pages";
+      if (error.message) {
+        errorMessage += ": " + error.message;
+      }
+      if (error.message?.includes("502") || error.message?.includes("504") || error.message?.includes("timeout")) {
+        errorMessage += "\n\nThe request timed out. Try checking fewer domains at once or use the 'Recheck Failed' option.";
+      }
+      alert(errorMessage);
     } finally {
       setProcessing(false);
     }
