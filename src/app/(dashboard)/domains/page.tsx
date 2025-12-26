@@ -161,7 +161,11 @@ export default function DomainsPage() {
     setProcessing(true);
     try {
       // Show a message that this may take up to 2 minutes (Playwright waits for page loading)
-      alert("Re-checking contact page... This may take up to 2 minutes. The system will use Playwright to verify the contact page link. Please wait.");
+      const userConfirmed = confirm("Re-checking contact page... This may take up to 2 minutes. The system will use Playwright to verify the contact page link. Continue?");
+      if (!userConfirmed) {
+        setProcessing(false);
+        return;
+      }
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes timeout (increased for Playwright waits)
@@ -177,18 +181,33 @@ export default function DomainsPage() {
 
       if (response.ok) {
         const data = await response.json();
-        alert(`Re-check completed: ${data.message}`);
-        await fetchDomains();
+        
+        // Check if it's a background processing response (202)
+        if (response.status === 202) {
+          alert(`Re-check started in background: ${data.message}\n\nThe page will refresh when complete.`);
+          // Poll for updates or refresh after a delay
+          setTimeout(() => {
+            fetchDomains();
+          }, 5000);
+        } else {
+          // Single domain check - immediate result
+          const statusEmoji = data.success ? "✅" : data.contactCheckStatus === "found" ? "✅" : "❌";
+          const statusText = data.contactCheckStatus || "unknown";
+          const contactUrl = data.contactUrl ? `\nContact URL: ${data.contactUrl}` : "";
+          
+          alert(`${statusEmoji} Re-check completed!\n\nStatus: ${statusText}${contactUrl}\n\nMessage: ${data.message}`);
+          await fetchDomains();
+        }
       } else {
         const error = await response.json();
-        alert(error.detail || "Failed to re-check contact page");
+        alert(`❌ Failed to re-check contact page: ${error.detail || "Unknown error"}`);
       }
     } catch (error: any) {
       console.error("Failed to re-check contact page:", error);
       if (error.name === 'AbortError') {
-        alert("Request timed out. The check is taking longer than expected. Please try again.");
+        alert("⏱️ Request timed out. The check is taking longer than expected. Please try again.");
       } else {
-        alert("Failed to re-check contact page: " + (error.message || "Unknown error"));
+        alert(`❌ Failed to re-check contact page: ${error.message || "Unknown error"}`);
       }
     } finally {
       setProcessing(false);
@@ -198,7 +217,7 @@ export default function DomainsPage() {
   const handleBulkRecheck = async () => {
     if (processing || selectedIds.length === 0) return;
     
-    if (!confirm(`Re-check contact pages for ${selectedIds.length} selected domain(s)? This may take several minutes.`)) {
+    if (!confirm(`Re-check contact pages for ${selectedIds.length} selected domain(s)? This may take several minutes (processing in background).`)) {
       return;
     }
     
@@ -210,19 +229,49 @@ export default function DomainsPage() {
         body: JSON.stringify({ domainIds: selectedIds }),
       });
 
-      if (response.ok) {
+      if (response.status === 202) {
+        // 202 Accepted - processing in background
         const data = await response.json();
-        alert(`Bulk re-check completed: ${data.message}`);
+        alert(`✅ Bulk re-check started!\n\n${data.message}\n\nProcessing ${data.totalDomains} selected domain(s) in the background.\n\nThe page will auto-refresh every 10 seconds to show updated results.`);
+        
+        // Set up periodic refresh to show updated results
+        let refreshCount = 0;
+        const maxRefreshes = 30; // Refresh for up to 5 minutes
+        const refreshInterval = setInterval(async () => {
+          refreshCount++;
+          await fetchDomains();
+          
+          if (refreshCount >= maxRefreshes) {
+            clearInterval(refreshInterval);
+            setProcessing(false);
+            setSelectedIds([]);
+            alert(`⏱️ Auto-refresh stopped after ${maxRefreshes * 10} seconds. You can manually refresh to see the latest results.`);
+          }
+        }, 10000); // Refresh every 10 seconds
+        
+        // Store interval ID
+        (window as any).recheckRefreshInterval = refreshInterval;
+        
+        // Initial refresh after 5 seconds
+        setTimeout(async () => {
+          await fetchDomains();
+        }, 5000);
+        
+        return;
+      } else if (response.ok) {
+        const data = await response.json();
+        alert(`✅ Bulk re-check completed: ${data.message}`);
         await fetchDomains();
         setSelectedIds([]);
+        setProcessing(false);
       } else {
         const error = await response.json();
-        alert(error.detail || "Failed to bulk re-check contact pages");
+        alert(`❌ Failed to bulk re-check contact pages: ${error.detail || "Unknown error"}`);
+        setProcessing(false);
       }
     } catch (error: any) {
       console.error("Failed to bulk re-check contact pages:", error);
-      alert("Failed to bulk re-check contact pages: " + (error.message || "Unknown error"));
-    } finally {
+      alert(`❌ Failed to bulk re-check contact pages: ${error.message || "Unknown error"}`);
       setProcessing(false);
     }
   };
@@ -232,8 +281,8 @@ export default function DomainsPage() {
     
     const count = filteredDomains.length;
     const message = filteredDomains.length === allDomains.length
-      ? `Re-check contact pages for ALL ${count} domain(s)? This may take a very long time.`
-      : `Re-check contact pages for ${count} filtered domain(s)? This may take a very long time.`;
+      ? `Re-check contact pages for ALL ${count} domain(s)? This may take a very long time (processing in background).`
+      : `Re-check contact pages for ${count} filtered domain(s)? This may take a very long time (processing in background).`;
     
     if (!confirm(message)) {
       return;
@@ -251,19 +300,38 @@ export default function DomainsPage() {
       if (response.status === 202) {
         // 202 Accepted - processing in background
         const data = await response.json();
-        alert(`Contact check started: ${data.message}\n\nProcessing ${data.totalDomains} domain(s) in the background. The page will refresh automatically in a few moments to show updated results.`);
-        // Refresh domains after a delay to show updated results
+        alert(`✅ Contact check started!\n\n${data.message}\n\nProcessing ${data.totalDomains} domain(s) in the background.\n\nThe page will auto-refresh every 10 seconds to show updated results.\n\nYou can continue using the page while processing continues.`);
+        
+        // Set up periodic refresh to show updated results
+        let refreshCount = 0;
+        const maxRefreshes = 30; // Refresh for up to 5 minutes (30 * 10 seconds)
+        const refreshInterval = setInterval(async () => {
+          refreshCount++;
+          await fetchDomains();
+          
+          if (refreshCount >= maxRefreshes) {
+            clearInterval(refreshInterval);
+            setProcessing(false);
+            alert(`⏱️ Auto-refresh stopped after ${maxRefreshes * 10} seconds. You can manually refresh to see the latest results.`);
+          }
+        }, 10000); // Refresh every 10 seconds
+        
+        // Store interval ID so we can clear it if needed
+        (window as any).recheckRefreshInterval = refreshInterval;
+        
+        // Also do an initial refresh after 5 seconds
         setTimeout(async () => {
           await fetchDomains();
-          setProcessing(false);
-        }, 5000); // Refresh after 5 seconds
+        }, 5000);
+        
         return;
       } else if (response.ok) {
         const data = await response.json();
-        alert(`Re-check all completed: ${data.message}`);
+        alert(`✅ Re-check all completed: ${data.message}`);
         await fetchDomains();
+        setProcessing(false);
       } else {
-        let errorMessage = "Failed to re-check all contact pages";
+        let errorMessage = "❌ Failed to re-check all contact pages";
         try {
           const error = await response.json();
           errorMessage = error.detail || error.message || errorMessage;
@@ -278,10 +346,11 @@ export default function DomainsPage() {
           errorMessage = `Server error (${response.status}): ${response.statusText || "Request failed"}`;
         }
         alert(errorMessage);
+        setProcessing(false);
       }
     } catch (error: any) {
       console.error("Failed to re-check all contact pages:", error);
-      let errorMessage = "Failed to re-check all contact pages";
+      let errorMessage = "❌ Failed to re-check all contact pages";
       if (error.message) {
         errorMessage += ": " + error.message;
       }
@@ -289,7 +358,6 @@ export default function DomainsPage() {
         errorMessage += "\n\nThe request timed out. Try checking fewer domains at once or split into smaller batches.";
       }
       alert(errorMessage);
-    } finally {
       setProcessing(false);
     }
   };
@@ -308,13 +376,13 @@ export default function DomainsPage() {
     }
     
     const count = failedDomains.length;
-    const message = `Re-check contact pages for ${count} failed domain(s)? This may take some time.`;
+    const message = `Re-check contact pages for ${count} failed domain(s)? This may take some time (processing in background).`;
     
     if (!confirm(message)) {
       return;
     }
     
-      setProcessing(true);
+    setProcessing(true);
     try {
       const domainIds = failedDomains.map(d => d.id);
       const response = await fetch("/api/domains/check-contact", {
@@ -326,19 +394,38 @@ export default function DomainsPage() {
       if (response.status === 202) {
         // 202 Accepted - processing in background
         const data = await response.json();
-        alert(`Contact check started: ${data.message}\n\nProcessing ${data.totalDomains} domain(s) in the background. The page will refresh automatically in a few moments to show updated results.`);
-        // Refresh domains after a delay to show updated results
+        alert(`✅ Contact check started!\n\n${data.message}\n\nProcessing ${data.totalDomains} failed domain(s) in the background.\n\nThe page will auto-refresh every 10 seconds to show updated results.\n\nYou can continue using the page while processing continues.`);
+        
+        // Set up periodic refresh to show updated results
+        let refreshCount = 0;
+        const maxRefreshes = 30; // Refresh for up to 5 minutes (30 * 10 seconds)
+        const refreshInterval = setInterval(async () => {
+          refreshCount++;
+          await fetchDomains();
+          
+          if (refreshCount >= maxRefreshes) {
+            clearInterval(refreshInterval);
+            setProcessing(false);
+            alert(`⏱️ Auto-refresh stopped after ${maxRefreshes * 10} seconds. You can manually refresh to see the latest results.`);
+          }
+        }, 10000); // Refresh every 10 seconds
+        
+        // Store interval ID so we can clear it if needed
+        (window as any).recheckRefreshInterval = refreshInterval;
+        
+        // Also do an initial refresh after 5 seconds
         setTimeout(async () => {
           await fetchDomains();
-          setProcessing(false);
-        }, 5000); // Refresh after 5 seconds
+        }, 5000);
+        
         return;
       } else if (response.ok) {
         const data = await response.json();
-        alert(`Re-check failed completed: ${data.message}`);
+        alert(`✅ Re-check failed completed: ${data.message}`);
         await fetchDomains();
+        setProcessing(false);
       } else {
-        let errorMessage = "Failed to re-check failed contact pages";
+        let errorMessage = "❌ Failed to re-check failed contact pages";
         try {
           const error = await response.json();
           errorMessage = error.detail || error.message || errorMessage;
@@ -350,18 +437,18 @@ export default function DomainsPage() {
           errorMessage = `Server error (${response.status}): ${response.statusText || "Request failed"}`;
         }
         alert(errorMessage);
+        setProcessing(false);
       }
     } catch (error: any) {
       console.error("Failed to re-check failed contact pages:", error);
-      let errorMessage = "Failed to re-check failed contact pages";
+      let errorMessage = "❌ Failed to re-check failed contact pages";
       if (error.message) {
         errorMessage += ": " + error.message;
       }
       if (error.message?.includes("502") || error.message?.includes("504") || error.message?.includes("timeout")) {
-        errorMessage += "\n\nThe request timed out. Try checking fewer domains at once or use the 'Recheck Failed' option.";
+        errorMessage += "\n\nThe request timed out. Try checking fewer domains at once or split into smaller batches.";
       }
       alert(errorMessage);
-    } finally {
       setProcessing(false);
     }
   };
@@ -870,10 +957,21 @@ https://example3.com,marketing`;
           </button>
           <button
             onClick={handleBulkRecheck}
-            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             disabled={selectedIds.length === 0 || processing}
+            title={`Re-check contact pages for ${selectedIds.length} selected domain(s). Processing in background.`}
           >
-            Bulk Recheck {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
+            {processing ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                Processing...
+              </>
+            ) : (
+              <>
+                <span>🔄</span>
+                Bulk Recheck {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
+              </>
+            )}
           </button>
           <button
             onClick={() => setShowBulkDeleteModal(true)}
@@ -889,18 +987,41 @@ https://example3.com,marketing`;
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Contact Check:</span>
           <button
             onClick={handleRecheckAll}
-            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             disabled={filteredDomains.length === 0 || processing}
+            title={filteredDomains.length === allDomains.length 
+              ? `Re-check contact pages for ALL ${filteredDomains.length} domain(s). Processing in background.`
+              : `Re-check contact pages for ${filteredDomains.length} filtered domain(s). Processing in background.`}
           >
-            Recheck All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+            {processing ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                Processing...
+              </>
+            ) : (
+              <>
+                <span>🔄</span>
+                Recheck All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+              </>
+            )}
           </button>
           <button
             onClick={handleRecheckFailed}
-            className="rounded-lg border border-amber-600 px-4 py-2 text-xs font-medium text-amber-400 hover:bg-amber-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-lg border border-amber-600 px-4 py-2 text-xs font-medium text-amber-400 hover:bg-amber-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             disabled={processing || filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length === 0}
-            title="Re-check only domains with failed contact checks (error or not_found status)"
+            title={`Re-check only domains with failed contact checks (error or not_found status). Found ${filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length} failed domain(s). Processing in background.`}
           >
-            Recheck Failed ({filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length})
+            {processing ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                Processing...
+              </>
+            ) : (
+              <>
+                <span>🔍</span>
+                Recheck Failed ({filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length})
+              </>
+            )}
           </button>
         </div>
 
@@ -1050,9 +1171,10 @@ https://example3.com,marketing`;
                       <button
                         onClick={() => handleRecheckContact(domain)}
                         disabled={processing}
-                        className="mr-3 hover:text-yellow-300 disabled:opacity-50"
-                        title="Re-check contact page"
+                        className="mr-3 hover:text-yellow-300 disabled:opacity-50 flex items-center gap-1"
+                        title="Re-check contact page for this domain. This may take up to 2 minutes."
                       >
+                        <span>🔄</span>
                         Re-check
                       </button>
                       <button

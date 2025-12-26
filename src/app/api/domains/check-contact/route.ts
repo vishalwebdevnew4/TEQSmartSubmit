@@ -119,27 +119,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: "domainIds or urls array is required." }, { status: 400 });
     }
 
-    // Return immediately and process in background to prevent timeout
-    // This prevents the proxy from timing out
-    (async () => {
-      try {
-        await processContactChecksInBackground(
-          domainsToCheck,
-          batchSize,
-          batchDelay,
-          concurrent
-        );
-      } catch (error) {
-        console.error("[ContactCheck] Background processing error:", error);
-      }
-    })();
+    // For single domain checks, process synchronously and return results
+    // For multiple domains, process in background to prevent timeout
+    if (domainsToCheck.length === 1) {
+      console.log(`[ContactCheck] Processing single domain synchronously: ${domainsToCheck[0].url}`);
+      const result = await processDomainCheck(domainsToCheck[0]);
+      
+      return NextResponse.json({
+        status: result.status,
+        message: result.success 
+          ? `Contact check completed: ${result.message}` 
+          : `Contact check failed: ${result.message}`,
+        domainId: result.domainId,
+        url: result.url,
+        contactUrl: result.contactUrl,
+        contactCheckStatus: result.status,
+        success: result.success,
+      });
+    } else {
+      // For multiple domains, process in background
+      console.log(`[ContactCheck] Processing ${domainsToCheck.length} domains in background`);
+      
+      // Return immediately and process in background to prevent timeout
+      (async () => {
+        try {
+          await processContactChecksInBackground(
+            domainsToCheck,
+            batchSize,
+            batchDelay,
+            concurrent
+          );
+        } catch (error) {
+          console.error("[ContactCheck] Background processing error:", error);
+        }
+      })();
 
-    // Return immediately with 202 Accepted
-    return NextResponse.json({
-      status: "processing",
-      message: `Contact check started for ${domainsToCheck.length} domain(s). Processing in background...`,
-      totalDomains: domainsToCheck.length,
-    }, { status: 202 }); // 202 Accepted - request accepted but processing asynchronously
+      // Return immediately with 202 Accepted
+      return NextResponse.json({
+        status: "processing",
+        message: `Contact check started for ${domainsToCheck.length} domain(s). Processing in background...`,
+        totalDomains: domainsToCheck.length,
+      }, { status: 202 }); // 202 Accepted - request accepted but processing asynchronously
+    }
   } catch (error) {
     console.error("[ContactCheck] Error:", error);
     return NextResponse.json(
