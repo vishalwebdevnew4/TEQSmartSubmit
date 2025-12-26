@@ -164,52 +164,58 @@ export default function ReportsPage() {
 
       {stats && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Total Submissions</p>
-            <p className="mt-1 text-2xl font-semibold text-white">{stats.total}</p>
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Total Submissions</p>
+            <p className="mt-3 text-2xl font-bold text-white">{stats.total}</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Success Rate</p>
-            <p className="mt-1 text-2xl font-semibold text-emerald-400">{stats.successRate}%</p>
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Success Rate</p>
+            <p className="mt-3 text-2xl font-bold text-emerald-400">{stats.successRate}%</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Successful</p>
-            <p className="mt-1 text-2xl font-semibold text-emerald-400">{stats.success}</p>
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Successful</p>
+            <p className="mt-3 text-2xl font-bold text-emerald-400">{stats.success}</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Failed</p>
-            <p className="mt-1 text-2xl font-semibold text-rose-400">{stats.failed}</p>
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Failed</p>
+            <p className="mt-3 text-2xl font-bold text-rose-400">{stats.failed}</p>
           </div>
         </div>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-          <h3 className="text-lg font-semibold text-white">Quick Exports</h3>
-          <p className="mt-2 text-xs text-slate-400">Choose presets to export recent automation data.</p>
-          <div className="mt-4 grid gap-3">
+        <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-6 shadow-lg">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-lg">⚡</span>
+            <h3 className="text-lg font-semibold text-white">Quick Exports</h3>
+          </div>
+          <p className="mb-4 text-xs text-slate-400">Choose presets to export recent automation data.</p>
+          <div className="grid gap-3">
             <button
               onClick={handleTodaySuccess}
               disabled={exporting}
-              className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:from-indigo-400 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
             >
+              <span>📊</span>
               {getButtonText("Success Today (CSV)", "csv", "success")}
             </button>
             <button
               onClick={handleWeekFailed}
               disabled={exporting}
-              className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:from-indigo-400 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
             >
+              <span>📊</span>
               {getButtonText("Failed This Week (JSON)", "json", "failed")}
             </button>
             <button
               onClick={() => setCustomRange(!customRange)}
-              className={`rounded-lg border px-4 py-2 text-xs font-medium hover:bg-slate-800 transition-colors ${
+              className={`inline-flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all ${
                 customRange
-                  ? "border-indigo-500 bg-indigo-500/20 text-indigo-300"
-                  : "border-slate-700 text-slate-200"
+                  ? "border-indigo-500/50 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20"
+                  : "border-slate-700/50 bg-slate-800/50 text-slate-200 hover:bg-slate-700/50"
               }`}
             >
+              <span>📅</span>
               Custom Range
             </button>
             {customRange && (
@@ -247,26 +253,31 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-          <h3 className="text-lg font-semibold text-white">Export Options</h3>
-          <p className="mt-2 text-xs text-slate-400">Export all logs or filter by status and date range.</p>
-          <div className="mt-4 space-y-3 text-sm text-slate-300">
-            <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+        <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-6 shadow-lg">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-lg">📊</span>
+            <h3 className="text-lg font-semibold text-white">Export Options</h3>
+          </div>
+          <p className="mb-4 text-xs text-slate-400">Export all logs or filter by status and date range.</p>
+          <div className="space-y-3 text-sm text-slate-300">
+            <div className="rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-medium">All Logs</span>
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleExport(null, null, "csv")}
                     disabled={exporting}
-                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
+                    <span>📥</span>
                     {getButtonText("CSV", "csv", "all")}
                   </button>
                   <button
                     onClick={() => handleExport(null, null, "json")}
                     disabled={exporting}
-                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
+                    <span>📥</span>
                     {getButtonText("JSON", "json", "all")}
                   </button>
                 </div>
@@ -280,15 +291,17 @@ export default function ReportsPage() {
                   <button
                     onClick={() => handleExport("success", null, "csv")}
                     disabled={exporting}
-                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
+                    <span>📥</span>
                     {getButtonText("CSV", "csv", "success")}
                   </button>
                   <button
                     onClick={() => handleExport("success", null, "json")}
                     disabled={exporting}
-                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
+                    <span>📥</span>
                     {getButtonText("JSON", "json", "success")}
                   </button>
                 </div>
@@ -302,15 +315,17 @@ export default function ReportsPage() {
                   <button
                     onClick={() => handleExport("failed", null, "csv")}
                     disabled={exporting}
-                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
+                    <span>📥</span>
                     {getButtonText("CSV", "csv", "failed")}
                   </button>
                   <button
                     onClick={() => handleExport("failed", null, "json")}
                     disabled={exporting}
-                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
+                    <span>📥</span>
                     {getButtonText("JSON", "json", "failed")}
                   </button>
                 </div>

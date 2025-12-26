@@ -19,4 +19,41 @@ yarn-error.log*
 # misc
 .DS_Store
 
+# User-specific files (should not be in repo)
+.bash_history
+.bashrc
+.profile
+.gitconfig
+.viminfo
+.lesshst
 
+# User directories
+.cache/
+.config/
+.local/
+.npm/
+.nvm/
+.pki/
+.pm2/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs
+*.log
+error.log
+
+# Temporary files
+tmp/
+*.tmp
+
+# Test files (if not needed in repo)
+# tests/
+# test_*.py
+
+# Frontend build (if separate)
+# frontend/

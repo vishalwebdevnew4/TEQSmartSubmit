@@ -243,107 +243,115 @@ export default function LogsPage() {
 
       {logs.length > 0 && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Total Logs</p>
-            <p className="mt-1 text-2xl font-semibold text-white">{logs.length}</p>
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Total Logs</p>
+            <p className="mt-3 text-2xl font-bold text-white">{logs.length}</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Success</p>
-            <p className="mt-1 text-2xl font-semibold text-emerald-400">
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Success</p>
+            <p className="mt-3 text-2xl font-bold text-emerald-400">
               {logs.filter(l => l.status === "success").length}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Failed</p>
-            <p className="mt-1 text-2xl font-semibold text-rose-400">
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Failed</p>
+            <p className="mt-3 text-2xl font-bold text-rose-400">
               {logs.filter(l => l.status === "failed").length}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-            <p className="text-xs text-slate-400">Running</p>
-            <p className="mt-1 text-2xl font-semibold text-yellow-400">
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg hover:border-slate-700 transition-colors">
+            <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Running</p>
+            <p className="mt-3 text-2xl font-bold text-yellow-400">
               {logs.filter(l => l.status === "running" || l.status === "pending").length}
             </p>
           </div>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 text-xs items-center">
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing || loading}
-          className="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-          title="Refresh logs"
-        >
-          <svg
-            className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+      <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg">
+        <div className="flex flex-wrap gap-3 items-center">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/50 hover:border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            title="Refresh logs"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-          {refreshing ? "Refreshing..." : "Refresh"}
-        </button>
-        <button
-          onClick={() => setShowFilter(!showFilter)}
-          className={`rounded-lg border px-4 py-2 font-medium hover:bg-slate-800 transition-colors ${
-            showFilter ? "border-indigo-500 bg-indigo-500/20 text-indigo-300" : "border-slate-700 text-slate-200"
-          }`}
-        >
-          Filter {filterStatus && `(${filterStatus})`}
-        </button>
-        {showFilter && (
-          <div className="flex gap-2 items-center">
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-200"
+            <svg
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <option value="">All Statuses</option>
-              <option value="success">Success</option>
-              <option value="failed">Failed</option>
-              <option value="pending">Pending</option>
-              <option value="running">Running</option>
-            </select>
-          </div>
-        )}
-        <button
-          onClick={() => handleExport("csv")}
-          className="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-200 hover:bg-slate-800"
-        >
-          Export CSV
-        </button>
-        <button
-          onClick={() => handleExport("json")}
-          className="rounded-lg border border-slate-700 px-4 py-2 font-medium text-slate-200 hover:bg-slate-800"
-        >
-          Export JSON
-        </button>
-        <button
-          onClick={handleClearLogs}
-          className="rounded-lg border border-rose-600 px-4 py-2 font-medium text-rose-400 hover:bg-rose-600/20 hover:border-rose-500 transition-colors"
-          title="Delete all logs from database"
-        >
-          Clear Logs
-        </button>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </button>
+          <button
+            onClick={() => setShowFilter(!showFilter)}
+            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all ${
+              showFilter 
+                ? "border-indigo-500/50 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20" 
+                : "border-slate-700/50 bg-slate-800/50 text-slate-200 hover:bg-slate-700/50"
+            }`}
+          >
+            <span>🔍</span>
+            Filter {filterStatus && `(${filterStatus})`}
+          </button>
+          {showFilter && (
+            <div className="flex gap-2 items-center">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2 text-sm text-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
+              >
+                <option value="">All Statuses</option>
+                <option value="success">Success</option>
+                <option value="failed">Failed</option>
+                <option value="pending">Pending</option>
+                <option value="running">Running</option>
+              </select>
+            </div>
+          )}
+          <button
+            onClick={() => handleExport("csv")}
+            className="inline-flex items-center gap-2 rounded-lg border border-blue-600/50 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-400 hover:bg-blue-500/20 transition-all"
+          >
+            <span>📥</span>
+            Export CSV
+          </button>
+          <button
+            onClick={() => handleExport("json")}
+            className="inline-flex items-center gap-2 rounded-lg border border-blue-600/50 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-400 hover:bg-blue-500/20 transition-all"
+          >
+            <span>📥</span>
+            Export JSON
+          </button>
+          <button
+            onClick={handleClearLogs}
+            className="inline-flex items-center gap-2 rounded-lg border border-rose-600/50 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-400 hover:bg-rose-500/20 transition-all"
+            title="Delete all logs from database"
+          >
+            <span>🗑️</span>
+            Clear Logs
+          </button>
+        </div>
       </div>
 
       <div className="space-y-3">
         {logs.length === 0 ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center text-sm text-slate-400">
-            No logs found.
+          <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-8 text-center shadow-lg">
+            <p className="text-sm text-slate-300">No logs found.</p>
           </div>
         ) : (
           logs.map((log) => (
           <div
             key={log.id}
-            className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 text-sm shadow-sm hover:border-slate-700"
+            className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 text-sm shadow-lg hover:border-slate-700 transition-all"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex-1">
@@ -356,7 +364,13 @@ export default function LogsPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getStatusColor(log.status)}`}>
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border ${getStatusColor(log.status)}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      log.status === "success" ? "bg-emerald-300" :
+                      log.status === "failed" ? "bg-rose-300" :
+                      log.status === "pending" || log.status === "running" ? "bg-yellow-300 animate-pulse" :
+                      "bg-slate-300"
+                    }`}></span>
                     {log.status}
                   </span>
                   {log.message && (

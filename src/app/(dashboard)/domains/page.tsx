@@ -812,29 +812,39 @@ https://example3.com,marketing`;
       </header>
 
       {/* Filter Controls */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg">
         <div className="flex flex-wrap gap-4 items-end">
           {/* Search by URL */}
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-medium text-slate-400 mb-1">Search by URL</label>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search domains..."
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-            />
+            <label className="block text-xs font-semibold text-slate-300 mb-2 tracking-wide">Search by URL</label>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search domains..."
+                className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Status Filter */}
           <div className="min-w-[150px]">
-            <label className="block text-xs font-medium text-slate-400 mb-1">Status</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-2 tracking-wide">Status</label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "disabled")}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+              className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all cursor-pointer"
             >
-              <option value="all">All</option>
+              <option value="all">All Status</option>
               <option value="active">Active</option>
               <option value="disabled">Disabled</option>
             </select>
@@ -842,11 +852,11 @@ https://example3.com,marketing`;
 
           {/* Category Filter */}
           <div className="min-w-[150px]">
-            <label className="block text-xs font-medium text-slate-400 mb-1">Category</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-2 tracking-wide">Category</label>
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+              className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all cursor-pointer"
             >
               <option value="all">All Categories</option>
               {uniqueCategories.map((category) => (
@@ -859,13 +869,13 @@ https://example3.com,marketing`;
 
           {/* Contact Status Filter */}
           <div className="min-w-[150px]">
-            <label className="block text-xs font-medium text-slate-400 mb-1">Contact Status</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-2 tracking-wide">Contact Status</label>
             <select
               value={contactStatusFilter}
               onChange={(e) => setContactStatusFilter(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+              className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all cursor-pointer"
             >
-              <option value="all">All</option>
+              <option value="all">All Status</option>
               <option value="pending">Pending</option>
               <option value="found">Found</option>
               <option value="not_found">Not Found</option>
@@ -922,148 +932,177 @@ https://example3.com,marketing`;
       </div>
 
       {/* Organized Button Groups */}
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Add/Import Section */}
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Add/Import:</span>
-          <button
-            onClick={handleAdd}
-            className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 transition-colors"
-          >
-            Add Domain
-          </button>
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
-          >
-            Upload CSV
-          </button>
+        <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-4 shadow-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">➕</span>
+            <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Add/Import</h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleAdd}
+              className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-indigo-600 px-4 py-2 text-sm font-medium text-white hover:from-indigo-400 hover:to-indigo-500 transition-all shadow-sm hover:shadow-md"
+            >
+              <span>➕</span>
+              Add Domain
+            </button>
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/50 hover:border-slate-600 transition-all"
+            >
+              <span>📤</span>
+              Upload CSV
+            </button>
+          </div>
         </div>
 
         {/* Bulk Actions Section */}
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Bulk Actions:</span>
-          <button
-            onClick={() => setShowBulkEnableModal(true)}
-            className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
-          >
-            Bulk Enable
-          </button>
-          <button
-            onClick={() => setShowBulkDisableModal(true)}
-            className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors"
-          >
-            Bulk Disable
-          </button>
-          <button
-            onClick={handleBulkRecheck}
-            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            disabled={selectedIds.length === 0 || processing}
-            title={`Re-check contact pages for ${selectedIds.length} selected domain(s). Processing in background.`}
-          >
-            {processing ? (
-              <>
-                <span className="animate-spin">⏳</span>
-                Processing...
-              </>
-            ) : (
-              <>
-                <span>🔄</span>
-                Bulk Recheck {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
-              </>
-            )}
-          </button>
-          <button
-            onClick={() => setShowBulkDeleteModal(true)}
-            className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={selectedIds.length === 0}
-          >
-            Bulk Delete
-          </button>
+        <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-4 shadow-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">⚡</span>
+            <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Bulk Actions</h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setShowBulkEnableModal(true)}
+              disabled={selectedIds.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>✓</span>
+              Enable
+            </button>
+            <button
+              onClick={() => setShowBulkDisableModal(true)}
+              disabled={selectedIds.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600/50 bg-slate-700/30 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>⊘</span>
+              Disable
+            </button>
+            <button
+              onClick={handleBulkRecheck}
+              disabled={selectedIds.length === 0 || processing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title={`Re-check contact pages for ${selectedIds.length} selected domain(s). Processing in background.`}
+            >
+              {processing ? (
+                <>
+                  <span className="animate-spin">⏳</span>
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <span>🔄</span>
+                  Recheck {selectedIds.length > 0 ? `(${selectedIds.length})` : ""}
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => setShowBulkDeleteModal(true)}
+              disabled={selectedIds.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>🗑️</span>
+              Delete
+            </button>
+          </div>
         </div>
 
         {/* Contact Check Section */}
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Contact Check:</span>
-          <button
-            onClick={handleRecheckAll}
-            className="rounded-lg border border-blue-600 px-4 py-2 text-xs font-medium text-blue-400 hover:bg-blue-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            disabled={filteredDomains.length === 0 || processing}
-            title={filteredDomains.length === allDomains.length 
-              ? `Re-check contact pages for ALL ${filteredDomains.length} domain(s). Processing in background.`
-              : `Re-check contact pages for ${filteredDomains.length} filtered domain(s). Processing in background.`}
-          >
-            {processing ? (
-              <>
-                <span className="animate-spin">⏳</span>
-                Processing...
-              </>
-            ) : (
-              <>
-                <span>🔄</span>
-                Recheck All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
-              </>
-            )}
-          </button>
-          <button
-            onClick={handleRecheckFailed}
-            className="rounded-lg border border-amber-600 px-4 py-2 text-xs font-medium text-amber-400 hover:bg-amber-600/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            disabled={processing || filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length === 0}
-            title={`Re-check only domains with failed contact checks (error or not_found status). Found ${filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length} failed domain(s). Processing in background.`}
-          >
-            {processing ? (
-              <>
-                <span className="animate-spin">⏳</span>
-                Processing...
-              </>
-            ) : (
-              <>
-                <span>🔍</span>
-                Recheck Failed ({filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length})
-              </>
-            )}
-          </button>
+        <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-4 shadow-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">🔍</span>
+            <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Contact Check</h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleRecheckAll}
+              disabled={filteredDomains.length === 0 || processing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600/50 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title={filteredDomains.length === allDomains.length 
+                ? `Re-check contact pages for ALL ${filteredDomains.length} domain(s). Processing in background.`
+                : `Re-check contact pages for ${filteredDomains.length} filtered domain(s). Processing in background.`}
+            >
+              {processing ? (
+                <>
+                  <span className="animate-spin">⏳</span>
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <span>🔄</span>
+                  Recheck All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleRecheckFailed}
+              disabled={processing || filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-400 hover:bg-amber-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title={`Re-check only domains with failed contact checks (error or not_found status). Found ${filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length} failed domain(s). Processing in background.`}
+            >
+              {processing ? (
+                <>
+                  <span className="animate-spin">⏳</span>
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <span>🔍</span>
+                  Recheck Failed ({filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length})
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Dangerous Actions Section */}
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide mr-2">Danger Zone:</span>
-          <button
-            onClick={handleDownloadFailedDomains}
-            className="rounded-lg border border-rose-600 px-4 py-2 text-xs font-medium text-rose-400 hover:bg-rose-600/20 transition-colors"
-          >
-            Download Failed Domains
-          </button>
-          <button
-            onClick={() => setShowDeleteAllModal(true)}
-            className="rounded-lg border border-rose-700 px-4 py-2 text-xs font-medium text-rose-300 hover:bg-rose-700/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={filteredDomains.length === 0}
-          >
-            Delete All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
-          </button>
+        <div className="rounded-xl border border-rose-800/50 bg-gradient-to-br from-rose-900/20 to-slate-900/40 backdrop-blur-sm p-4 shadow-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">⚠️</span>
+            <h3 className="text-sm font-semibold text-rose-300 uppercase tracking-wide">Danger Zone</h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleDownloadFailedDomains}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition-all"
+            >
+              <span>📥</span>
+              Download Failed
+            </button>
+            <button
+              onClick={() => setShowDeleteAllModal(true)}
+              disabled={filteredDomains.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-700/50 bg-rose-600/10 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-600/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>🗑️</span>
+              Delete All {filteredDomains.length !== allDomains.length ? `(${filteredDomains.length})` : ""}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+      <div className="overflow-hidden rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm shadow-lg">
         <table className="min-w-full border-collapse text-left text-sm">
-          <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-400">
+          <thead className="bg-slate-800/30 border-b border-slate-700/50">
             <tr>
-              <th className="px-6 py-4">
+              <th className="px-6 py-4 text-left">
                 <input
                   type="checkbox"
                   checked={selectedIds.length === domains.length && domains.length > 0}
                   onChange={toggleSelectAll}
-                  className="rounded border-slate-600 bg-slate-800"
+                  className="rounded border-slate-600 bg-slate-800/50 cursor-pointer focus:ring-2 focus:ring-indigo-500/50"
                 />
               </th>
-              <th className="px-6 py-4">Domain URL</th>
-              <th className="px-6 py-4">Status</th>
-              <th className="px-6 py-4">Category</th>
-              <th className="px-6 py-4">Contact Page</th>
-              <th className="px-6 py-4 text-right">Actions</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Domain URL</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Status</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Category</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Contact Page</th>
+              <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-slate-800/50">
             {domains.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-400">
@@ -1082,52 +1121,60 @@ https://example3.com,marketing`;
                     : null;
 
                 return (
-                  <tr key={domain.id} className="hover:bg-slate-900/80">
+                  <tr key={domain.id} className="hover:bg-slate-800/30 transition-colors border-b border-slate-800/30">
                     <td className="px-6 py-4">
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(domain.id)}
                         onChange={() => toggleSelect(domain.id)}
-                        className="rounded border-slate-600 bg-slate-800"
+                        className="rounded border-slate-600 bg-slate-800/50 cursor-pointer focus:ring-2 focus:ring-indigo-500/50"
                       />
                     </td>
-                    <td className="px-6 py-4 font-medium text-slate-100">
-                      <a 
-                        href={domain.url.startsWith('http') ? domain.url : `https://${domain.url}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-indigo-400 hover:text-indigo-300 text-blue"
-                        title={domain.url}
-                      >
-                        {domain.url}
-                      </a>
-                      {templatePreview && (
-                        <div className="mt-1 text-xs text-slate-400">
-                          Templates: {templatePreview}
-                          {domain.templates.length === 3 && "…"}
-                        </div>
-                      )}
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col gap-1">
+                        <a 
+                          href={domain.url.startsWith('http') ? domain.url : `https://${domain.url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1.5 group"
+                          title={domain.url}
+                        >
+                          <span className="group-hover:underline">{domain.url}</span>
+                          <span className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity">↗</span>
+                        </a>
+                        {templatePreview && (
+                          <div className="text-xs text-slate-400 flex items-center gap-1">
+                            <span className="text-slate-500">📋</span>
+                            <span>{templatePreview}{domain.templates.length === 3 && "…"}</span>
+                          </div>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-xs">
+                    <td className="px-6 py-4">
                       <span
-                        className={`rounded-full px-3 py-1 font-semibold ${
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
                           domain.isActive
-                            ? "bg-emerald-500/10 text-emerald-300"
-                            : "bg-slate-700/40 text-slate-300"
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            : "bg-slate-700/40 text-slate-400 border border-slate-700/50"
                         }`}
                       >
+                        <span className={`w-1.5 h-1.5 rounded-full ${domain.isActive ? "bg-emerald-400" : "bg-slate-400"}`}></span>
                         {domain.isActive ? "Active" : "Disabled"}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-slate-300">{domain.category ?? "—"}</td>
-                    <td className="px-6 py-4 text-xs">
+                    <td className="px-6 py-4">
+                      <span className="text-sm text-slate-300">{domain.category ?? <span className="text-slate-500">—</span>}</span>
+                    </td>
+                    <td className="px-6 py-4">
                       {domain.contactCheckStatus === "pending" ? (
-                        <span className="rounded-full px-3 py-1 font-semibold bg-yellow-500/10 text-yellow-300">
+                        <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse"></span>
                           Checking...
                         </span>
                       ) : domain.contactCheckStatus === "found" ? (
-                        <div>
-                          <span className="rounded-full px-3 py-1 font-semibold bg-emerald-500/10 text-emerald-300">
+                        <div className="flex flex-col gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 w-fit">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                             Found
                           </span>
                           {domain.contactPageUrl && (
@@ -1135,60 +1182,68 @@ https://example3.com,marketing`;
                               href={domain.contactPageUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="block mt-1 text-xs text-indigo-400 hover:text-indigo-300 truncate max-w-[200px]"
+                              className="text-xs text-indigo-400 hover:text-indigo-300 truncate max-w-[200px] flex items-center gap-1 group"
                               title={domain.contactPageUrl}
                             >
-                              {domain.contactPageUrl.length > 30
-                                ? domain.contactPageUrl.substring(0, 30) + "..."
-                                : domain.contactPageUrl}
+                              <span className="group-hover:underline">
+                                {domain.contactPageUrl.length > 30
+                                  ? domain.contactPageUrl.substring(0, 30) + "..."
+                                  : domain.contactPageUrl}
+                              </span>
+                              <span className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity">↗</span>
                             </a>
                           )}
                         </div>
                       ) : domain.contactCheckStatus === "not_found" ? (
-                        <span className="rounded-full px-3 py-1 font-semibold bg-rose-500/10 text-rose-300">
+                        <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
                           Not Found
                         </span>
                       ) : domain.contactCheckStatus === "no_form" ? (
-                        <span className="rounded-full px-3 py-1 font-semibold bg-orange-500/10 text-orange-300" title="Contact page found but no contact form detected (may have search/newsletter forms only)">
-                          No Contact Form
+                        <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20" title="Contact page found but no contact form detected (may have search/newsletter forms only)">
+                          <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
+                          No Form
                         </span>
                       ) : domain.contactCheckStatus === "error" ? (
                         <span 
-                          className="rounded-full px-3 py-1 font-semibold bg-slate-700/40 text-slate-300 cursor-help"
+                          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium bg-slate-700/40 text-slate-400 border border-slate-700/50 cursor-help"
                           title={domain.contactCheckMessage || "Error checking contact page"}
                         >
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                           {domain.contactCheckMessage 
-                            ? (domain.contactCheckMessage.length > 30 
-                                ? domain.contactCheckMessage.substring(0, 30) + "..." 
+                            ? (domain.contactCheckMessage.length > 25 
+                                ? domain.contactCheckMessage.substring(0, 25) + "..." 
                                 : domain.contactCheckMessage)
                             : "Error"}
                         </span>
                       ) : (
-                        <span className="text-slate-500">—</span>
+                        <span className="text-slate-500 text-sm">—</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-right text-xs text-slate-400">
-                      <button
-                        onClick={() => handleRecheckContact(domain)}
-                        disabled={processing}
-                        className="mr-3 hover:text-yellow-300 disabled:opacity-50 flex items-center gap-1"
-                        title="Re-check contact page for this domain. This may take up to 2 minutes."
-                      >
-                        <span>🔄</span>
-                        Re-check
-                      </button>
-                      <button
-                        onClick={() => handleEdit(domain)}
-                        className="mr-3 hover:text-indigo-300"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(domain.id)}
-                        className="hover:text-rose-300"
-                      >
-                        Remove
-                      </button>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleRecheckContact(domain)}
+                          disabled={processing}
+                          className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-yellow-300 hover:bg-yellow-500/10 rounded-lg border border-transparent hover:border-yellow-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                          title="Re-check contact page for this domain. This may take up to 2 minutes."
+                        >
+                          <span className="text-sm">🔄</span>
+                          Re-check
+                        </button>
+                        <button
+                          onClick={() => handleEdit(domain)}
+                          className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-indigo-300 hover:bg-indigo-500/10 rounded-lg border border-transparent hover:border-indigo-500/20 transition-all"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(domain.id)}
+                          className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg border border-transparent hover:border-rose-500/20 transition-all"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1200,7 +1255,7 @@ https://example3.com,marketing`;
 
       {/* Pagination Controls */}
       {filteredDomains.length > 0 && (
-        <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900/60 px-6 py-4">
+        <div className="flex items-center justify-between rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm px-6 py-4 shadow-lg">
           <div className="text-sm text-slate-400">
             Page {currentPage} of {Math.ceil(filteredDomains.length / itemsPerPage)}
           </div>

@@ -36,6 +36,7 @@ export default function TemplatesPage() {
     domainId: "",
     fieldMappings: "{}",
   });
+  const [fieldMappingsList, setFieldMappingsList] = useState<Array<{ key: string; value: string }>>([]);
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
@@ -215,38 +216,56 @@ export default function TemplatesPage() {
         <p className="text-sm text-slate-400">Create reusable mappings that the automation engine relies on.</p>
       </header>
 
-      <div className="flex flex-wrap gap-3 items-center justify-between">
-        <button
-          onClick={handleCreate}
-          className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 transition-colors"
-        >
-          + New Template
-        </button>
-        
-        <div className="flex flex-wrap gap-3 items-center">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search templates..."
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none min-w-[200px]"
-          />
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value as "all" | "universal" | "domain")}
-            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none"
+      <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 shadow-lg">
+        <div className="flex flex-wrap gap-4 items-end">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-semibold text-slate-300 mb-2 tracking-wide">Search Templates</label>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search templates..."
+                className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm text-white placeholder-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+          
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-slate-300 mb-2 tracking-wide">Filter Type</label>
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as "all" | "universal" | "domain")}
+              className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all cursor-pointer"
+            >
+              <option value="all">All Templates</option>
+              <option value="universal">Universal Only</option>
+              <option value="domain">Domain-Specific</option>
+            </select>
+          </div>
+
+          <button
+            onClick={handleCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:from-indigo-400 hover:to-indigo-500 transition-all shadow-sm hover:shadow-md"
           >
-            <option value="all">All Templates</option>
-            <option value="universal">Universal Only</option>
-            <option value="domain">Domain-Specific</option>
-          </select>
+            <span>➕</span>
+            New Template
+          </button>
         </div>
       </div>
 
       {templates.length > 0 && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-          <div className="flex items-center gap-4 text-sm text-slate-400">
-            <span>Total: <span className="text-white font-medium">{templates.length}</span></span>
+        <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-4 shadow-lg">
+          <div className="flex items-center gap-4 text-sm text-slate-300 mb-4">
+            <span className="font-semibold">Total: <span className="text-white font-bold">{templates.length}</span></span>
             <span>Universal: <span className="text-indigo-300 font-medium">{templates.filter(t => t.domainId === null).length}</span></span>
             <span>Domain-Specific: <span className="text-emerald-300 font-medium">{templates.filter(t => t.domainId !== null).length}</span></span>
             {searchQuery && (
@@ -260,12 +279,14 @@ export default function TemplatesPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         {filteredTemplates.length === 0 ? (
-          <div className="col-span-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center text-sm text-slate-400">
-            {templates.length === 0 
-              ? "No templates found. Create your first template to get started."
-              : searchQuery || filterType !== "all"
-              ? "No templates match your filters."
-              : "No templates found."}
+          <div className="col-span-2 rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-8 text-center shadow-lg">
+            <p className="text-sm text-slate-300">
+              {templates.length === 0 
+                ? "No templates found. Create your first template to get started."
+                : searchQuery || filterType !== "all"
+                ? "No templates match your filters."
+                : "No templates found."}
+            </p>
           </div>
         ) : (
           filteredTemplates.map((template) => {
@@ -273,7 +294,7 @@ export default function TemplatesPage() {
             const preview = formatFieldMappings(template.fieldMappings);
 
             return (
-              <div key={template.id} className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 hover:border-slate-700 transition-colors">
+              <div key={template.id} className="space-y-3 rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-6 shadow-lg hover:border-slate-700 transition-all">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-white">{template.name}</h3>
@@ -289,14 +310,16 @@ export default function TemplatesPage() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleEdit(template)}
-                      className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-600/50 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20 transition-all"
                     >
-                Edit
-              </button>
+                      <span>✏️</span>
+                      Edit
+                    </button>
                     <button
                       onClick={() => handleDelete(template.id)}
-                      className="rounded-lg border border-rose-500/50 px-3 py-1 text-xs font-medium text-rose-200 hover:bg-rose-500/10"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-all"
                     >
+                      <span>🗑️</span>
                       Delete
                     </button>
                   </div>
@@ -304,17 +327,18 @@ export default function TemplatesPage() {
                 {template.description && (
                   <p className="text-sm text-slate-300">{template.description}</p>
                 )}
-            <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-              <p className="text-xs text-slate-400">Mapped fields</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <div className="rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
+              <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-3">Mapped Fields</p>
+              <div className="flex flex-wrap gap-2">
                     {fields.length > 0 ? (
                       fields.map((field) => (
-                  <span key={field} className="rounded-full bg-indigo-500/20 px-3 py-1 text-indigo-300">
+                  <span key={field} className="inline-flex items-center gap-1 rounded-full bg-indigo-500/20 border border-indigo-500/30 px-3 py-1.5 text-xs font-medium text-indigo-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
                     {field}
                   </span>
                       ))
                     ) : (
-                      <span className="text-slate-500">No fields mapped</span>
+                      <span className="text-slate-500 text-xs">No fields mapped</span>
                     )}
               </div>
             </div>
