@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 type TemplateFieldMappings = Record<string, unknown>;
 
@@ -40,6 +40,10 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const [averageTimePerDomain, setAverageTimePerDomain] = useState(0); // in seconds (static calculation)
   const [recheckingContacts, setRecheckingContacts] = useState(false);
+
+  // Refs for polling - must be at top level, not inside useEffect
+  const isPageVisible = useRef(true);
+  const lastActivityTime = useRef(Date.now());
 
   const delaySeconds = 5;
   const retryLimit = 2;
@@ -188,13 +192,36 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
     // Check immediately on mount
     checkRunningSubmissions();
 
-    // Poll every 3 seconds for running submissions (only if not manually running)
-    const intervalId = setInterval(() => {
-      // Always check to update status from database
-      checkRunningSubmissions();
-    }, 3000);
+    // Adaptive polling with Page Visibility API
+    // Note: isPageVisible and lastActivityTime are defined at component top level
+    let timeoutId: NodeJS.Timeout | null = null;
+    
+    const handleVisibilityChange = () => {
+      isPageVisible.current = !document.hidden;
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    
+    const getPollInterval = () => {
+      const timeSinceActivity = Date.now() - lastActivityTime.current;
+      // Fast polling (2s) when active, slower (10s) when idle
+      return timeSinceActivity < 30000 ? 2000 : 10000;
+    };
+    
+    const poll = () => {
+      if (isPageVisible.current) {
+        checkRunningSubmissions();
+        lastActivityTime.current = Date.now();
+        timeoutId = setTimeout(poll, getPollInterval());
+      }
+    };
+    
+    // Start polling
+    timeoutId = setTimeout(poll, getPollInterval());
 
-    return () => clearInterval(intervalId);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [domain, allDomains, status, isRunning, runAllDomains]);
 
   const primaryTemplate = domain?.templates?.[0];

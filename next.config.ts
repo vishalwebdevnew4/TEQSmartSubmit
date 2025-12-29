@@ -17,6 +17,12 @@ const nextConfig: NextConfig = {
   generateBuildId: async () => {
     return 'build-' + Date.now();
   },
+  // Enable compression
+  compress: true,
+  // Optimize images
+  images: {
+    formats: ['image/avif', 'image/webp'],
+  },
 };
 
 export default nextConfig;

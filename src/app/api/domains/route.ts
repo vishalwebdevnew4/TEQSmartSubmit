@@ -40,17 +40,37 @@ export async function GET(req: NextRequest) {
     
     if (domainIds.length > 0) {
       try {
-        // Use $queryRaw to fetch contact check messages
-        const contactChecks = await prisma.$queryRaw<Array<{ domainId: bigint; message: string | null }>>`
-          SELECT DISTINCT ON ("domainId") "domainId", "message"
-          FROM "ContactCheck"
-          WHERE "domainId" = ANY(ARRAY[${domainIds.join(',')}]::int[])
-            AND "status" = 'error'
-          ORDER BY "domainId", "checkedAt" DESC
-        `;
+        // Use Prisma to fetch latest contact check messages for error status
+        // Get all contact checks for these domains with error status, then group by domainId
+        const contactChecks = await prisma.contactCheck.findMany({
+          where: {
+            domainId: { in: domainIds },
+            status: 'error',
+          },
+          orderBy: {
+            checkedAt: 'desc',
+          },
+          select: {
+            domainId: true,
+            message: true,
+            checkedAt: true,
+          },
+        });
+        
+        // Group by domainId and take the most recent one for each domain
+        const latestByDomain = new Map<number, { message: string | null; checkedAt: Date }>();
+        for (const check of contactChecks) {
+          const existing = latestByDomain.get(check.domainId);
+          if (!existing || check.checkedAt > existing.checkedAt) {
+            latestByDomain.set(check.domainId, {
+              message: check.message,
+              checkedAt: check.checkedAt,
+            });
+          }
+        }
         
         errorMessageMap = new Map(
-          contactChecks.map((check) => [Number(check.domainId), check.message])
+          Array.from(latestByDomain.entries()).map(([domainId, data]) => [domainId, data.message])
         );
       } catch (error) {
         // If query fails, continue without error messages

@@ -36,7 +36,7 @@ export default function TemplatesPage() {
     domainId: "",
     fieldMappings: "{}",
   });
-  const [fieldMappingsList, setFieldMappingsList] = useState<Array<{ key: string; value: string }>>([]);
+  const [fieldMappingsList, setFieldMappingsList] = useState<Array<{ key: string; value: string; type?: 'text' | 'number' | 'boolean' | 'object' }>>([]);
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
@@ -103,6 +103,7 @@ export default function TemplatesPage() {
       domainId: "",
       fieldMappings: "{}",
     });
+    setFieldMappingsList([]);
     setShowModal(true);
   };
 
@@ -114,6 +115,27 @@ export default function TemplatesPage() {
       domainId: template.domainId?.toString() || "",
       fieldMappings: JSON.stringify(template.fieldMappings, null, 2),
     });
+    // Convert field mappings object to array for easier editing
+    const mappingsArray = Object.entries(template.fieldMappings || {}).map(([key, value]: [string, any]) => {
+      let type: 'text' | 'number' | 'boolean' | 'object' = 'text';
+      let stringValue = '';
+      
+      if (typeof value === 'boolean') {
+        type = 'boolean';
+        stringValue = String(value);
+      } else if (typeof value === 'number') {
+        type = 'number';
+        stringValue = String(value);
+      } else if (typeof value === 'object' && value !== null) {
+        type = 'object';
+        stringValue = JSON.stringify(value, null, 2);
+      } else {
+        stringValue = String(value);
+      }
+      
+      return { key, value: stringValue, type };
+    });
+    setFieldMappingsList(mappingsArray.length > 0 ? mappingsArray : []);
     setShowModal(true);
   };
 
@@ -138,16 +160,30 @@ export default function TemplatesPage() {
     e.preventDefault();
     setProcessing(true);
     try {
-      let fieldMappings;
-      try {
-        fieldMappings = JSON.parse(formData.fieldMappings);
-        // Validate that it's an object
-        if (typeof fieldMappings !== "object" || Array.isArray(fieldMappings)) {
-          alert("Field mappings must be a valid JSON object");
-          return;
+      // Convert field mappings list to object
+      const fieldMappings: Record<string, any> = {};
+      for (const mapping of fieldMappingsList) {
+        if (mapping.key.trim() && mapping.value.trim()) {
+          // Try to parse value as JSON if it looks like JSON, otherwise use as string
+          let parsedValue: any = mapping.value.trim();
+          try {
+            // Check if it's a JSON object/array/boolean/number
+            if (mapping.value.trim().startsWith('{') || mapping.value.trim().startsWith('[') || 
+                mapping.value.trim() === 'true' || mapping.value.trim() === 'false' ||
+                (!isNaN(Number(mapping.value.trim())) && mapping.value.trim() !== '')) {
+              parsedValue = JSON.parse(mapping.value.trim());
+            }
+          } catch {
+            // If parsing fails, use as string
+            parsedValue = mapping.value.trim();
+          }
+          fieldMappings[mapping.key.trim()] = parsedValue;
         }
-      } catch {
-        alert("Invalid JSON in field mappings");
+      }
+      
+      if (Object.keys(fieldMappings).length === 0) {
+        alert("Please add at least one field mapping");
+        setProcessing(false);
         return;
       }
 
@@ -168,6 +204,7 @@ export default function TemplatesPage() {
       if (response.ok) {
         setShowModal(false);
         setEditingTemplate(null);
+        setFieldMappingsList([]);
         fetchTemplates();
       } else {
         const error = await response.json();
@@ -353,44 +390,54 @@ export default function TemplatesPage() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-semibold text-white mb-4">
-              {editingTemplate ? "Edit Template" : "New Template"}
-            </h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-3xl rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/95 to-slate-900/80 backdrop-blur-sm p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800/50">
+              <div className="w-10 h-10 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
+                <span className="text-lg">{editingTemplate ? "✏️" : "➕"}</span>
+              </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Name *</label>
+                <h3 className="text-xl font-semibold text-white">
+                  {editingTemplate ? "Edit Template" : "New Template"}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {editingTemplate ? "Update template configuration" : "Create a new form template"}
+                </p>
+              </div>
+            </div>
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div>
+                <label className="block text-sm font-semibold text-slate-300 mb-2">Template Name *</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
-                  placeholder="Default Contact Form"
+                  className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+                  placeholder="e.g., Default Contact Form"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Description</label>
+                <label className="block text-sm font-semibold text-slate-300 mb-2">Description</label>
                 <input
                   type="text"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
-                  placeholder="Optional description"
+                  className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+                  placeholder="Optional description for this template"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
+                <label className="block text-sm font-semibold text-slate-300 mb-2">
                   Domain (optional)
-                  <span className="ml-2 text-xs text-slate-500 font-normal">
-                    Leave empty to create a universal template that works with all domains
-                  </span>
                 </label>
+                <p className="text-xs text-slate-400 mb-2">
+                  Leave empty to create a universal template that works with all domains
+                </p>
                 <select
                   value={formData.domainId}
                   onChange={(e) => setFormData({ ...formData, domainId: e.target.value })}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                  className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all cursor-pointer"
                 >
                   <option value="">🌐 Universal (all domains)</option>
                   {domains.map((domain) => (
@@ -401,40 +448,278 @@ export default function TemplatesPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">
-                  Field Mappings (JSON) *
-                  <span className="ml-2 text-xs text-slate-500 font-normal">
-                    Format: {`{"fieldName": "selector"}`}
-                  </span>
-                </label>
-                <textarea
-                  value={formData.fieldMappings}
-                  onChange={(e) => setFormData({ ...formData, fieldMappings: e.target.value })}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono text-sm h-48"
-                  placeholder='{"name": "input[name=\\"fullname\\"]", "email": "input#email", "message": "textarea[name=\\"message\\"]"}'
-                  required
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  Example: {`{"name": "input[name='name']", "email": "input#email", "message": "textarea"}`}
-              </p>
-            </div>
-              <div className="flex gap-3 justify-end">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-semibold text-slate-300">
+                    Field Mappings *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setFieldMappingsList([...fieldMappingsList, { key: "", value: "", type: 'text' }])}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-600/50 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20 transition-all"
+                  >
+                    <span>➕</span>
+                    Add Field
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mb-3">
+                  Configure field mappings and settings. Values can be text, numbers, booleans, or JSON objects.
+                </p>
+                
+                {fieldMappingsList.length === 0 ? (
+                  <div className="rounded-lg border-2 border-dashed border-slate-700/50 bg-slate-800/30 p-8 text-center">
+                    <p className="text-sm text-slate-400 mb-3">No field mappings added yet</p>
+                    <button
+                      type="button"
+                      onClick={() => setFieldMappingsList([{ key: "", value: "", type: 'text' }])}
+                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-500/10 border border-indigo-600/50 px-4 py-2 text-sm font-medium text-indigo-300 hover:bg-indigo-500/20 transition-all"
+                    >
+                      <span>➕</span>
+                      Add Your First Field Mapping
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {fieldMappingsList.map((mapping, index) => {
+                      const detectedType = mapping.type || (() => {
+                        const val = mapping.value.trim();
+                        if (val === 'true' || val === 'false') return 'boolean';
+                        if (!isNaN(Number(val)) && val !== '') return 'number';
+                        if (val.startsWith('{') || val.startsWith('[')) return 'object';
+                        return 'text';
+                      })();
+                      
+                      return (
+                        <div key={index} className="rounded-lg border border-slate-700/50 bg-slate-800/50 p-4">
+                          <div className="grid grid-cols-[1.2fr_1fr_0.8fr_auto] gap-3 items-start">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                                Field Name
+                              </label>
+                              <input
+                                type="text"
+                                value={mapping.key}
+                                onChange={(e) => {
+                                  const newList = [...fieldMappingsList];
+                                  newList[index].key = e.target.value;
+                                  setFieldMappingsList(newList);
+                                }}
+                                className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all"
+                                placeholder="e.g., name, email, captcha"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                                Value Type
+                              </label>
+                              <select
+                                value={detectedType}
+                                onChange={(e) => {
+                                  const newList = [...fieldMappingsList];
+                                  newList[index].type = e.target.value as any;
+                                  // Reset value if switching types
+                                  if (e.target.value === 'boolean') {
+                                    newList[index].value = 'true';
+                                  } else if (e.target.value === 'number') {
+                                    newList[index].value = '0';
+                                  } else if (e.target.value === 'object') {
+                                    newList[index].value = '{}';
+                                  } else {
+                                    newList[index].value = '';
+                                  }
+                                  setFieldMappingsList(newList);
+                                }}
+                                className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all cursor-pointer"
+                              >
+                                <option value="text">Text / CSS Selector</option>
+                                <option value="number">Number</option>
+                                <option value="boolean">Boolean (true/false)</option>
+                                <option value="object">JSON Object/Array</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                                {detectedType === 'boolean' ? 'Boolean Value' : 
+                                 detectedType === 'number' ? 'Number Value' :
+                                 detectedType === 'object' ? 'JSON Value' :
+                                 'Value / CSS Selector'}
+                              </label>
+                              {detectedType === 'boolean' ? (
+                                <select
+                                  value={mapping.value}
+                                  onChange={(e) => {
+                                    const newList = [...fieldMappingsList];
+                                    newList[index].value = e.target.value;
+                                    setFieldMappingsList(newList);
+                                  }}
+                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all cursor-pointer"
+                                >
+                                  <option value="true">true</option>
+                                  <option value="false">false</option>
+                                </select>
+                              ) : detectedType === 'number' ? (
+                                <input
+                                  type="number"
+                                  value={mapping.value}
+                                  onChange={(e) => {
+                                    const newList = [...fieldMappingsList];
+                                    newList[index].value = e.target.value;
+                                    setFieldMappingsList(newList);
+                                  }}
+                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all"
+                                  placeholder="e.g., 600000"
+                                />
+                              ) : detectedType === 'object' ? (
+                                <textarea
+                                  value={mapping.value}
+                                  onChange={(e) => {
+                                    const newList = [...fieldMappingsList];
+                                    newList[index].value = e.target.value;
+                                    setFieldMappingsList(newList);
+                                  }}
+                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all font-mono h-20 resize-y"
+                                  placeholder='{"key": "value"} or [...]'
+                                />
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={mapping.value}
+                                  onChange={(e) => {
+                                    const newList = [...fieldMappingsList];
+                                    newList[index].value = e.target.value;
+                                    setFieldMappingsList(newList);
+                                  }}
+                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all font-mono"
+                                  placeholder='e.g., input[name="name"], #email, or any text'
+                                />
+                              )}
+                            </div>
+                            <div className="pt-6">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newList = fieldMappingsList.filter((_, i) => i !== index);
+                                  setFieldMappingsList(newList);
+                                }}
+                                className="rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-all"
+                                title="Remove this field mapping"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                          {mapping.key && mapping.value && (
+                            <div className="mt-3 flex items-center gap-2 text-xs">
+                              <span className="text-slate-400">Preview:</span>
+                              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-950/50 border border-slate-800/50">
+                                <span className="font-semibold text-indigo-300">{mapping.key}</span>
+                                <span className="text-slate-600">→</span>
+                                {detectedType === 'object' ? (
+                                  <span className="text-emerald-300 font-mono text-[10px]">
+                                    {(() => {
+                                      try {
+                                        const parsed = JSON.parse(mapping.value);
+                                        if (typeof parsed === 'object' && parsed !== null) {
+                                          const keys = Object.keys(parsed);
+                                          return keys.length > 0 
+                                            ? `{${keys.length} ${keys.length === 1 ? 'key' : 'keys'}}`
+                                            : '{}';
+                                        }
+                                      } catch {}
+                                      return 'JSON';
+                                    })()}
+                                  </span>
+                                ) : detectedType === 'boolean' ? (
+                                  <span className={`font-semibold ${mapping.value === 'true' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {mapping.value}
+                                  </span>
+                                ) : detectedType === 'number' ? (
+                                  <span className="text-blue-300 font-mono">
+                                    {mapping.value}
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-300 font-mono text-[10px] max-w-[200px] truncate" title={mapping.value}>
+                                    {mapping.value.length > 30 ? mapping.value.substring(0, 30) + '...' : mapping.value}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                <div className="mt-4 rounded-lg border border-slate-800/50 bg-gradient-to-br from-indigo-950/30 to-slate-950/50 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-lg">💡</span>
+                    <p className="text-xs font-semibold text-slate-300">Common CSS Selectors:</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                    <div className="flex items-start gap-2">
+                      <span className="text-indigo-400 mt-0.5">•</span>
+                      <div>
+                        <code className="text-indigo-300 font-mono">input[name="name"]</code>
+                        <span className="text-slate-500 ml-2">By name attribute</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="text-indigo-400 mt-0.5">•</span>
+                      <div>
+                        <code className="text-indigo-300 font-mono">#email</code>
+                        <span className="text-slate-500 ml-2">By ID</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="text-indigo-400 mt-0.5">•</span>
+                      <div>
+                        <code className="text-indigo-300 font-mono">input[type="email"]</code>
+                        <span className="text-slate-500 ml-2">By type</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="text-indigo-400 mt-0.5">•</span>
+                      <div>
+                        <code className="text-indigo-300 font-mono">textarea</code>
+                        <span className="text-slate-500 ml-2">By tag name</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3 justify-end pt-4 border-t border-slate-800/50">
                 <button
                   type="button"
                   onClick={() => {
                     setShowModal(false);
                     setEditingTemplate(null);
+                    setFieldMappingsList([]);
                   }}
-                  className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-700/50 transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={processing}
-                  className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-400 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-indigo-500 to-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:from-indigo-400 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
                 >
-                  {processing ? "Saving..." : editingTemplate ? "Update" : "Create"}
+                  {processing ? (
+                    <>
+                      <span className="animate-spin">⏳</span>
+                      Saving...
+                    </>
+                  ) : editingTemplate ? (
+                    <>
+                      <span>💾</span>
+                      Update Template
+                    </>
+                  ) : (
+                    <>
+                      <span>✨</span>
+                      Create Template
+                    </>
+                  )}
                 </button>
               </div>
             </form>

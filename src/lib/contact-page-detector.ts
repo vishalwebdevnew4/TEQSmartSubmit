@@ -105,24 +105,31 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
       }
     }
     
-    // Extract just the domain (origin) - always use homepage for contact detection
-    // This handles cases where URLs have paths like /users/..., /profile/..., etc.
+    // Extract just the domain (origin)
     const origin = url.origin;
     const isHomepage = (url.pathname === '/' || url.pathname === '') && !url.hash && !url.search;
     const homepageUrl = `${origin}/`;
     
-    // If URL has a path, log it but we'll check the homepage instead
+    // Determine which URL to check
+    // For blog/resource pages, check both the page and homepage (page might have contact forms)
+    // For other paths, prefer homepage but also check the provided page
+    const isResourcePage = /\/blog\/|\/resources\/|\/articles\/|\/posts\/|\/news\/|\/help\/|\/support\/|\/docs\//i.test(url.pathname);
+    
     if (!isHomepage) {
-      console.log(`[ContactDetector] URL has path/hash/query (${url.pathname}${url.search}${url.hash}), checking homepage instead: ${homepageUrl}`);
+      if (isResourcePage) {
+        console.log(`[ContactDetector] Resource/blog page detected (${url.pathname}), will check both this page and homepage`);
+      } else {
+        console.log(`[ContactDetector] URL has path (${url.pathname}), will check homepage first, then this page if needed`);
+      }
     }
     
     console.log(`[ContactDetector] Checking contact page for domain: ${origin}`);
     console.log(`[ContactDetector] Provided URL: ${baseUrl}, isHomepage: ${isHomepage}`);
 
     // Fetch homepage (or provided page) with better error handling and retry logic
-    // Prefer homepage for better contact link detection, but fallback to provided URL
+    // For resource pages, check the page itself first; otherwise check homepage
     let response: Response;
-    let urlToFetch = isHomepage ? baseUrl : homepageUrl;
+    let urlToFetch = (isHomepage || isResourcePage) ? baseUrl : homepageUrl;
     let finalUrl = urlToFetch; // Track final URL after redirects
     let finalOrigin = origin; // Track final origin after redirects
     
@@ -276,48 +283,140 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
         }
       }
       if (fetchError.message?.includes("fetch failed") || fetchError.message?.includes("network") || fetchError.message?.includes("ECONNRESET")) {
+        // Try Playwright as fallback - some sites block standard fetch but allow browser requests
+        console.log(`[ContactDetector] Fetch failed with network error, trying Playwright as fallback for ${urlToFetch}...`);
+        try {
+          // Use Playwright to get HTML and final URL in one go
+          let browser: Browser | null = null;
+          let playwrightHtml = '';
+          try {
+            browser = await chromium.launch({
+              headless: true,
+              args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            });
+            const page = await browser.newPage();
+            page.setDefaultTimeout(20000);
+            await page.goto(urlToFetch, { waitUntil: 'domcontentloaded', timeout: 20000 });
+            finalUrl = page.url();
+            try {
+              const finalUrlObj = new URL(finalUrl);
+              finalOrigin = finalUrlObj.origin;
+              if (finalOrigin !== origin) {
+                console.log(`[ContactDetector] Domain redirected from ${origin} to ${finalOrigin}`);
+              }
+            } catch {
+              // Keep original origin if URL parsing fails
+            }
+            
+            // Wait for page to fully load
+            await sleep(5000);
+            
+            // Scroll to trigger lazy loading
+            await page.evaluate(() => {
+              window.scrollTo(0, document.body.scrollHeight);
+            });
+            await sleep(3000);
+            
+            // Get the rendered HTML
+            playwrightHtml = await page.content();
+            await page.close();
+          } finally {
+            if (browser) {
+              try {
+                await browser.close();
+              } catch {
+                // Ignore close errors
+              }
+            }
+          }
+          
+          console.log(`[ContactDetector] Playwright fallback successful, got ${playwrightHtml.length} chars`);
+          
+          // Create a proper mock response object so we can continue with normal flow
+          // Store HTML in a variable that text() can access
+          const htmlContent = playwrightHtml;
+          response = {
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            url: finalUrl,
+            text: async () => htmlContent,
+            headers: new Headers(),
+            redirected: false,
+            type: 'basic' as ResponseType,
+            clone: function() { return this; },
+            body: null,
+            bodyUsed: false,
+            arrayBuffer: async () => new ArrayBuffer(0),
+            blob: async () => new Blob(),
+            formData: async () => new FormData(),
+            json: async () => ({}),
+          } as Response;
+          
+          console.log(`[ContactDetector] Mock response created, continuing with normal flow...`);
+          // Break out of error handling - response is set, continue to normal flow
+          // We'll skip the rest of the catch block by not returning/throwing
+        } catch (playwrightError: any) {
+          console.log(`[ContactDetector] Playwright fallback also failed: ${playwrightError.message}`);
+          // If Playwright also fails, fall through to the error handler below
+        }
+      }
+      
+      // Only return error if we didn't successfully use Playwright fallback
+      // Check if response was set (meaning Playwright succeeded)
+      if (!response) {
+        // Provide more specific error message
+        const errorMsg = fetchError.message || fetchError.toString() || "Unknown error";
         return {
           found: false,
           contactUrl: null,
           hasForm: false,
-          message: `Network error: ${fetchError.message || "Unable to connect to site"}`,
+          message: errorMsg.length > 100 ? errorMsg.substring(0, 100) + "..." : errorMsg,
           status: "error",
         };
       }
-      // Provide more specific error message
-      const errorMsg = fetchError.message || fetchError.toString() || "Unknown error";
-      return {
-        found: false,
-        contactUrl: null,
-        hasForm: false,
-        message: errorMsg.length > 100 ? errorMsg.substring(0, 100) + "..." : errorMsg,
-        status: "error",
-      };
+      // If response is set (Playwright succeeded), continue with normal flow below
     }
     
     // If we got here after SSL error handling with HTTP fallback, response should be set
     // Continue with normal flow
 
+    console.log(`[ContactDetector] Checking response.ok: ${response.ok}, status: ${response.status}`);
     if (!response.ok) {
       // Handle specific HTTP error codes
       let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      let status: "error" | "not_found" = "error";
       
       if (response.status === 403) {
+        // HTTP 403 is a legitimate response - site is blocking automated requests
+        // This doesn't mean the site is broken, just that we can't access it
+        // Mark as "not_found" instead of "error" since the site likely exists
         errorMessage = "HTTP 403: Forbidden - site may be blocking automated requests";
+        status = "not_found";
       } else if (response.status === 401) {
         errorMessage = "HTTP 401: Unauthorized - site requires authentication";
+        status = "not_found"; // Site exists but requires auth
+      } else if (response.status === 404) {
+        errorMessage = "HTTP 404: Page not found";
+        status = "not_found";
       } else if (response.status === 429) {
         errorMessage = "HTTP 429: Too Many Requests - rate limited, try again later";
+        status = "error"; // Rate limiting is a temporary error
       } else if (response.status === 500) {
         errorMessage = "HTTP 500: Internal Server Error - site may be temporarily down";
+        status = "error";
       } else if (response.status === 503 || response.status === 502 || response.status === 504) {
         errorMessage = `HTTP ${response.status}: Service Unavailable - site may be temporarily down`;
+        status = "error";
       } else if (response.status === 525) {
         errorMessage = "HTTP 525: SSL Handshake Failed - Cloudflare SSL error";
+        status = "error";
       } else if (response.status >= 400 && response.status < 500) {
         errorMessage = `HTTP ${response.status}: Client Error`;
+        status = "not_found"; // Client errors often mean page doesn't exist or access denied
       } else if (response.status >= 500) {
         errorMessage = `HTTP ${response.status}: Server Error - site may be temporarily down`;
+        status = "error";
       }
       
       return {
@@ -325,16 +424,18 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
         contactUrl: null,
         hasForm: false,
         message: errorMessage,
-        status: "error",
+        status,
       };
     }
 
+    console.log(`[ContactDetector] Extracting HTML from response...`);
     let html = await response.text();
+    console.log(`[ContactDetector] Got HTML, length: ${html.length} chars`);
 
     // Check if page might be JavaScript-rendered (React, Vue, Angular, etc.)
     const hasJSFramework = /react|vue|angular|__NEXT_DATA__|id=["']root["']|id=["']app["']|data-reactroot|_next/i.test(html);
     const hasMinimalContent = html.length < 5000 && !/<body[^>]*>[\s\S]{100,}/i.test(html);
-    const hasNoContactLinks = !/contact/i.test(html.toLowerCase());
+    const hasNoContactLinks = !/(contact|support|help)/i.test(html.toLowerCase());
 
     // Find contact page links in initial HTML - use finalOrigin after redirects
     let contactUrl = findContactPageLink(html, finalOrigin);
@@ -363,6 +464,33 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
         }
       } catch (error: any) {
         console.log(`[ContactDetector] Homepage form check failed: ${error.message}`);
+      }
+    }
+
+    // If no contact URL found from initial HTML, also check the provided page (if different from homepage)
+    // This helps with resource/blog pages that might have contact forms
+    if (!contactUrl && !isHomepage && urlToFetch === homepageUrl) {
+      console.log(`[ContactDetector] No contact link found on homepage, checking provided page: ${baseUrl}`);
+      try {
+        const pageResponse = await fetchWithRetry(
+          baseUrl,
+          {
+            ...options,
+            redirect: "follow",
+          },
+          1,
+          2000
+        );
+        if (pageResponse.ok) {
+          const pageHtml = await pageResponse.text();
+          const pageContactUrl = findContactPageLink(pageHtml, finalOrigin);
+          if (pageContactUrl) {
+            contactUrl = pageContactUrl;
+            console.log(`[ContactDetector] Found contact link on provided page: ${contactUrl}`);
+          }
+        }
+      } catch (error: any) {
+        console.log(`[ContactDetector] Failed to check provided page: ${error.message}`);
       }
     }
 
@@ -453,6 +581,11 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
         '/reach-us',
         '/contact-page',
         '/contact_page',
+        '/support',
+        '/support/contact',
+        '/help',
+        '/help-center',
+        '/contact-support',
       ];
       
       // Try each common path to see if it exists and has a form
@@ -567,8 +700,13 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
       errorMessage = `Redirect error: ${error.message}`;
     }
     
-    // Log the full error for debugging
-    console.error(`[ContactDetector] Error checking contact page for ${domainUrl}:`, error);
+    // Log the full error for debugging with more context
+    console.error(`[ContactDetector] Error checking contact page for ${domainUrl}:`, {
+      message: error.message,
+      name: error.name,
+      stack: error.stack?.substring(0, 500), // First 500 chars of stack
+      domainUrl,
+    });
     
     return {
       found: false,
@@ -714,15 +852,15 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
     const pageContent = await page.content();
     
     // Check if page content suggests it's a contact page
-    const hasContactContent = /contact|get in touch|reach us|send message|write us/i.test(pageContent.toLowerCase());
+    const hasContactContent = /contact|get in touch|reach us|send message|write us|support|help center/i.test(pageContent.toLowerCase());
     const urlPath = new URL(finalUrl).pathname.toLowerCase();
-    const isContactPage = /contact|get-in-touch|reach-us|contactus/i.test(finalUrl) || 
-                          /contact|get-in-touch|reach-us|contactus/i.test(pageTitle) ||
-                          /contact|get-in-touch|reach-us|contactus/i.test(urlPath) ||
+    const isContactPage = /contact|get-in-touch|reach-us|contactus|support|help/i.test(finalUrl) || 
+                          /contact|get-in-touch|reach-us|contactus|support|help/i.test(pageTitle) ||
+                          /contact|get-in-touch|reach-us|contactus|support|help/i.test(urlPath) ||
                           hasContactContent;
     
     // If URL clearly indicates contact page (e.g., /p/contact-us.html), be more lenient
-    const isClearContactUrl = /\/p\/contact|\/contact-us|\/contact\.html|\/contact\.php/i.test(urlPath);
+    const isClearContactUrl = /\/p\/contact|\/contact-us|\/contact\.html|\/contact\.php|\/support|\/help/i.test(urlPath);
     
     console.log(`[ContactDetector] Contact page verified: ${finalUrl}, isContactPage: ${isContactPage}, isClearContactUrl: ${isClearContactUrl}`);
     
@@ -744,6 +882,7 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
 
 function findContactPageLink(html: string, origin: string): string | null {
   // Common contact page patterns - more comprehensive
+  // Added support for "contact us" (with space), "support", "help", etc.
   const contactPatterns = [
     /href=["']([^"']*\/contact[^"']*?)["']/gi,
     /href=["']([^"']*\/contact-us[^"']*?)["']/gi,
@@ -755,6 +894,9 @@ function findContactPageLink(html: string, origin: string): string | null {
     /href=["']([^"']*\/contact_page[^"']*?)["']/gi,
     /href=["']([^"']*\/p\/contact[^"']*?)["']/gi, // For /p/contact-us.html style URLs
     /href=["']([^"']*\/p\/contact-us[^"']*?)["']/gi,
+    /href=["']([^"']*\/support[^"']*?)["']/gi, // Support pages
+    /href=["']([^"']*\/help[^"']*?)["']/gi, // Help pages
+    /href=["']([^"']*\/contact.*us[^"']*?)["']/gi, // "contact us" with space or hyphen
   ];
 
   // Extract header and footer sections
@@ -837,7 +979,8 @@ function findContactPageLink(html: string, origin: string): string | null {
               }
               
               if (urlPath.includes('contact') || urlPath.includes('get-in-touch') || urlPath.includes('reach-us') || 
-                  urlPath.includes('/p/contact') || urlPath.includes('/p/contact-us')) {
+                  urlPath.includes('/p/contact') || urlPath.includes('/p/contact-us') ||
+                  urlPath.includes('support') || urlPath.includes('help')) {
                 // Return the original URL (with trailing slash if it had one)
                 return contactUrl;
               }

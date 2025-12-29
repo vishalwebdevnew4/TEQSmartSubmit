@@ -1,4 +1,4 @@
-import { detectContactPage } from "./src/lib/contact-page-detector";
+import { detectContactPage } from "./src/lib/contact-page-detector.js";
 
 async function testContactPage() {
   const testUrl = process.argv[2] || "https://interiordesign.xcelanceweb.com";

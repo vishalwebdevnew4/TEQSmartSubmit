@@ -8,6 +8,14 @@ declare global {
 // Configure Prisma with proper connection pooling
 const prismaOptions: ConstructorParameters<typeof PrismaClient>[0] = {
   log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["error"],
+  // Optimize connection pool
+  datasources: {
+    db: {
+      url: process.env.DATABASE_URL,
+    },
+  },
+  // Connection pool configuration
+  // These are handled via DATABASE_URL parameters or connection pooling service
 };
 
 // Use connection pooling URL if available, otherwise use regular DATABASE_URL

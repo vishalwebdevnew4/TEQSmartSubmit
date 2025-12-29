@@ -1,0 +1,597 @@
+{
+  "plan": {
+    "title": "TEQSmartSubmit System Improvement Plan",
+    "version": "1.0.0",
+    "created": "2025-01-XX",
+    "status": "planning",
+    "overview": "Comprehensive plan to improve TEQSmartSubmit system performance, user experience, code quality, and infrastructure",
+    "goals": {
+      "performance": {
+        "target": "50-70% faster page loads",
+        "metrics": [
+          "Page load time < 1s (from current ~2-3s)",
+          "Time to Interactive < 2s (from current ~3-4s)",
+          "API response time < 200ms (from current ~500-1000ms)",
+          "Database query time < 100ms (from current ~200-500ms)"
+        ]
+      },
+      "efficiency": {
+        "target": "60-80% reduction in database queries",
+        "metrics": [
+          "Reduce dashboard queries from 8+ to 2-3",
+          "Implement caching for frequently accessed data",
+          "Optimize polling frequency"
+        ]
+      },
+      "user_experience": {
+        "target": "Modern, smooth, intuitive interface",
+        "metrics": [
+          "Loading skeletons on all pages",
+          "Error boundaries with user-friendly messages",
+          "Toast notifications for actions",
+          "Responsive design improvements"
+        ]
+      },
+      "scalability": {
+        "target": "Support multiple concurrent users",
+        "metrics": [
+          "Load balancing setup",
+          "Horizontal scaling capability",
+          "Connection pooling optimization",
+          "Health checks and monitoring"
+        ]
+      }
+    },
+    "phases": [
+      {
+        "id": "phase1",
+        "name": "Quick Wins - UX & Performance",
+        "duration": "1-2 weeks",
+        "priority": "high",
+        "effort": "low",
+        "impact": "high",
+        "tasks": [
+          {
+            "id": "p1-t1",
+            "title": "Add Loading Skeletons",
+            "description": "Create skeleton components for all dashboard pages",
+            "files": [
+              "src/components/skeletons/DashboardSkeleton.tsx",
+              "src/components/skeletons/LogsSkeleton.tsx",
+              "src/components/skeletons/CardSkeleton.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 4
+          },
+          {
+            "id": "p1-t2",
+            "title": "Optimize Polling Frequency",
+            "description": "Implement adaptive polling (2s active, 10s idle) with Page Visibility API",
+            "files": [
+              "src/app/(dashboard)/logs/page.tsx",
+              "src/app/(dashboard)/dashboard/AutomationControls.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 3
+          },
+          {
+            "id": "p1-t3",
+            "title": "Add Error Boundaries",
+            "description": "Create ErrorBoundary component and wrap dashboard pages",
+            "files": [
+              "src/components/ErrorBoundary.tsx",
+              "src/app/(dashboard)/layout.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 3
+          },
+          {
+            "id": "p1-t4",
+            "title": "Implement Basic Caching",
+            "description": "Add in-memory caching for dashboard stats and logs",
+            "files": [
+              "src/lib/cache.ts",
+              "src/app/(dashboard)/dashboard/page.tsx",
+              "src/app/api/logs/route.ts"
+            ],
+            "dependencies": [],
+            "estimated_hours": 4
+          },
+          {
+            "id": "p1-t5",
+            "title": "Improve Error Messages",
+            "description": "Add user-friendly error messages and toast notifications",
+            "files": [
+              "src/components/Toast.tsx",
+              "src/lib/toast.ts"
+            ],
+            "dependencies": ["p1-t3"],
+            "estimated_hours": 3
+          }
+        ],
+        "expected_results": [
+          "30-40% reduction in API calls",
+          "Better perceived performance",
+          "Improved error handling"
+        ]
+      },
+      {
+        "id": "phase2",
+        "name": "Backend Optimization",
+        "duration": "2-3 weeks",
+        "priority": "high",
+        "effort": "medium",
+        "impact": "high",
+        "tasks": [
+          {
+            "id": "p2-t1",
+            "title": "Implement Redis Caching Layer",
+            "description": "Set up Redis for persistent caching with TTL and invalidation",
+            "files": [
+              "src/lib/cache.ts",
+              "src/app/api/stats/route.ts"
+            ],
+            "dependencies": [],
+            "estimated_hours": 8,
+            "requirements": [
+              "Redis server installation",
+              "REDIS_URL environment variable"
+            ]
+          },
+          {
+            "id": "p2-t2",
+            "title": "Optimize Database Queries",
+            "description": "Combine queries, add indexes, implement pagination",
+            "files": [
+              "src/app/(dashboard)/dashboard/page.tsx",
+              "src/app/api/domains/route.ts",
+              "src/app/api/logs/route.ts",
+              "prisma/migrations/xxx_add_indexes/migration.sql"
+            ],
+            "dependencies": [],
+            "estimated_hours": 6
+          },
+          {
+            "id": "p2-t3",
+            "title": "Create Dedicated Stats API",
+            "description": "Create /api/stats endpoint to reduce dashboard queries",
+            "files": [
+              "src/app/api/stats/route.ts"
+            ],
+            "dependencies": ["p2-t1"],
+            "estimated_hours": 4
+          },
+          {
+            "id": "p2-t4",
+            "title": "Add Response Compression",
+            "description": "Enable gzip compression for API responses",
+            "files": [
+              "next.config.ts"
+            ],
+            "dependencies": [],
+            "estimated_hours": 2
+          },
+          {
+            "id": "p2-t5",
+            "title": "Implement Pagination for Logs",
+            "description": "Add cursor-based pagination for logs API",
+            "files": [
+              "src/app/api/logs/route.ts",
+              "src/app/(dashboard)/logs/page.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 4
+          }
+        ],
+        "expected_results": [
+          "50-70% faster page loads",
+          "60-80% reduction in database queries",
+          "Better scalability"
+        ]
+      },
+      {
+        "id": "phase3",
+        "name": "Frontend Optimization",
+        "duration": "2-3 weeks",
+        "priority": "medium",
+        "effort": "medium",
+        "impact": "medium",
+        "tasks": [
+          {
+            "id": "p3-t1",
+            "title": "Implement Code Splitting",
+            "description": "Lazy load components and routes",
+            "files": [
+              "src/app/(dashboard)/domains/page.tsx",
+              "src/app/(dashboard)/templates/page.tsx",
+              "src/app/(dashboard)/logs/page.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 6
+          },
+          {
+            "id": "p3-t2",
+            "title": "Add React Optimizations",
+            "description": "Use React.memo, useMemo, useCallback for expensive components",
+            "files": [
+              "src/components/**/*.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 8
+          },
+          {
+            "id": "p3-t3",
+            "title": "Optimize Bundle Size",
+            "description": "Analyze and reduce bundle size with webpack-bundle-analyzer",
+            "files": [
+              "next.config.ts",
+              "package.json"
+            ],
+            "dependencies": [],
+            "estimated_hours": 4
+          },
+          {
+            "id": "p3-t4",
+            "title": "Implement Progressive Loading",
+            "description": "Load critical content first, then lazy load non-critical",
+            "files": [
+              "src/app/(dashboard)/dashboard/page.tsx"
+            ],
+            "dependencies": ["p3-t1"],
+            "estimated_hours": 4
+          },
+          {
+            "id": "p3-t5",
+            "title": "Add Toast Notification System",
+            "description": "Implement toast notifications for user actions",
+            "files": [
+              "src/components/Toast.tsx",
+              "src/lib/toast.ts",
+              "src/app/(dashboard)/layout.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 4
+          }
+        ],
+        "expected_results": [
+          "40-60% smaller initial bundle",
+          "Smoother UI interactions",
+          "Better performance on slower devices"
+        ]
+      },
+      {
+        "id": "phase4",
+        "name": "Infrastructure & Scalability",
+        "duration": "2-3 weeks",
+        "priority": "medium",
+        "effort": "high",
+        "impact": "high",
+        "tasks": [
+          {
+            "id": "p4-t1",
+            "title": "Set Up Load Balancing",
+            "description": "Configure nginx as reverse proxy with load balancing",
+            "files": [
+              "nginx.conf",
+              "docker-compose.yml"
+            ],
+            "dependencies": [],
+            "estimated_hours": 8,
+            "requirements": [
+              "nginx installation",
+              "Multiple Next.js instances"
+            ]
+          },
+          {
+            "id": "p4-t2",
+            "title": "Configure Horizontal Scaling",
+            "description": "Set up Docker containers for multiple Next.js instances",
+            "files": [
+              "docker-compose.yml",
+              "Dockerfile"
+            ],
+            "dependencies": ["p4-t1"],
+            "estimated_hours": 6
+          },
+          {
+            "id": "p4-t3",
+            "title": "Implement Health Checks",
+            "description": "Add health check endpoints and monitoring",
+            "files": [
+              "src/app/api/health/route.ts"
+            ],
+            "dependencies": [],
+            "estimated_hours": 4
+          },
+          {
+            "id": "p4-t4",
+            "title": "Set Up Monitoring and Alerts",
+            "description": "Configure monitoring tools (e.g., Prometheus, Grafana)",
+            "files": [
+              "monitoring/prometheus.yml",
+              "monitoring/grafana/dashboards.json"
+            ],
+            "dependencies": ["p4-t3"],
+            "estimated_hours": 8
+          },
+          {
+            "id": "p4-t5",
+            "title": "Optimize Connection Pooling",
+            "description": "Configure Prisma connection pool for better performance",
+            "files": [
+              "src/lib/prisma.ts",
+              "prisma/schema.prisma"
+            ],
+            "dependencies": [],
+            "estimated_hours": 3
+          }
+        ],
+        "expected_results": [
+          "High availability",
+          "Better handling of concurrent users",
+          "Improved reliability"
+        ]
+      },
+      {
+        "id": "phase5",
+        "name": "Code Quality & Testing",
+        "duration": "2-3 weeks",
+        "priority": "medium",
+        "effort": "medium",
+        "impact": "medium",
+        "tasks": [
+          {
+            "id": "p5-t1",
+            "title": "Add Unit Tests",
+            "description": "Write unit tests for critical components and utilities",
+            "files": [
+              "src/__tests__/**/*.test.ts",
+              "src/__tests__/**/*.test.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 12
+          },
+          {
+            "id": "p5-t2",
+            "title": "Add Integration Tests",
+            "description": "Write integration tests for API routes",
+            "files": [
+              "src/__tests__/api/**/*.test.ts"
+            ],
+            "dependencies": [],
+            "estimated_hours": 10
+          },
+          {
+            "id": "p5-t3",
+            "title": "Improve TypeScript Types",
+            "description": "Add strict types and remove any types",
+            "files": [
+              "src/**/*.ts",
+              "src/**/*.tsx",
+              "tsconfig.json"
+            ],
+            "dependencies": [],
+            "estimated_hours": 8
+          },
+          {
+            "id": "p5-t4",
+            "title": "Add Code Documentation",
+            "description": "Add JSDoc comments and improve code documentation",
+            "files": [
+              "src/**/*.ts",
+              "src/**/*.tsx"
+            ],
+            "dependencies": [],
+            "estimated_hours": 6
+          },
+          {
+            "id": "p5-t5",
+            "title": "Set Up CI/CD Pipeline",
+            "description": "Configure GitHub Actions for automated testing and deployment",
+            "files": [
+              ".github/workflows/ci.yml",
+              ".github/workflows/deploy.yml"
+            ],
+            "dependencies": ["p5-t1", "p5-t2"],
+            "estimated_hours": 6
+          }
+        ],
+        "expected_results": [
+          "Better code maintainability",
+          "Reduced bugs",
+          "Automated testing and deployment"
+        ]
+      }
+    ],
+    "current_issues": {
+      "performance": [
+        "8+ database queries on every dashboard load (no caching)",
+        "Logs page polls every 2 seconds",
+        "AutomationControls polls every 3 seconds",
+        "No loading states (blank screens during load)",
+        "Large bundle size (all components loaded upfront)"
+      ],
+      "user_experience": [
+        "No visual feedback during operations",
+        "Basic error handling",
+        "No loading skeletons",
+        "Limited responsive design"
+      ],
+      "infrastructure": [
+        "Single Next.js instance (no load balancing)",
+        "Basic connection pooling",
+        "No horizontal scaling",
+        "No health checks or monitoring"
+      ],
+      "code_quality": [
+        "Limited test coverage",
+        "Some TypeScript any types",
+        "Inconsistent error handling",
+        "Limited code documentation"
+      ]
+    },
+    "technical_stack": {
+      "frontend": {
+        "framework": "Next.js 15",
+        "ui_library": "React 19",
+        "styling": "Tailwind CSS",
+        "state_management": "React Hooks"
+      },
+      "backend": {
+        "runtime": "Node.js",
+        "orm": "Prisma",
+        "database": "PostgreSQL",
+        "api": "Next.js API Routes"
+      },
+      "automation": {
+        "language": "Python",
+        "framework": "Playwright",
+        "execution": "Script-based (run_submission.py)"
+      },
+      "infrastructure": {
+        "deployment": "Vercel/Server",
+        "cache": "Redis (planned)",
+        "load_balancer": "nginx (planned)",
+        "monitoring": "TBD"
+      }
+    },
+    "database_schema": {
+      "models": [
+        "Admin",
+        "Domain",
+        "Template",
+        "SubmissionLog",
+        "Setting",
+        "ContactCheck"
+      ],
+      "relationships": {
+        "Domain": ["templates", "submissions", "contactChecks"],
+        "Template": ["domain", "submissions"],
+        "SubmissionLog": ["domain", "template", "admin"],
+        "ContactCheck": ["domain"]
+      }
+    },
+    "api_endpoints": {
+      "auth": [
+        "POST /api/auth/login",
+        "POST /api/auth/register"
+      ],
+      "domains": [
+        "GET /api/domains",
+        "POST /api/domains",
+        "GET /api/domains/[id]",
+        "PUT /api/domains/[id]",
+        "DELETE /api/domains/[id]",
+        "POST /api/domains/check-contact",
+        "POST /api/domains/upload",
+        "GET /api/domains/failed-export"
+      ],
+      "templates": [
+        "GET /api/templates",
+        "POST /api/templates",
+        "GET /api/templates/[id]",
+        "PUT /api/templates/[id]",
+        "DELETE /api/templates/[id]"
+      ],
+      "logs": [
+        "GET /api/logs",
+        "DELETE /api/logs"
+      ],
+      "reports": [
+        "GET /api/reports/export"
+      ],
+      "automation": [
+        "POST /api/run"
+      ],
+      "settings": [
+        "GET /api/settings",
+        "PUT /api/settings"
+      ]
+    },
+    "success_metrics": {
+      "performance": {
+        "page_load_time": {
+          "current": "2-3s",
+          "target": "< 1s",
+          "improvement": "50-70%"
+        },
+        "api_response_time": {
+          "current": "500-1000ms",
+          "target": "< 200ms",
+          "improvement": "60-80%"
+        },
+        "database_queries": {
+          "current": "8+ per page load",
+          "target": "2-3 per page load",
+          "improvement": "60-80%"
+        }
+      },
+      "user_experience": {
+        "loading_states": {
+          "current": "None",
+          "target": "All pages",
+          "improvement": "100%"
+        },
+        "error_handling": {
+          "current": "Basic",
+          "target": "Comprehensive with user-friendly messages",
+          "improvement": "Significant"
+        }
+      },
+      "scalability": {
+        "concurrent_users": {
+          "current": "Limited",
+          "target": "Multiple concurrent users",
+          "improvement": "High"
+        },
+        "availability": {
+          "current": "Single instance",
+          "target": "Load balanced, high availability",
+          "improvement": "High"
+        }
+      }
+    },
+    "risks": [
+      {
+        "risk": "Redis dependency adds infrastructure complexity",
+        "mitigation": "Start with in-memory cache, migrate to Redis later"
+      },
+      {
+        "risk": "Breaking changes during refactoring",
+        "mitigation": "Comprehensive testing before deployment"
+      },
+      {
+        "risk": "Performance improvements may introduce bugs",
+        "mitigation": "Incremental changes with thorough testing"
+      }
+    ],
+    "dependencies": [
+      {
+        "name": "Redis",
+        "type": "infrastructure",
+        "required_for": ["phase2"],
+        "optional": false
+      },
+      {
+        "name": "nginx",
+        "type": "infrastructure",
+        "required_for": ["phase4"],
+        "optional": false
+      },
+      {
+        "name": "Docker",
+        "type": "infrastructure",
+        "required_for": ["phase4"],
+        "optional": false
+      }
+    ],
+    "notes": [
+      "This plan is comprehensive and should be implemented incrementally",
+      "Each phase builds on the previous one",
+      "Quick wins (Phase 1) should be prioritized for immediate impact",
+      "Infrastructure improvements (Phase 4) require server access and configuration",
+      "All changes should be tested thoroughly before production deployment"
+    ]
+  }
+}
+

@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { AutomationControls } from "./AutomationControls";
 import { headers } from "next/headers";
+import { cache, cacheKeys, cached } from "@/lib/cache";
+import { DashboardSkeleton } from "@/components/skeletons/DashboardSkeleton";
+import { Suspense } from "react";
 
 // Force dynamic rendering to prevent database connection issues during build
 export const dynamic = 'force-dynamic';
@@ -35,16 +38,16 @@ export default async function DashboardPage() {
       successSubmissions,
       failedSubmissions,
     ] = await Promise.all([
-      prisma.domain.count().catch(() => 0),
-      prisma.domain.count({ where: { isActive: true } }).catch(() => 0),
-      prisma.submissionLog.findMany({
+      cached(cacheKeys.dashboardStats(), () => prisma.domain.count().catch(() => 0), 30),
+      cached(cacheKeys.dashboardStats() + ":active", () => prisma.domain.count({ where: { isActive: true } }).catch(() => 0), 30),
+      cached(cacheKeys.dashboardStats() + ":activity", () => prisma.submissionLog.findMany({
         orderBy: { createdAt: "desc" },
         take: 10,
         include: {
           domain: true,
         },
-      }).catch(() => []),
-      prisma.domain.findMany({
+      }).catch(() => []), 10),
+      cached(cacheKeys.dashboardDomains(), () => prisma.domain.findMany({
         where: { 
           isActive: true,
         },
@@ -55,14 +58,14 @@ export default async function DashboardPage() {
             take: 10,
           },
         },
-      }).catch(() => []),
-      prisma.template.findMany({
+      }).catch(() => []), 30),
+      cached(cacheKeys.dashboardTemplates(), () => prisma.template.findMany({
         where: { domainId: null },
         orderBy: { createdAt: "desc" },
-      }).catch(() => []),
-      prisma.submissionLog.count().catch(() => 0),
-      prisma.submissionLog.count({ where: { status: "success" } }).catch(() => 0),
-      prisma.submissionLog.count({ where: { status: "failed" } }).catch(() => 0),
+      }).catch(() => []), 60),
+      cached(cacheKeys.dashboardStats() + ":total", () => prisma.submissionLog.count().catch(() => 0), 30),
+      cached(cacheKeys.dashboardStats() + ":success", () => prisma.submissionLog.count({ where: { status: "success" } }).catch(() => 0), 30),
+      cached(cacheKeys.dashboardStats() + ":failed", () => prisma.submissionLog.count({ where: { status: "failed" } }).catch(() => 0), 30),
     ]);
     
     // Count domains with forms found from the fetched domains
@@ -115,11 +118,12 @@ export default async function DashboardPage() {
   // Domains without templates will be skipped with a clear message
 
   return (
-    <div className="space-y-8">
-      <header className="flex flex-col gap-2">
-        <h2 className="text-2xl font-semibold text-white">Overview</h2>
-        <p className="text-sm text-slate-400">Monitor automation health and recent submission activity.</p>
-      </header>
+    <Suspense fallback={<DashboardSkeleton />}>
+      <div className="space-y-8">
+        <header className="flex flex-col gap-2">
+          <h2 className="text-2xl font-semibold text-white">Overview</h2>
+          <p className="text-sm text-slate-400">Monitor automation health and recent submission activity.</p>
+        </header>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 shadow-sm hover:border-slate-700 transition-colors">
@@ -229,6 +233,7 @@ export default async function DashboardPage() {
           </ul>
         </div>
       </section>
-    </div>
+      </div>
+    </Suspense>
   );
 }

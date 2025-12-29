@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { LogsSkeleton } from "@/components/skeletons/LogsSkeleton";
+import { toast } from "@/lib/toast";
 
 interface SubmissionLog {
   id: number;
@@ -27,15 +29,60 @@ export default function LogsPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
 
+  const isPageVisible = useRef(true);
+  const lastActivityTime = useRef(Date.now());
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     fetchLogs();
     
-    // Auto-refresh every 2 seconds to show real-time log updates
-    const interval = setInterval(() => {
-      fetchLogs(false); // Silent refresh
-    }, 2000);
+    // Page Visibility API - pause polling when tab is hidden
+    const handleVisibilityChange = () => {
+      isPageVisible.current = !document.hidden;
+      if (isPageVisible.current) {
+        // Tab became visible, resume polling
+        startPolling();
+      } else {
+        // Tab hidden, stop polling
+        stopPolling();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Adaptive polling: 2s when active, 10s when idle
+    const startPolling = () => {
+      stopPolling(); // Clear any existing interval
+      
+      const getPollInterval = () => {
+        const timeSinceActivity = Date.now() - lastActivityTime.current;
+        // If user was active in last 30 seconds, use fast polling
+        return timeSinceActivity < 30000 ? 2000 : 10000;
+      };
+
+      const poll = () => {
+        if (isPageVisible.current) {
+          fetchLogs(false); // Silent refresh
+          intervalRef.current = setTimeout(poll, getPollInterval());
+        }
+      };
+
+      intervalRef.current = setTimeout(poll, getPollInterval());
+    };
+
+    const stopPolling = () => {
+      if (intervalRef.current) {
+        clearTimeout(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+
+    startPolling();
     
-    return () => clearInterval(interval);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      stopPolling();
+    };
   }, [filterStatus]);
 
   const fetchLogs = async (isRefresh = false) => {
@@ -60,13 +107,15 @@ export default function LogsPage() {
         // Show user-friendly error message
         if (response.status === 500) {
           setLogs([]);
-          alert(`Error loading logs: ${errorData.detail || errorData.error || "Database connection issue. Please check server logs."}`);
+          const errorMsg = errorData.detail || errorData.error || "Database connection issue. Please check server logs.";
+          toast.error(errorMsg);
         }
         return;
       }
       
         const data = await response.json();
         setLogs(data.logs || []);
+        lastActivityTime.current = Date.now(); // Update activity time on successful fetch
       
       // Log for debugging
       if (data.logs && data.logs.length > 0) {
@@ -77,7 +126,7 @@ export default function LogsPage() {
     } catch (error) {
       console.error("Failed to fetch logs:", error);
       setLogs([]);
-      alert(`Network error: ${error instanceof Error ? error.message : "Failed to connect to server"}`);
+      toast.error(`Network error: ${error instanceof Error ? error.message : "Failed to connect to server"}`);
     } finally {
       setLoading(false);
       if (isRefresh) {

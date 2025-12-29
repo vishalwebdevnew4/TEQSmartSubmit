@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { PropsWithChildren, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ToastContainer } from "@/components/Toast";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
@@ -67,7 +69,12 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
           <p>Version: 0.1.0</p>
         </div>
       </aside>
-      <main className="flex flex-col gap-6 bg-slate-950 px-10 py-8">{children}</main>
+      <main className="flex flex-col gap-6 bg-slate-950 px-10 py-8">
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
+        <ToastContainer />
+      </main>
     </div>
   );
 }
