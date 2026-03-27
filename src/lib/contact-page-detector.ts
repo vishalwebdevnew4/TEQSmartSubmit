@@ -4,6 +4,9 @@
  * Uses Playwright to verify contact page links for JavaScript-rendered sites
  */
 
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { chromium, Browser, Page } from 'playwright';
 
 interface ContactCheckResult {
@@ -16,6 +19,97 @@ interface ContactCheckResult {
 
 // Helper function to sleep/delay
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type ChromiumLaunchOptions = {
+  headless: boolean;
+  args: string[];
+  executablePath?: string;
+};
+
+function collectExistingPlaywrightInstallRoots(): string[] {
+  const roots = [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    path.join(os.homedir(), '.cache', 'ms-playwright'),
+    path.join(os.homedir(), '.local', 'share', 'ms-playwright'),
+    path.join(process.cwd(), '.cache', 'ms-playwright'),
+  ].filter((value): value is string => Boolean(value));
+
+  return Array.from(new Set(roots)).filter((root) => {
+    try {
+      return fs.existsSync(root);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function findExecutableInInstallRoot(root: string): string | null {
+  const executablePatterns = [
+    { prefix: 'chromium_headless_shell-', relativePath: ['chrome-headless-shell-linux64', 'chrome-headless-shell'] },
+    { prefix: 'chromium-', relativePath: ['chrome-linux', 'chrome'] },
+  ];
+
+  try {
+    const entries = fs.readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+      .reverse();
+
+    for (const pattern of executablePatterns) {
+      const matched = entries.filter((entry) => entry.startsWith(pattern.prefix));
+      for (const entry of matched) {
+        const executablePath = path.join(root, entry, ...pattern.relativePath);
+        if (fs.existsSync(executablePath)) {
+          return executablePath;
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function getChromiumLaunchOptions(): ChromiumLaunchOptions {
+  const launchOptions: ChromiumLaunchOptions = {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  };
+
+  const configuredPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  if (configuredPath && fs.existsSync(configuredPath)) {
+    console.log(`[ContactDetector] Using Chromium executable from PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: ${configuredPath}`);
+    return { ...launchOptions, executablePath: configuredPath };
+  }
+
+  const roots = collectExistingPlaywrightInstallRoots();
+  const resolvedExecutable = roots
+    .map((root) => ({ root, executable: findExecutableInInstallRoot(root) }))
+    .find((candidate) => candidate.executable);
+
+  if (resolvedExecutable?.executable) {
+    const envRoot = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    if (envRoot && envRoot !== resolvedExecutable.root) {
+      console.log(
+        `[ContactDetector] PLAYWRIGHT_BROWSERS_PATH points to ${envRoot}, falling back to detected browser root ${resolvedExecutable.root}`
+      );
+    } else {
+      console.log(`[ContactDetector] Using Playwright browser root: ${resolvedExecutable.root}`);
+    }
+
+    return { ...launchOptions, executablePath: resolvedExecutable.executable };
+  }
+
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    console.log(
+      `[ContactDetector] No Chromium executable found under PLAYWRIGHT_BROWSERS_PATH=${process.env.PLAYWRIGHT_BROWSERS_PATH}`
+    );
+  }
+
+  return launchOptions;
+}
 
 // Helper function to fetch with retry
 async function fetchWithRetry(
@@ -290,10 +384,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
           let browser: Browser | null = null;
           let playwrightHtml = '';
           try {
-            browser = await chromium.launch({
-              headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            });
+            browser = await chromium.launch(getChromiumLaunchOptions());
             const page = await browser.newPage();
             page.setDefaultTimeout(20000);
             await page.goto(urlToFetch, { waitUntil: 'domcontentloaded', timeout: 20000 });
@@ -358,6 +449,15 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
           // We'll skip the rest of the catch block by not returning/throwing
         } catch (playwrightError: any) {
           console.log(`[ContactDetector] Playwright fallback also failed: ${playwrightError.message}`);
+          if (playwrightError.message?.includes('ERR_NAME_NOT_RESOLVED')) {
+            return {
+              found: false,
+              contactUrl: null,
+              hasForm: false,
+              message: 'DNS resolution failed on the server for this domain',
+              status: 'error',
+            };
+          }
           // If Playwright also fails, fall through to the error handler below
         }
       }
@@ -724,10 +824,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
 async function fetchHomepageWithPlaywright(url: string): Promise<string> {
   let browser: Browser | null = null;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    browser = await chromium.launch(getChromiumLaunchOptions());
     
     const page = await browser.newPage();
     page.setDefaultTimeout(45000);
@@ -783,10 +880,7 @@ async function fetchHomepageWithPlaywright(url: string): Promise<string> {
 async function verifyContactPageWithPlaywright(contactUrl: string): Promise<boolean> {
   let browser: Browser | null = null;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    browser = await chromium.launch(getChromiumLaunchOptions());
     
     const page = await browser.newPage();
     page.setDefaultTimeout(20000); // 20 second timeout
@@ -1032,10 +1126,7 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
   let browser: Browser | null = null;
   try {
     // Use Playwright to get fully rendered HTML (handles JavaScript-rendered forms)
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    browser = await chromium.launch(getChromiumLaunchOptions());
     
     const page = await browser.newPage();
     page.setDefaultTimeout(20000); // 20 second timeout
@@ -1294,4 +1385,3 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
     }
   }
 }
-

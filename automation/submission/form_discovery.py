@@ -2415,7 +2415,8 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
     result = {
         "fields_attempted": 0,
         "fields_filled": 0,
-        "checkboxes_checked": 0
+        "checkboxes_checked": 0,
+        "radios_selected": 0,
     }
     
     if not page or page.is_closed():
@@ -2944,10 +2945,151 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                 }
             """)
         
+        # Fallback for radio groups like budget/service selectors:
+        # if nothing is selected yet, choose one random visible option.
+        try:
+            all_radios = await page.query_selector_all('input[type="radio"]')
+            selected_radio_count = 0
+            radio_groups = {}
+
+            ultra_safe_log_print(f"   🔍 Found {len(all_radios)} radio button(s) on page")
+
+            for radio in all_radios:
+                try:
+                    is_visible = await radio.is_visible()
+                    is_disabled = await radio.is_disabled()
+                    if not is_visible or is_disabled:
+                        continue
+
+                    name = await radio.evaluate("(rb) => rb.name || rb.id || 'ungrouped'")
+                    label = await radio.evaluate("(rb) => rb.closest('label')?.textContent || rb.getAttribute('aria-label') || ''")
+                    value = await radio.evaluate("(rb) => rb.value || ''")
+                    text = (name + ' ' + label + ' ' + value).lower()
+
+                    skip_keywords = ['newsletter', 'marketing', 'subscribe', 'cookie', 'honeypot', 'remember']
+                    if text.strip() and any(kw in text for kw in skip_keywords):
+                        ultra_safe_log_print(f"   ⏭️  Skipping radio: {name[:30]} (newsletter/marketing)")
+                        continue
+
+                    if name not in radio_groups:
+                        radio_groups[name] = []
+                    radio_groups[name].append(radio)
+                    ultra_safe_log_print(f"   📋 Found radio: {name[:30]} (label: {label[:30]})")
+                except Exception as e:
+                    ultra_safe_log_print(f"   ⚠️  Error processing radio: {str(e)[:50]}")
+                    continue
+
+            for group_name, group_radios in radio_groups.items():
+                try:
+                    ultra_safe_log_print(f"   🔍 Processing radio group '{group_name}' ({len(group_radios)} radio button(s))")
+
+                    any_selected = False
+                    for rb in group_radios:
+                        if await rb.is_checked():
+                            any_selected = True
+                            selected_radio_count += 1
+                            ultra_safe_log_print(f"   ✅ Radio in group '{group_name}' already selected")
+                            break
+
+                    if not any_selected and len(group_radios) > 0:
+                        rb_to_select = random.choice(group_radios)
+                        try:
+                            selected_js = await rb_to_select.evaluate("""
+                                (rb) => {
+                                    try {
+                                        if (!rb.checked) {
+                                            rb.checked = true;
+                                            rb.dispatchEvent(new Event('change', { bubbles: true }));
+                                            rb.dispatchEvent(new Event('click', { bubbles: true }));
+                                        }
+                                        return rb.checked;
+                                    } catch (e) {
+                                        return false;
+                                    }
+                                }
+                            """)
+                            await asyncio.sleep(0.2)
+                            if selected_js:
+                                selected_radio_count += 1
+                                ultra_safe_log_print(f"   ✅ Selected radio in group '{group_name}' (via JavaScript)")
+                            else:
+                                try:
+                                    await rb_to_select.check(timeout=2000)
+                                    await asyncio.sleep(0.2)
+                                    if await rb_to_select.is_checked():
+                                        selected_radio_count += 1
+                                        ultra_safe_log_print(f"   ✅ Selected radio in group '{group_name}' (via Playwright)")
+                                except:
+                                    try:
+                                        await rb_to_select.click(timeout=2000)
+                                        await asyncio.sleep(0.2)
+                                        if await rb_to_select.is_checked():
+                                            selected_radio_count += 1
+                                            ultra_safe_log_print(f"   ✅ Selected radio in group '{group_name}' (via click)")
+                                    except:
+                                        ultra_safe_log_print(f"   ⚠️  Could not select radio in group '{group_name}'")
+                        except Exception as e:
+                            ultra_safe_log_print(f"   ⚠️  Error selecting radio in group '{group_name}': {str(e)[:50]}")
+                except Exception as e:
+                    ultra_safe_log_print(f"   ⚠️  Error processing radio group '{group_name}': {str(e)[:50]}")
+                    continue
+
+            radio_result = selected_radio_count
+        except:
+            radio_result = await page.evaluate("""
+                () => {
+                    try {
+                        let selected = 0;
+                        const radioGroups = {};
+                        const radios = document.querySelectorAll('input[type="radio"]');
+                        const skipKeywords = ['newsletter', 'marketing', 'subscribe', 'cookie', 'honeypot'];
+
+                        radios.forEach(rb => {
+                            if (rb.offsetParent !== null && !rb.disabled) {
+                                const name = (rb.name || 'ungrouped').toLowerCase();
+                                const label = (rb.closest('label')?.textContent || '').toLowerCase();
+                                const text = name + ' ' + label;
+
+                                if (skipKeywords.some(kw => text.includes(kw))) {
+                                    return;
+                                }
+
+                                if (!radioGroups[name]) {
+                                    radioGroups[name] = [];
+                                }
+                                radioGroups[name].push(rb);
+                            }
+                        });
+
+                        Object.keys(radioGroups).forEach(groupName => {
+                            const group = radioGroups[groupName];
+                            const anySelected = group.some(rb => rb.checked);
+
+                            if (!anySelected && group.length > 0) {
+                                const randomRb = group[Math.floor(Math.random() * group.length)];
+                                randomRb.checked = true;
+                                randomRb.click();
+                                randomRb.dispatchEvent(new Event('change', { bubbles: true }));
+                                selected++;
+                            } else if (anySelected) {
+                                selected++;
+                            }
+                        });
+
+                        return selected;
+                    } catch (e) {
+                        return 0;
+                    }
+                }
+            """)
+
         result["checkboxes_checked"] = checkbox_result
-        result["fields_attempted"] = result["fields_filled"] + result["checkboxes_checked"]
-        
-        ultra_safe_log_print(f"   ✅ Filled {result['fields_filled']} field(s), checked {result['checkboxes_checked']} checkbox(es)")
+        result["radios_selected"] = radio_result
+        result["fields_attempted"] = result["fields_filled"] + result["checkboxes_checked"] + result["radios_selected"]
+
+        ultra_safe_log_print(
+            f"   ✅ Filled {result['fields_filled']} field(s), checked {result['checkboxes_checked']} checkbox(es), selected {result['radios_selected']} radio option(s)"
+        )
         
         # Verify all required fields are filled and fill any missing ones
         try:

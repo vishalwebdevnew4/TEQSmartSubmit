@@ -1673,10 +1673,15 @@ class UltimateLocalCaptchaSolver:
                     ffmpeg_path = shutil.which('ffmpeg')
                     ffprobe_path = shutil.which('ffprobe')
                     
-                    # Convert to WAV
+                    # Convert to a speech-friendly WAV before recognition.
+                    # reCAPTCHA audio is prerecorded, so ambient-noise calibration
+                    # tends to hurt more than help here.
                     safe_log_print("   🔄 Converting audio to WAV...")
                     try:
                         audio = AudioSegment.from_mp3(audio_path)
+                        audio = audio.normalize()
+                        audio = audio.set_channels(1)
+                        audio = audio.set_frame_rate(16000)
                         wav_path = audio_path.replace('.mp3', '.wav')
                         audio.export(wav_path, format="wav")
                         safe_log_print("   ✅ Audio converted to WAV")
@@ -1699,8 +1704,9 @@ class UltimateLocalCaptchaSolver:
                         try:
                             safe_log_print(f"   🎤 Recognizing speech (attempt {recog_attempt + 1}/3)...")
                             r = sr.Recognizer()
+                            r.dynamic_energy_threshold = False
+                            r.energy_threshold = 300
                             with sr.AudioFile(wav_path) as source:
-                                r.adjust_for_ambient_noise(source, duration=0.5)
                                 audio_data = r.record(source)
                                 text = r.recognize_google(audio_data, language='en-US')
                                 recognized = text.strip().upper().replace(' ', '').replace('-', '')
