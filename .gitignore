@@ -6,6 +6,7 @@ out/
 
 # Env
 .env*
+backend/.env*
 
 # Prisma
 prisma/dev.db
