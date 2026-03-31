@@ -15,8 +15,10 @@
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "next": "15.0.3",
+    "playwright": "^1.58.2",
     "react": "19.0.0-rc-66855b96-20241106",
-    "react-dom": "19.0.0-rc-66855b96-20241106"
+    "react-dom": "19.0.0-rc-66855b96-20241106",
+    "react-dropzone": "^15.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",

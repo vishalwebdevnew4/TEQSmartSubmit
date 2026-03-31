@@ -2577,6 +2577,8 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                                     valueToFill = testData.name;
                                 } else if (currentName.includes('phone') || currentName.includes('telefoon') || placeholder.includes('phone') || placeholder.includes('nummer') || input.type === 'tel') {
                                     valueToFill = testData.phone;
+                                } else if (currentName.includes('subject') || placeholder.includes('subject')) {
+                                    valueToFill = testData.subject;
                                 } else if (currentName.includes('message') || currentName.includes('comment') || currentName.includes('bericht') || placeholder.includes('message') || placeholder.includes('bericht') || input.tagName === 'TEXTAREA') {
                                     valueToFill = testData.message;
                                 }
@@ -2662,7 +2664,7 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
             
             # Try to find contact form fields specifically (name, email, phone, comment)
             contact_form_fields = await page.query_selector_all(
-                'input[name="name"], input[name="email"], input[name="phone"], textarea[name="comment"], textarea[name="message"], textarea[id="message"], textarea'
+                'input[name="name"], input[name="email"], input[name="phone"], input[name="subject"], input[name*="subject"], textarea[name="comment"], textarea[name="message"], textarea[id="message"], textarea'
             )
             
             if len(contact_form_fields) >= 3:  # Found contact form (has at least name, email, comment)
@@ -2688,6 +2690,10 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                             elif name == 'phone':
                                 await input_field.fill(resolved_test_data['phone'])
                                 ultra_safe_log_print("   ✅ Filled phone field")
+                                playwright_fields_filled += 1
+                            elif name == 'subject' or 'subject' in name:
+                                await input_field.fill(resolved_test_data['subject'])
+                                ultra_safe_log_print("   ✅ Filled subject field")
                                 playwright_fields_filled += 1
                             elif name == 'comment' or name == 'message':
                                 await input_field.fill(resolved_test_data['message'])
@@ -2721,6 +2727,8 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                             value_to_fill = resolved_test_data['name']
                         elif 'phone' in name or 'telefoon' in name or 'phone' in placeholder or 'nummer' in placeholder or input_type == 'tel':
                             value_to_fill = resolved_test_data['phone']
+                        elif 'subject' in name or 'subject' in placeholder:
+                            value_to_fill = resolved_test_data['subject']
                         elif 'message' in name or 'comment' in name or 'bericht' in name or 'message' in placeholder or 'bericht' in placeholder or tag_name == 'textarea':
                             value_to_fill = resolved_test_data['message']
                         else:
@@ -3189,6 +3197,8 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                             value = resolved_test_data['name']
                         elif 'phone' in field_name or 'phone' in placeholder or field_type == 'tel':
                             value = resolved_test_data['phone']
+                        elif 'subject' in field_name or 'subject' in placeholder:
+                            value = resolved_test_data['subject']
                         elif 'message' in field_name or 'message' in placeholder:
                             value = resolved_test_data['message']
                         else:
@@ -4898,6 +4908,8 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                                 value_to_fill = resolved_test_data['name']
                                             elif 'phone' in field_name_lower or 'telefoon' in field_name_lower:
                                                 value_to_fill = resolved_test_data['phone']
+                                            elif 'subject' in field_name_lower:
+                                                value_to_fill = resolved_test_data['subject']
                                             elif 'message' in field_name_lower or 'comment' in field_name_lower or 'bericht' in field_name_lower:
                                                 value_to_fill = resolved_test_data['message']
                                             

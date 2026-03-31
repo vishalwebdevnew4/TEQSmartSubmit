@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useDropzone } from "react-dropzone";
 
 interface Domain {
   id: number;
@@ -117,6 +118,24 @@ export default function DomainsPage() {
     const endIndex = startIndex + itemsPerPage;
     setDomains(filteredDomains.slice(startIndex, endIndex));
   }, [currentPage, itemsPerPage, filteredDomains]);
+
+  const { getRootProps, getInputProps, open: openFilePicker, isDragActive, isDragReject } = useDropzone({
+    accept: {
+      "text/csv": [".csv"],
+      "text/plain": [".txt"],
+    },
+    multiple: false,
+    noClick: true,
+    onDropAccepted: (acceptedFiles) => {
+      const file = acceptedFiles[0];
+      if (file) {
+        void loadCsvFile(file);
+      }
+    },
+    onDropRejected: () => {
+      alert("Please select a CSV or TXT file");
+    },
+  });
 
   // Get unique categories for filter dropdown
   const uniqueCategories = Array.from(
@@ -570,12 +589,6 @@ export default function DomainsPage() {
       setCsvContent("");
       alert("Failed to read the selected file");
     }
-  };
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await loadCsvFile(file);
   };
 
   const handleDownloadSample = () => {
@@ -1638,38 +1651,30 @@ https://example3.com,marketing,Looking for marketing support`;
               <div className="mb-4">
                 <label className="block text-sm font-medium text-slate-300 mb-2">Select CSV File</label>
                 <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.classList.add('border-indigo-500', 'bg-indigo-500/10');
-                  }}
-                  onDragLeave={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-500/10');
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-500/10');
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) {
-                      void loadCsvFile(file);
-                    }
-                  }}
-                  className="w-full rounded-lg border-2 border-dashed border-slate-700 bg-slate-800/50 px-6 py-12 text-center transition-colors hover:border-indigo-500 hover:bg-indigo-500/5 cursor-pointer"
+                  {...getRootProps()}
+                  className={`w-full rounded-lg border-2 border-dashed px-6 py-12 text-center transition-colors ${
+                    isDragReject
+                      ? "border-rose-500 bg-rose-500/10"
+                      : isDragActive
+                        ? "border-indigo-500 bg-indigo-500/10"
+                        : "border-slate-700 bg-slate-800/50 hover:border-indigo-500 hover:bg-indigo-500/5"
+                  }`}
                 >
+                  <input {...getInputProps()} />
                   <svg className="mx-auto h-12 w-12 text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  <p className="text-sm font-medium text-slate-300">Drag and drop your CSV file here</p>
+                  <p className="text-sm font-medium text-slate-300">
+                    {isDragActive ? "Drop your CSV file here" : "Drag and drop your CSV file here"}
+                  </p>
                   <p className="text-xs text-slate-500 mt-1">or</p>
-                  <label className="text-sm text-indigo-400 cursor-pointer hover:underline">
+                  <button
+                    type="button"
+                    onClick={openFilePicker}
+                    className="text-sm text-indigo-400 hover:underline"
+                  >
                     click to browse
-                    <input
-                      type="file"
-                      accept=".csv,.txt"
-                      onChange={handleFileSelect}
-                      className="hidden"
-                    />
-                  </label>
+                  </button>
                 </div>
                 {csvFile && (
                   <p className="mt-2 text-xs text-slate-400">
