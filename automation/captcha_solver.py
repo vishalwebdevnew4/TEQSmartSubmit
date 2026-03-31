@@ -150,6 +150,7 @@ class UltimateLocalCaptchaSolver:
         self.solver_name = "LocalCaptchaSolver"
         self.page = page
         self.max_wait_time = 300  # Maximum seconds to wait for CAPTCHA solution (5 minutes for audio challenge)
+        self._last_audio_url = None
     
     async def solve_recaptcha_v2(self, site_key: str, page_url: str) -> Dict[str, Any]:
         """
@@ -1147,6 +1148,34 @@ class UltimateLocalCaptchaSolver:
             safe_log_print(f"   ⚠️  Failed to click checkbox again: {str(e)[:30]}")
             return False
 
+    async def _reopen_recaptcha_challenge(self):
+        """Re-open the challenge iframe after it expires or gets closed."""
+        try:
+            safe_log_print("   🔄 Re-opening reCAPTCHA challenge...")
+            clicked = await self._click_recaptcha_checkbox_again()
+            if not clicked:
+                safe_log_print("   ⚠️  Could not click checkbox to re-open challenge")
+                return None
+
+            for attempt in range(5):
+                await safe_async_sleep(2)
+                challenge_iframe = await self._check_for_challenge_iframe()
+                if challenge_iframe:
+                    safe_log_print(f"   ✅ Challenge iframe re-opened (attempt {attempt + 1})")
+                    return challenge_iframe
+
+                if await self._check_checkbox_expired():
+                    safe_log_print("   ⚠️  Checkbox expired again while re-opening, retrying...")
+                    clicked = await self._click_recaptcha_checkbox_again()
+                    if not clicked:
+                        return None
+
+            safe_log_print("   ⚠️  Challenge iframe did not re-open after retries")
+            return None
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Error re-opening challenge: {str(e)[:50]}")
+            return None
+
     async def _handle_audio_challenge(self) -> Optional[str]:
         """Handle reCAPTCHA audio challenge - download, recognize, and solve with retries."""
         try:
@@ -1206,6 +1235,20 @@ class UltimateLocalCaptchaSolver:
             safe_log_print("   🔄 Ensuring we're in audio challenge mode...")
             audio_switched = False
             for attempt in range(5):
+                current_challenge_iframe = await self._check_for_challenge_iframe()
+                if not current_challenge_iframe or await self._check_checkbox_expired():
+                    safe_log_print("   ⚠️  Challenge closed or expired before audio switch, re-opening...")
+                    challenge_iframe = await self._reopen_recaptcha_challenge()
+                    if not challenge_iframe:
+                        continue
+                    try:
+                        frame = await challenge_iframe.content_frame()
+                    except:
+                        frame = None
+                    if not frame:
+                        await safe_async_sleep(1)
+                        continue
+
                 audio_switched = await self._switch_to_audio_challenge(frame)
                 if audio_switched:
                     safe_log_print(f"   ✅ Successfully switched to audio mode! (attempt {attempt + 1})")
@@ -1237,6 +1280,21 @@ class UltimateLocalCaptchaSolver:
             # Step 2: Download and recognize audio (with retries)
             audio_text = None
             for attempt in range(5):
+                current_challenge_iframe = await self._check_for_challenge_iframe()
+                if not current_challenge_iframe or await self._check_checkbox_expired():
+                    safe_log_print("   ⚠️  Challenge closed or expired before audio recognition, re-opening...")
+                    challenge_iframe = await self._reopen_recaptcha_challenge()
+                    if not challenge_iframe:
+                        continue
+                    try:
+                        frame = await challenge_iframe.content_frame()
+                    except:
+                        frame = None
+                    if not frame:
+                        await safe_async_sleep(1)
+                        continue
+                    await safe_async_sleep(2)
+
                 audio_text = await self._solve_audio_challenge(frame)
                 if audio_text:
                     break
@@ -1370,10 +1428,32 @@ class UltimateLocalCaptchaSolver:
                 '[class*="audio-button"]',
                 '[id*="audio-button"]'
             ]
+
+            async def ensure_active_challenge(current_frame):
+                challenge_iframe = await self._check_for_challenge_iframe()
+                if not challenge_iframe or await self._check_checkbox_expired():
+                    safe_log_print("   ⚠️  Challenge closed or expired while switching to audio, re-opening...")
+                    challenge_iframe = await self._reopen_recaptcha_challenge()
+                    if not challenge_iframe:
+                        return None
+                    try:
+                        refreshed_frame = await challenge_iframe.content_frame()
+                        if refreshed_frame:
+                            await safe_async_sleep(1)
+                            return refreshed_frame
+                    except Exception as e:
+                        safe_log_print(f"   ⚠️  Could not access re-opened challenge frame: {str(e)[:40]}")
+                        return None
+                return current_frame
             
             # Method 1: Try direct element click with coordinates
             for selector in audio_selectors:
                 try:
+                    refreshed_frame = await ensure_active_challenge(frame)
+                    if not refreshed_frame:
+                        continue
+                    frame = refreshed_frame
+
                     audio_btn = await frame.query_selector(selector)
                     if audio_btn:
                         is_visible = await audio_btn.is_visible()
@@ -1425,6 +1505,11 @@ class UltimateLocalCaptchaSolver:
                                             await self.page.mouse.click(abs_x, abs_y)
                                             safe_log_print("   ✅ Clicked audio button via absolute coordinates")
                                             await safe_async_sleep(3)
+
+                                            refreshed_frame = await ensure_active_challenge(frame)
+                                            if not refreshed_frame:
+                                                continue
+                                            frame = refreshed_frame
                                             
                                             # Verify we're now in audio mode
                                             is_audio = await frame.evaluate("""
@@ -1461,10 +1546,15 @@ class UltimateLocalCaptchaSolver:
                                                     await self.page.evaluate(f"window.scrollTo(0, {scroll_y})")
                                                     safe_log_print("   📜 Scrolled page to bring audio button into view")
                                                     await safe_async_sleep(0.5)
-                                                
+                                
                                 await audio_btn.click(timeout=5000)
                                 safe_log_print("   ✅ Clicked audio button (regular click)")
                                 await safe_async_sleep(3)
+
+                                refreshed_frame = await ensure_active_challenge(frame)
+                                if not refreshed_frame:
+                                    continue
+                                frame = refreshed_frame
                                 
                                 # Verify
                                 is_audio = await frame.evaluate("""
@@ -1483,6 +1573,11 @@ class UltimateLocalCaptchaSolver:
             
             # Method 2: Try JavaScript click (more reliable for iframes) with viewport adjustment
             try:
+                refreshed_frame = await ensure_active_challenge(frame)
+                if not refreshed_frame:
+                    return False
+                frame = refreshed_frame
+
                 clicked = await frame.evaluate("""
                     () => {
                         const selectors = [
@@ -1529,6 +1624,11 @@ class UltimateLocalCaptchaSolver:
                 if clicked:
                     safe_log_print("   ✅ Clicked audio button via JavaScript (with viewport adjustment)")
                     await safe_async_sleep(3)
+
+                    refreshed_frame = await ensure_active_challenge(frame)
+                    if not refreshed_frame:
+                        return False
+                    frame = refreshed_frame
                     
                     # Verify
                     is_audio = await frame.evaluate("""
@@ -1547,6 +1647,49 @@ class UltimateLocalCaptchaSolver:
             
         except Exception as e:
             safe_log_print(f"   ⚠️  Switch to audio error: {str(e)[:50]}")
+            return False
+
+    def _clean_recognized_text(self, text: str) -> str:
+        """Normalize recognition output into the compact format reCAPTCHA expects."""
+        try:
+            cleaned = ''.join(ch for ch in text.upper() if ch.isalnum())
+            return cleaned.strip()
+        except Exception:
+            return ""
+
+    async def _request_new_audio_challenge(self, frame) -> bool:
+        """Ask reCAPTCHA for a new audio sample when the current one is unusable."""
+        try:
+            safe_log_print("   🔄 Requesting a fresh audio challenge...")
+            clicked = await frame.evaluate("""
+                () => {
+                    const selectors = [
+                        '#recaptcha-reload-button',
+                        'button[title*="new challenge"]',
+                        'button[title*="reload"]',
+                        'button[aria-label*="new challenge"]',
+                        'button[aria-label*="reload"]',
+                        'button[id*="reload"]'
+                    ];
+                    for (const selector of selectors) {
+                        const el = document.querySelector(selector);
+                        if (el && el.offsetParent !== null) {
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            """)
+            if clicked:
+                await safe_async_sleep(3)
+                self._last_audio_url = None
+                safe_log_print("   ✅ Requested a fresh audio challenge")
+                return True
+            safe_log_print("   ⚠️  Could not find reload control for a fresh audio challenge")
+            return False
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Fresh audio request failed: {str(e)[:50]}")
             return False
     
     async def _solve_audio_challenge(self, frame) -> Optional[str]:
@@ -1634,6 +1777,10 @@ class UltimateLocalCaptchaSolver:
                 safe_log_print("   ⚠️  Could not find audio URL after 5 attempts")
                 safe_log_print("   💡 Audio may not be loaded yet, or challenge may be in image mode")
                 return None
+
+            if self._last_audio_url and audio_url == self._last_audio_url:
+                safe_log_print("   ℹ️  Same audio challenge detected again")
+            self._last_audio_url = audio_url
             
             # Download audio (with retries)
             audio_path = None
@@ -1665,7 +1812,6 @@ class UltimateLocalCaptchaSolver:
                 try:
                     import speech_recognition as sr
                     from pydub import AudioSegment
-                    from pydub.utils import which
                     import shutil
                     
                     # Check for ffmpeg/ffprobe BEFORE attempting conversion
@@ -1680,18 +1826,27 @@ class UltimateLocalCaptchaSolver:
                     ffmpeg_path = shutil.which('ffmpeg')
                     ffprobe_path = shutil.which('ffprobe')
                     
-                    # Convert to a speech-friendly WAV before recognition.
-                    # reCAPTCHA audio is prerecorded, so ambient-noise calibration
-                    # tends to hurt more than help here.
+                    # Convert to a few speech-friendly WAV variants before recognition.
                     safe_log_print("   🔄 Converting audio to WAV...")
+                    variant_paths = []
                     try:
                         audio = AudioSegment.from_mp3(audio_path)
-                        audio = audio.normalize()
-                        audio = audio.set_channels(1)
-                        audio = audio.set_frame_rate(16000)
-                        wav_path = audio_path.replace('.mp3', '.wav')
-                        audio.export(wav_path, format="wav")
-                        safe_log_print("   ✅ Audio converted to WAV")
+                        base_audio = audio.normalize().set_channels(1)
+                        variants = [
+                            ("normalized-16k", base_audio.set_frame_rate(16000)),
+                            ("filtered-16k", base_audio.high_pass_filter(120).low_pass_filter(3800).set_frame_rate(16000)),
+                            ("boosted-16k", (base_audio + 8).high_pass_filter(120).low_pass_filter(3800).set_frame_rate(16000)),
+                            ("slow-16k", base_audio._spawn(
+                                base_audio.raw_data,
+                                overrides={"frame_rate": max(int(base_audio.frame_rate * 0.92), 8000)}
+                            ).set_frame_rate(16000)),
+                        ]
+                        for index, (variant_name, variant_audio) in enumerate(variants):
+                            variant_path = audio_path.replace('.mp3', f'-{index}.wav')
+                            variant_audio.export(variant_path, format="wav")
+                            variant_paths.append((variant_name, variant_path))
+                        wav_path = variant_paths[0][1]
+                        safe_log_print(f"   ✅ Audio converted to {len(variant_paths)} recognition variants")
                     except Exception as e:
                         error_msg = str(e)
                         if 'ffprobe' in error_msg.lower() or 'ffmpeg' in error_msg.lower() or 'no such file' in error_msg.lower():
@@ -1702,41 +1857,43 @@ class UltimateLocalCaptchaSolver:
                             safe_log_print("   💡 Install with: sudo apt-get install -y ffmpeg")
                             return None
                         safe_log_print(f"   ⚠️  Audio conversion error: {error_msg[:50]}")
-                        # Try direct recognition if conversion fails (unlikely to work without conversion)
+                        variant_paths = [("original", audio_path)]
                         wav_path = audio_path
                     
-                    # Recognize (with retries)
+                    # Recognize using multiple processed variants. Re-running the same waveform
+                    # usually produces the same failure, so vary the audio before giving up.
                     recognized = None
-                    for recog_attempt in range(3):
+                    total_variants = len(variant_paths)
+                    for variant_index, (variant_name, variant_file) in enumerate(variant_paths):
                         try:
-                            safe_log_print(f"   🎤 Recognizing speech (attempt {recog_attempt + 1}/3)...")
+                            safe_log_print(
+                                f"   🎤 Recognizing speech variant {variant_index + 1}/{total_variants}: {variant_name}..."
+                            )
                             r = sr.Recognizer()
                             r.dynamic_energy_threshold = False
                             r.energy_threshold = 300
-                            with sr.AudioFile(wav_path) as source:
+                            r.pause_threshold = 0.6
+                            with sr.AudioFile(variant_file) as source:
                                 audio_data = r.record(source)
                                 text = r.recognize_google(audio_data, language='en-US')
-                                recognized = text.strip().upper().replace(' ', '').replace('-', '')
-                                safe_log_print(f"   ✅ Recognized: {recognized}")
-                                break
+                                cleaned = self._clean_recognized_text(text)
+                                if cleaned and len(cleaned) >= 3:
+                                    recognized = cleaned
+                                    safe_log_print(f"   ✅ Recognized: {recognized}")
+                                    break
+                                safe_log_print(f"   ⚠️  Recognition too short from {variant_name}: {cleaned or '[empty]'}")
                         except sr.UnknownValueError:
-                            if recog_attempt < 2:
-                                safe_log_print(f"   ⚠️  Could not understand audio (attempt {recog_attempt + 1}), retrying...")
-                                await safe_async_sleep(1)
-                            else:
-                                safe_log_print("   ⚠️  Could not understand audio after 3 attempts")
+                            safe_log_print(f"   ⚠️  Could not understand {variant_name}")
                         except sr.RequestError as e:
                             safe_log_print(f"   ⚠️  Speech recognition API error: {str(e)[:50]}")
-                            if recog_attempt < 2:
-                                await safe_async_sleep(2)
-                            else:
-                                return None
+                            return None
                         except Exception as e:
-                            safe_log_print(f"   ⚠️  Recognition error: {str(e)[:50]}")
-                            if recog_attempt < 2:
-                                await safe_async_sleep(1)
-                            else:
-                                return None
+                            safe_log_print(f"   ⚠️  Recognition error on {variant_name}: {str(e)[:50]}")
+                        await safe_async_sleep(0.5)
+
+                    if not recognized:
+                        safe_log_print("   ⚠️  All audio variants failed to transcribe")
+                        await self._request_new_audio_challenge(frame)
                     
                     return recognized
                         
@@ -1752,6 +1909,10 @@ class UltimateLocalCaptchaSolver:
                             os.unlink(audio_path)
                         if wav_path and os.path.exists(wav_path) and wav_path != audio_path:
                             os.unlink(wav_path)
+                        if 'variant_paths' in locals():
+                            for _, variant_file in variant_paths:
+                                if variant_file != wav_path and variant_file != audio_path and os.path.exists(variant_file):
+                                    os.unlink(variant_file)
                     except:
                         pass
                         

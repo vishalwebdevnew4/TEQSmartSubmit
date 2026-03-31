@@ -1279,17 +1279,23 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
     // Contact form field indicators (name, id, placeholder, label text)
     const contactFormIndicators = [
       // Field names
-      /name=["'](name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)/i,
-      /name=["'](email|e-mail|email_address|contact_email|your_email)/i,
-      /name=["'](message|msg|comment|comments|inquiry|enquiry|query|questions|feedback)/i,
-      /name=["'](subject|topic|subject_line)/i,
-      /name=["'](phone|telephone|tel|mobile|contact_phone|phone_number)/i,
+      /name=["'][^"']*(name|fullname|full_name|first[-_ ]?name|last[-_ ]?name|contact[-_ ]?name|your[-_ ]?name)[^"']*["']/i,
+      /name=["'][^"']*(email|e-mail|email_address|contact[-_ ]?email|your[-_ ]?email)[^"']*["']/i,
+      /name=["'][^"']*(message|msg|comment|comments|inquiry|enquiry|query|questions|feedback|your[-_ ]?message)[^"']*["']/i,
+      /name=["'][^"']*(subject|topic|subject_line|your[-_ ]?subject)[^"']*["']/i,
+      /name=["'][^"']*(phone|telephone|tel|mobile|contact[-_ ]?phone|phone[-_ ]?number|your[-_ ]?phone)[^"']*["']/i,
       // Field IDs
-      /id=["'](name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)/i,
-      /id=["'](email|e-mail|email_address|contact_email|your_email)/i,
-      /id=["'](message|msg|comment|comments|inquiry|enquiry|query|questions|feedback)/i,
-      /id=["'](subject|topic|subject_line)/i,
-      /id=["'](phone|telephone|tel|mobile|contact_phone|phone_number)/i,
+      /id=["'][^"']*(name|fullname|full_name|first[-_ ]?name|last[-_ ]?name|contact[-_ ]?name|your[-_ ]?name)[^"']*["']/i,
+      /id=["'][^"']*(email|e-mail|email_address|contact[-_ ]?email|your[-_ ]?email)[^"']*["']/i,
+      /id=["'][^"']*(message|msg|comment|comments|inquiry|enquiry|query|questions|feedback|your[-_ ]?message)[^"']*["']/i,
+      /id=["'][^"']*(subject|topic|subject_line|your[-_ ]?subject)[^"']*["']/i,
+      /id=["'][^"']*(phone|telephone|tel|mobile|contact[-_ ]?phone|phone[-_ ]?number|your[-_ ]?phone)[^"']*["']/i,
+      // Wrapper data-name attributes used by CF7 and similar builders
+      /data-name=["'][^"']*(name|fullname|full_name|first[-_ ]?name|last[-_ ]?name|contact[-_ ]?name|your[-_ ]?name)[^"']*["']/i,
+      /data-name=["'][^"']*(email|e-mail|email_address|contact[-_ ]?email|your[-_ ]?email)[^"']*["']/i,
+      /data-name=["'][^"']*(message|msg|comment|comments|inquiry|enquiry|query|questions|feedback|your[-_ ]?message)[^"']*["']/i,
+      /data-name=["'][^"']*(subject|topic|subject_line|your[-_ ]?subject)[^"']*["']/i,
+      /data-name=["'][^"']*(phone|telephone|tel|mobile|contact[-_ ]?phone|phone[-_ ]?number|your[-_ ]?phone)[^"']*["']/i,
       // Placeholders
       /placeholder=["']([^"']*(name|full name|your name|first name|last name)[^"']*)/i,
       /placeholder=["']([^"']*(email|e-mail|your email|contact email)[^"']*)/i,
@@ -1348,17 +1354,17 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
 
     // Check for email field specifically (contact forms usually have email)
     // More flexible: check for email in any attribute or type
-    const hasEmailField = /<(input|textarea)[^>]*(name|id|placeholder|class|type)=["']([^"']*email[^"']*)["']/i.test(html) ||
+    const hasEmailField = /<(input|textarea)[^>]*(name|id|placeholder|class|type|data-name)=["']([^"']*email[^"']*)["']/i.test(html) ||
                           /type=["']email["']/i.test(html) ||
                           /<input[^>]*type=["']email["']/i.test(html);
 
     // Check for message/comment field (contact forms usually have a message field)
     // More flexible: check for message/comment in any attribute
-    const hasMessageField = /<(input|textarea)[^>]*(name|id|placeholder|class)=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback)[^"']*)["']/i.test(html) ||
+    const hasMessageField = /<(input|textarea|span)[^>]*(name|id|placeholder|class|data-name)=["']([^"']*(message|comment|inquiry|enquiry|query|question|feedback)[^"']*)["']/i.test(html) ||
                             /<textarea[^>]*>/i.test(html); // Textarea is often used for messages
 
     // Check for name field (contact forms often have name field)
-    const hasNameField = /<(input|textarea)[^>]*(name|id|placeholder|class)=["']([^"']*(name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)[^"']*)["']/i.test(html);
+    const hasNameField = /<(input|textarea|span)[^>]*(name|id|placeholder|class|data-name)=["']([^"']*(name|fullname|full_name|firstname|first_name|lastname|last_name|contact_name|your_name)[^"']*)["']/i.test(html);
 
     // Contact form should have at least:
     // 1. Email field, OR
