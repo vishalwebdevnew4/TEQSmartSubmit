@@ -1956,6 +1956,16 @@ DEFAULT_TEST_DATA = {
     "company": "Test Company",
 }
 
+CHECKPOINT_MARKER = "CHECKPOINT|"
+
+
+def log_checkpoint(step: int, title: str, status: str, detail: str = ""):
+    """Emit machine-readable checkpoint lines for the UI while keeping raw logs intact."""
+    safe_title = (title or "").replace("|", "/")
+    safe_status = (status or "").replace("|", "/")
+    safe_detail = (detail or "").replace("|", "/")
+    ultra_safe_log_print(f"{CHECKPOINT_MARKER}{step}|{safe_status}|{safe_title}|{safe_detail}")
+
 
 def resolve_test_data(template: Dict[str, Any]) -> Dict[str, str]:
     raw_test_data = template.get("test_data")
@@ -5713,6 +5723,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     ultra_safe_log_print("=" * 80)
     ultra_safe_log_print("🚀 STARTING AUTOMATION")
     ultra_safe_log_print("=" * 80)
+    log_checkpoint(1, "Template Load", "in_progress", "Loading template configuration")
     ultra_safe_log_print(f"📋 Loading template from: {template_path}")
     template = await ultra_safe_template_load(template_path)
     resolved_test_data = resolve_test_data(template)
@@ -5729,6 +5740,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     result["template_used"] = "custom" if template.get("fields") else "default"
     ultra_safe_log_print(f"✅ Template loaded: {result['template_used']} template")
     ultra_safe_log_print(f"📝 Submission message source: {'custom template/domain message' if resolved_test_data['message'] != DEFAULT_TEST_DATA['message'] else 'default message'}")
+    log_checkpoint(1, "Template Load", "success", f"Loaded {result['template_used']} template")
     
     # Get headless setting from template (default to False for better CAPTCHA solving)
     headless_mode = template.get("headless", False)
@@ -5762,6 +5774,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     
     try:
         # Step 2: Initialize Playwright (cannot fail)
+        log_checkpoint(2, "Browser Init", "in_progress", f"Starting browser (headless={headless_mode})")
         ultra_safe_log_print(f"🚀 Initializing browser (headless={headless_mode})...")
         ultra_safe_log_print(f"   📍 About to call playwright_manager.start()...")
         sys.stderr.flush()
@@ -5801,6 +5814,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             
             error_msg = "\n".join(error_details)
             ultra_safe_log_print(f"❌ {error_msg}")
+            log_checkpoint(2, "Browser Init", "failed", "Browser initialization failed")
             result.update({
                 "status": "error",
                 "message": error_msg,
@@ -5811,6 +5825,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         ultra_safe_log_print("✅ Browser initialized successfully")
         result["steps_completed"].append("browser_ready")
+        log_checkpoint(2, "Browser Init", "success", "Browser initialized successfully")
         
         try:
             if heartbeat_file_path and heartbeat_file_path.exists():
@@ -5823,6 +5838,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             pass
         
         # Step 3: Navigate to URL (cannot fail)
+        log_checkpoint(3, "Page Load", "in_progress", url)
         ultra_safe_log_print(f"🌐 Navigating to URL: {url}")
         # Track form load timestamp for WPForms
         form_load_timestamp = time.time()
@@ -5840,6 +5856,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         if not navigation_success:
             error_msg = f"Navigation failed to {url}"
             ultra_safe_log_print(f"❌ {error_msg}")
+            log_checkpoint(3, "Page Load", "failed", error_msg)
             result.update({
                 "status": "error", 
                 "message": error_msg + "\n\nThis usually means the page failed to load or timed out.",
@@ -5849,6 +5866,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             return result
         
         result["steps_completed"].append("navigation_complete")
+        log_checkpoint(3, "Page Load", "success", result.get("final_url", url))
         result["final_url"] = await UltimateSafetyWrapper.execute_async(
             lambda: playwright_manager.page.url,
             default_return=url
@@ -5871,6 +5889,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             ultra_safe_log_print(f"   ⚠️  Could not extract WPForms fields: {str(e)[:50]}")
         
         # Step 3.5: Handle banners, popups, and cookie consent (CRITICAL - must be done before form interaction)
+        log_checkpoint(4, "Banner Handling", "in_progress", "Checking banners and popups")
         ultra_safe_log_print("")
         ultra_safe_log_print("🚫 STEP 3.5: Handling banners, popups, and cookie consent...")
         ultra_safe_log_print("-" * 80)
@@ -5878,8 +5897,10 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         result["banners_closed"] = banners_closed
         if banners_closed > 0:
             ultra_safe_log_print(f"✅ Closed {banners_closed} banner(s)/popup(s)")
+            log_checkpoint(4, "Banner Handling", "success", f"Closed {banners_closed} banner(s)")
         else:
             ultra_safe_log_print("ℹ️  No banners or popups detected")
+            log_checkpoint(4, "Banner Handling", "success", "No banners or popups detected")
         ultra_safe_log_print("")
         
         # Step 3.6: Ensure forms appear above all banners with high z-index
@@ -5909,6 +5930,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         ultra_safe_log_print("")
         
         # Check if there's a contact form, if not try to find contact page
+        log_checkpoint(5, "Form Detection", "in_progress", "Scanning page for contact form")
         try:
             has_contact_form = await playwright_manager.page.evaluate("""
                 () => {
@@ -5991,6 +6013,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             
             if contact_form_result:
                 ultra_safe_log_print("✅ Found contact form with name, email, comment fields - scrolled to it")
+                log_checkpoint(5, "Form Detection", "success", "Found contact form on page")
                 await asyncio.sleep(2)  # Wait for scroll and content to load
                 # Don't navigate away if we found the contact form
                 has_contact_form = True
@@ -6022,12 +6045,15 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                         if nav_success:
                             result["final_url"] = contact_link
                             ultra_safe_log_print("✅ Navigated to contact page")
+                            log_checkpoint(5, "Form Detection", "warning", "Navigated to contact page to continue detection")
                             # Wait a bit for dynamic content to load
                             await asyncio.sleep(2)
                         else:
                             ultra_safe_log_print("⚠️  Failed to navigate to contact page")
+                            log_checkpoint(5, "Form Detection", "warning", "Found contact page but navigation failed")
                     else:
                         ultra_safe_log_print("⚠️  No contact page found - please provide contact page URL")
+                        log_checkpoint(5, "Form Detection", "warning", "No clear contact form/page found")
         except:
             pass  # Continue anyway
         
@@ -6042,6 +6068,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             pass
         
         ultra_safe_log_print("🔐 Checking for CAPTCHAs (using LOCAL solver)...")
+        log_checkpoint(6, "CAPTCHA", "in_progress", "Checking page for CAPTCHA widgets")
         
         # First, do a quick check to see if CAPTCHA is actually present
         quick_captcha_check = await playwright_manager.page.evaluate("""
@@ -6064,6 +6091,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         if not quick_captcha_check.get('has_captcha'):
             ultra_safe_log_print("ℹ️  No CAPTCHA detected on page - skipping CAPTCHA handling")
+            log_checkpoint(6, "CAPTCHA", "success", "No CAPTCHA detected")
             captcha_result = {
                 "captchas_detected": 0,
                 "captchas_solved": 0,
@@ -6074,6 +6102,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         else:
             # CAPTCHA detected, proceed with handling
             ultra_safe_log_print(f"🔐 CAPTCHA detected: reCAPTCHA={quick_captcha_check.get('has_recaptcha')}, hCaptcha={quick_captcha_check.get('has_hcaptcha')}, Hashcash={quick_captcha_check.get('has_hashcash')}")
+            log_checkpoint(6, "CAPTCHA", "warning", "CAPTCHA detected, attempting solve")
         
         # Check for rate limit error in reCAPTCHA challenge iframe BEFORE attempting to solve
         try:
@@ -6223,6 +6252,11 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                     "solutions": []
                 }
                 result["captcha_result"] = captcha_result
+
+        if result.get("captcha_result", {}).get("captchas_solved", 0) > 0:
+            log_checkpoint(6, "CAPTCHA", "success", f"Solved {result['captcha_result'].get('captchas_solved', 0)} CAPTCHA(s)")
+        elif result.get("captcha_result", {}).get("captchas_detected", 0) > 0:
+            log_checkpoint(6, "CAPTCHA", "warning", "CAPTCHA detected but not fully solved")
         
         try:
             if heartbeat_file_path and heartbeat_file_path.exists():
@@ -6246,10 +6280,15 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         ultra_safe_log_print("")
         ultra_safe_log_print("✍️  STEP 5: Filling form fields...")
         ultra_safe_log_print("-" * 80)
+        log_checkpoint(7, "Field Fill", "in_progress", "Filling detected form fields")
         fill_result = await ultra_simple_form_fill(playwright_manager.page, template)
         result.update(fill_result)
         result["steps_completed"].append("form_filled")
         ultra_safe_log_print(f"✅ Form filling completed: {fill_result.get('fields_filled', 0)} field(s) filled")
+        if fill_result.get('fields_filled', 0) > 0:
+            log_checkpoint(7, "Field Fill", "success", f"Filled {fill_result.get('fields_filled', 0)} field(s)")
+        else:
+            log_checkpoint(7, "Field Fill", "warning", "No fields were filled")
         ultra_safe_log_print("")
         
         try:
@@ -6515,6 +6554,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         ultra_safe_log_print("📤 STEP 6: Submitting form...")
         ultra_safe_log_print("-" * 80)
+        log_checkpoint(8, "Submit", "in_progress", "Attempting form submission")
         
         # Ensure form submission happens even if CAPTCHA solving failed
         # Validate page is still open before submission
@@ -6603,6 +6643,12 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         ultra_safe_log_print(f"   - Success flag: {submit_result.get('submission_success', False)}")
         ultra_safe_log_print(f"   - POST requests: {submit_result.get('post_requests', 0)}")
         ultra_safe_log_print(f"   - Form data captured: {submit_result.get('form_submission_data') is not None}")
+        if submit_result.get('submission_success'):
+            log_checkpoint(8, "Submit", "success", "Submission completed successfully")
+        elif submit_result.get('submission_attempted'):
+            log_checkpoint(8, "Submit", "warning", "Submission attempted but not fully verified")
+        else:
+            log_checkpoint(8, "Submit", "failed", "Submission was not attempted")
         ultra_safe_log_print("")
         
         # Collect all logs for final message - DETAILED VERSION
@@ -6666,6 +6712,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         
         all_logs.append("")
         all_logs.append("FINAL VERIFICATION:")
+        all_logs.append(f"{CHECKPOINT_MARKER}9|in_progress|Verification|Validating submission outcome")
         # Use result instead of submit_result since result.update(submit_result) was called earlier
         has_form_data = result.get("form_submission_data") is not None
         form_detected = result.get("form_submission_detected", False)
@@ -6680,8 +6727,10 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             all_logs.append("     This is likely a FALSE POSITIVE - form may not have actually submitted.")
         elif submission_success and has_form_data:
             all_logs.append("  ✅ All verification checks passed - submission confirmed.")
+            all_logs.append(f"{CHECKPOINT_MARKER}9|success|Verification|Submission verified with form data")
         elif not submission_success:
             all_logs.append("  ❌ Submission verification failed.")
+            all_logs.append(f"{CHECKPOINT_MARKER}9|failed|Verification|Submission verification failed")
         
         all_logs.append("")
         all_logs.append("=" * 80)
@@ -6699,12 +6748,14 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             # AND fields were actually filled
             has_form_data = result.get("form_submission_data") is not None
             if has_form_data and fields_filled > 0:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|success|Final Status|Run marked as success")
                 all_logs.append("✅ FINAL STATUS: SUCCESS - Form submitted with verified data")
                 result.update({
                     "status": "success",
                     "message": "\n".join(all_logs)
                 })
             elif has_form_data and fields_filled == 0:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|failed|Final Status|Form data captured but no fields filled")
                 # Has form data but no fields filled - suspicious, mark as failed
                 all_logs.append("❌ FINAL STATUS: FAILED - Form data captured but no fields were filled")
                 result.update({
@@ -6712,6 +6763,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                     "message": "\n".join(all_logs)
                 })
             else:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|failed|Final Status|No form data verification")
                 # No form data verification - mark as failed
                 all_logs.append("❌ FINAL STATUS: FAILED - No form data verification")
                 result.update({
@@ -6725,6 +6777,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
             has_form_data = result.get("form_submission_data") is not None
             
             if fields_filled == 0 and fields_attempted == 0:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|failed|Final Status|No fields filled and no submission verified")
                 # No fields filled at all - this is a failure
                 all_logs.append("❌ FINAL STATUS: FAILED - No fields filled and no submission verified")
                 result.update({
@@ -6732,6 +6785,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                     "message": "\n".join(all_logs)
                 })
             elif not form_detected and not has_form_data:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|failed|Final Status|Submission attempted but not detected")
                 # Submission attempted but not detected - failure
                 all_logs.append("❌ FINAL STATUS: FAILED - Submission attempted but not detected")
                 result.update({
@@ -6739,6 +6793,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                     "message": "\n".join(all_logs)
                 })
             else:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|warning|Final Status|Submission attempted but not fully verified")
                 # Some fields filled but submission not fully verified - unconfirmed
                 all_logs.append("⚠️  FINAL STATUS: SUBMITTED (unconfirmed) - Submission attempted but not verified")
                 result.update({
@@ -6748,8 +6803,10 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
         else:
             # No submission was attempted
             if fields_filled == 0:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|failed|Final Status|No fields filled and no submission attempted")
                 all_logs.append("❌ FINAL STATUS: FAILED - No fields filled and no submission attempted")
             else:
+                all_logs.append(f"{CHECKPOINT_MARKER}10|failed|Final Status|No submission was attempted")
                 all_logs.append("❌ FINAL STATUS: FAILED - No submission was attempted")
             result.update({
                 "status": "failed",

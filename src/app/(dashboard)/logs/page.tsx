@@ -21,6 +21,15 @@ interface SubmissionLog {
   };
 }
 
+interface LogCheckpoint {
+  step: number;
+  status: string;
+  title: string;
+  detail: string;
+}
+
+const CHECKPOINT_PREFIX = "CHECKPOINT|";
+
 export default function LogsPage() {
   const [logs, setLogs] = useState<SubmissionLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,7 +232,64 @@ export default function LogsPage() {
 
   const formatLogMessage = (message: string | null): string[] => {
     if (!message) return [];
-    return message.split("\n").filter((line) => line.trim().length > 0);
+    return message
+      .split("\n")
+      .filter((line) => line.trim().length > 0 && !line.startsWith(CHECKPOINT_PREFIX));
+  };
+
+  const parseCheckpoints = (message: string | null): LogCheckpoint[] => {
+    if (!message) return [];
+
+    const checkpoints = new Map<number, LogCheckpoint>();
+
+    for (const line of message.split("\n")) {
+      if (!line.startsWith(CHECKPOINT_PREFIX)) continue;
+
+      const [, stepRaw = "", status = "", title = "", detail = ""] = line.split("|");
+      const step = Number(stepRaw);
+      if (Number.isNaN(step)) continue;
+
+      checkpoints.set(step, {
+        step,
+        status: status || "pending",
+        title: title || `Step ${step}`,
+        detail: detail || "",
+      });
+    }
+
+    return Array.from(checkpoints.values()).sort((a, b) => a.step - b.step);
+  };
+
+  const getCheckpointStyle = (status: string) => {
+    const normalized = status.toLowerCase();
+    if (normalized === "success") {
+      return {
+        icon: "✅",
+        className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+      };
+    }
+    if (normalized === "warning") {
+      return {
+        icon: "⚠️",
+        className: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+      };
+    }
+    if (normalized === "failed") {
+      return {
+        icon: "❌",
+        className: "border-rose-500/30 bg-rose-500/10 text-rose-300",
+      };
+    }
+    if (normalized === "in_progress") {
+      return {
+        icon: "🔄",
+        className: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+      };
+    }
+    return {
+      icon: "⚪",
+      className: "border-slate-700 bg-slate-900/60 text-slate-300",
+    };
   };
 
   const getMessagePreview = (message: string | null, maxLength: number = 150): string => {
@@ -397,11 +463,13 @@ export default function LogsPage() {
             <p className="text-sm text-slate-300">No logs found.</p>
           </div>
         ) : (
-          logs.map((log) => (
-          <div
-            key={log.id}
-            className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 text-sm shadow-lg hover:border-slate-700 transition-all"
-          >
+          logs.map((log) => {
+            const checkpoints = parseCheckpoints(log.message);
+            return (
+              <div
+                key={log.id}
+                className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-5 text-sm shadow-lg hover:border-slate-700 transition-all"
+              >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex-1">
                   <p className="font-medium text-slate-200">{log.domain?.url || log.url}</p>
@@ -429,6 +497,32 @@ export default function LogsPage() {
                   )}
                 </div>
               </div>
+              {checkpoints.length > 0 && (
+                <div className="mt-3 rounded-lg border border-slate-700/50 bg-slate-950/50 p-3">
+                  <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Checkpoints
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {checkpoints.map((checkpoint) => {
+                      const style = getCheckpointStyle(checkpoint.status);
+                      return (
+                        <div
+                          key={`${log.id}-${checkpoint.step}`}
+                          className={`rounded-lg border px-3 py-2 text-xs ${style.className}`}
+                        >
+                          <div className="flex items-center gap-2 font-medium">
+                            <span>{style.icon}</span>
+                            <span>{checkpoint.step}. {checkpoint.title}</span>
+                          </div>
+                          {checkpoint.detail && (
+                            <p className="mt-1 text-[11px] opacity-90">{checkpoint.detail}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="mt-3">
                 {log.message ? (
                   isLongMessage(log.message) && !expandedLogs.has(log.id) ? (
@@ -541,7 +635,8 @@ export default function LogsPage() {
                 )}
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
