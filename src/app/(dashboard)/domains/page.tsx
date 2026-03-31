@@ -521,6 +521,38 @@ export default function DomainsPage() {
       reader.readAsText(file);
     });
 
+  const parseDelimitedLine = (line: string, delimiter: string) => {
+    const values: string[] = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      const next = line[i + 1];
+
+      if (char === '"') {
+        if (inQuotes && next === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+        continue;
+      }
+
+      if (char === delimiter && !inQuotes) {
+        values.push(current.trim());
+        current = "";
+        continue;
+      }
+
+      current += char;
+    }
+
+    values.push(current.trim());
+    return values;
+  };
+
   const loadCsvFile = async (file: File) => {
     const fileName = file.name.toLowerCase();
     if (!fileName.endsWith(".csv") && !fileName.endsWith(".txt")) {
@@ -586,35 +618,41 @@ https://example3.com,marketing,Looking for marketing support`;
 
     setProcessing(true);
     try {
-      const lines = content.split("\n").filter(line => line.trim());
+      const lines = content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line);
       if (lines.length === 0) {
         alert("No data found in CSV");
         return;
       }
 
       const domains: Array<{ url: string; category: string | null; message: string | null }> = [];
-      let hasHeaders = false;
-      
-      // Check if first line looks like headers
-      const firstLine = lines[0].toLowerCase();
-      if (firstLine.includes("url") || firstLine.includes("domain") || firstLine.includes("category")) {
-        hasHeaders = true;
-      }
-
-      // Start from line 1 if headers exist
+      const delimiter = lines[0].includes("\t") ? "\t" : ",";
+      const headerValues = parseDelimitedLine(lines[0], delimiter).map((value) => value.toLowerCase());
+      const hasHeaders = headerValues.some((value) =>
+        ["url", "domain", "category", "message", "custommessage", "isactive"].includes(value)
+      );
+      const headerIndex = new Map(headerValues.map((value, index) => [value, index]));
       const dataLines = hasHeaders ? lines.slice(1) : lines;
 
       for (const line of dataLines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        // Support both comma and tab separated
-        const parts = trimmed.split(/[,\t]/).map((p) => p.trim());
+        const parts = parseDelimitedLine(trimmed, delimiter);
+        const urlIndex = hasHeaders
+          ? (headerIndex.get("url") ?? headerIndex.get("domain") ?? 0)
+          : 0;
+        const categoryIndex = hasHeaders ? (headerIndex.get("category") ?? 1) : 1;
+        const messageIndex = hasHeaders
+          ? (headerIndex.get("message") ?? headerIndex.get("custommessage") ?? 2)
+          : 2;
         
-        if (parts[0]) {
-          const url = parts[0];
-          const category = parts[1] || null;
-          const message = parts[2] || null;
+        if (parts[urlIndex]) {
+          const url = parts[urlIndex];
+          const category = parts[categoryIndex] || null;
+          const message = parts[messageIndex] || null;
           
           // Validate URL format
           try {
