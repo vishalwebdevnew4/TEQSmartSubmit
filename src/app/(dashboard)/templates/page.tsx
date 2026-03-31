@@ -6,7 +6,7 @@ interface Template {
   id: number;
   name: string;
   description: string | null;
-  fieldMappings: Record<string, string>;
+  fieldMappings: Record<string, any>;
   createdAt: Date;
   updatedAt: Date;
   domainId: number | null;
@@ -20,6 +20,49 @@ interface Domain {
   id: number;
   url: string;
 }
+
+type TemplateTestData = {
+  name: string;
+  email: string;
+  phone: string;
+  message: string;
+  subject: string;
+  company: string;
+};
+
+const DEFAULT_TEST_DATA: TemplateTestData = {
+  name: "TEQ QA User",
+  email: "qa@example.com",
+  phone: "555-123-4567",
+  message: "This is an automated test submission.",
+  subject: "Test Inquiry",
+  company: "TEQSmartSubmit",
+};
+
+const getTemplateTestData = (fieldMappings: Record<string, any> | null | undefined): TemplateTestData => {
+  const rawTestData =
+    fieldMappings && typeof fieldMappings.test_data === "object" && fieldMappings.test_data !== null
+      ? fieldMappings.test_data
+      : {};
+
+  return {
+    name: typeof rawTestData.name === "string" && rawTestData.name.trim() ? rawTestData.name : DEFAULT_TEST_DATA.name,
+    email: typeof rawTestData.email === "string" && rawTestData.email.trim() ? rawTestData.email : DEFAULT_TEST_DATA.email,
+    phone: typeof rawTestData.phone === "string" && rawTestData.phone.trim() ? rawTestData.phone : DEFAULT_TEST_DATA.phone,
+    message:
+      typeof rawTestData.message === "string" && rawTestData.message.trim()
+        ? rawTestData.message
+        : DEFAULT_TEST_DATA.message,
+    subject:
+      typeof rawTestData.subject === "string" && rawTestData.subject.trim()
+        ? rawTestData.subject
+        : DEFAULT_TEST_DATA.subject,
+    company:
+      typeof rawTestData.company === "string" && rawTestData.company.trim()
+        ? rawTestData.company
+        : DEFAULT_TEST_DATA.company,
+  };
+};
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -36,8 +79,10 @@ export default function TemplatesPage() {
     domainId: "",
     fieldMappings: "{}",
   });
+  const [testData, setTestData] = useState<TemplateTestData>(DEFAULT_TEST_DATA);
   const [fieldMappingsList, setFieldMappingsList] = useState<Array<{ key: string; value: string; type?: 'text' | 'number' | 'boolean' | 'object' }>>([]);
   const [processing, setProcessing] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
   useEffect(() => {
     fetchTemplates();
@@ -103,7 +148,9 @@ export default function TemplatesPage() {
       domainId: "",
       fieldMappings: "{}",
     });
+    setTestData(DEFAULT_TEST_DATA);
     setFieldMappingsList([]);
+    setShowAdvancedSettings(false);
     setShowModal(true);
   };
 
@@ -115,8 +162,11 @@ export default function TemplatesPage() {
       domainId: template.domainId?.toString() || "",
       fieldMappings: JSON.stringify(template.fieldMappings, null, 2),
     });
+    setTestData(getTemplateTestData(template.fieldMappings));
     // Convert field mappings object to array for easier editing
-    const mappingsArray = Object.entries(template.fieldMappings || {}).map(([key, value]: [string, any]) => {
+    const mappingsArray = Object.entries(template.fieldMappings || {})
+      .filter(([key]) => key !== "test_data")
+      .map(([key, value]: [string, any]) => {
       let type: 'text' | 'number' | 'boolean' | 'object' = 'text';
       let stringValue = '';
       
@@ -133,9 +183,10 @@ export default function TemplatesPage() {
         stringValue = String(value);
       }
       
-      return { key, value: stringValue, type };
-    });
+        return { key, value: stringValue, type };
+      });
     setFieldMappingsList(mappingsArray.length > 0 ? mappingsArray : []);
+    setShowAdvancedSettings(mappingsArray.length > 0);
     setShowModal(true);
   };
 
@@ -187,6 +238,15 @@ export default function TemplatesPage() {
         return;
       }
 
+      fieldMappings.test_data = {
+        name: testData.name.trim() || DEFAULT_TEST_DATA.name,
+        email: testData.email.trim() || DEFAULT_TEST_DATA.email,
+        phone: testData.phone.trim() || DEFAULT_TEST_DATA.phone,
+        message: testData.message.trim() || DEFAULT_TEST_DATA.message,
+        subject: testData.subject.trim() || DEFAULT_TEST_DATA.subject,
+        company: testData.company.trim() || DEFAULT_TEST_DATA.company,
+      };
+
       const url = editingTemplate ? `/api/templates/${editingTemplate.id}` : "/api/templates";
       const method = editingTemplate ? "PUT" : "POST";
 
@@ -219,19 +279,23 @@ export default function TemplatesPage() {
   };
 
   const formatFieldMappings = (mappings: Record<string, string>): string => {
-    if (!mappings || Object.keys(mappings).length === 0) {
+    const filteredMappings = Object.fromEntries(
+      Object.entries(mappings || {}).filter(([key]) => key !== "test_data")
+    );
+
+    if (!filteredMappings || Object.keys(filteredMappings).length === 0) {
       return "No field mappings defined";
     }
-    return Object.entries(mappings)
+    return Object.entries(filteredMappings)
       .map(([key, value]) => `${key} - ${value}`)
       .join(", ");
   };
 
-  const getFieldKeys = (mappings: Record<string, string>): string[] => {
+  const getFieldKeys = (mappings: Record<string, any>): string[] => {
     if (!mappings || typeof mappings !== "object") {
       return [];
     }
-    return Object.keys(mappings);
+    return Object.keys(mappings).filter((key) => key !== "test_data");
   };
 
   if (loading) {
@@ -329,6 +393,7 @@ export default function TemplatesPage() {
           filteredTemplates.map((template) => {
             const fields = getFieldKeys(template.fieldMappings);
             const preview = formatFieldMappings(template.fieldMappings);
+            const templateTestData = getTemplateTestData(template.fieldMappings);
 
             return (
               <div key={template.id} className="space-y-3 rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-6 shadow-lg hover:border-slate-700 transition-all">
@@ -382,6 +447,17 @@ export default function TemplatesPage() {
             <div className="text-xs text-slate-400">
               <p>Preview:</p>
                   <p className="mt-1 line-clamp-2 text-slate-300 font-mono text-xs">{preview}</p>
+                </div>
+                <div className="rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
+                  <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-3">Submission Test Data</p>
+                  <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
+                    <p><span className="text-slate-500">Name:</span> {templateTestData.name}</p>
+                    <p><span className="text-slate-500">Email:</span> {templateTestData.email}</p>
+                    <p><span className="text-slate-500">Phone:</span> {templateTestData.phone}</p>
+                    <p><span className="text-slate-500">Subject:</span> {templateTestData.subject}</p>
+                    <p className="sm:col-span-2"><span className="text-slate-500">Company:</span> {templateTestData.company}</p>
+                    <p className="sm:col-span-2"><span className="text-slate-500">Message:</span> <span className="line-clamp-2">{templateTestData.message}</span></p>
+                  </div>
                 </div>
               </div>
             );
@@ -447,245 +523,294 @@ export default function TemplatesPage() {
                   ))}
                 </select>
               </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-semibold text-slate-300">
-                    Field Mappings *
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setFieldMappingsList([...fieldMappingsList, { key: "", value: "", type: 'text' }])}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-600/50 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20 transition-all"
-                  >
-                    <span>➕</span>
-                    Add Field
-                  </button>
+              <div className="rounded-lg border border-slate-800/50 bg-slate-950/40 p-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-300 mb-1">Submission Test Data</label>
+                  <p className="text-xs text-slate-400">
+                    These values will be used for auto-filled name, email, phone, subject, company, and default message.
+                    Domain custom messages can still override only the message body at run time.
+                  </p>
                 </div>
-                <p className="text-xs text-slate-400 mb-3">
-                  Configure field mappings and settings. Values can be text, numbers, booleans, or JSON objects.
-                </p>
-                
-                {fieldMappingsList.length === 0 ? (
-                  <div className="rounded-lg border-2 border-dashed border-slate-700/50 bg-slate-800/30 p-8 text-center">
-                    <p className="text-sm text-slate-400 mb-3">No field mappings added yet</p>
-                    <button
-                      type="button"
-                      onClick={() => setFieldMappingsList([{ key: "", value: "", type: 'text' }])}
-                      className="inline-flex items-center gap-2 rounded-lg bg-indigo-500/10 border border-indigo-600/50 px-4 py-2 text-sm font-medium text-indigo-300 hover:bg-indigo-500/20 transition-all"
-                    >
-                      <span>➕</span>
-                      Add Your First Field Mapping
-                    </button>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Name</label>
+                    <input
+                      type="text"
+                      value={testData.name}
+                      onChange={(e) => setTestData({ ...testData, name: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+                      placeholder="TEQ QA User"
+                    />
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {fieldMappingsList.map((mapping, index) => {
-                      const detectedType = mapping.type || (() => {
-                        const val = mapping.value.trim();
-                        if (val === 'true' || val === 'false') return 'boolean';
-                        if (!isNaN(Number(val)) && val !== '') return 'number';
-                        if (val.startsWith('{') || val.startsWith('[')) return 'object';
-                        return 'text';
-                      })();
-                      
-                      return (
-                        <div key={index} className="rounded-lg border border-slate-700/50 bg-slate-800/50 p-4">
-                          <div className="grid grid-cols-[1.2fr_1fr_0.8fr_auto] gap-3 items-start">
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                Field Name
-                              </label>
-                              <input
-                                type="text"
-                                value={mapping.key}
-                                onChange={(e) => {
-                                  const newList = [...fieldMappingsList];
-                                  newList[index].key = e.target.value;
-                                  setFieldMappingsList(newList);
-                                }}
-                                className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all"
-                                placeholder="e.g., name, email, captcha"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                Value Type
-                              </label>
-                              <select
-                                value={detectedType}
-                                onChange={(e) => {
-                                  const newList = [...fieldMappingsList];
-                                  newList[index].type = e.target.value as any;
-                                  // Reset value if switching types
-                                  if (e.target.value === 'boolean') {
-                                    newList[index].value = 'true';
-                                  } else if (e.target.value === 'number') {
-                                    newList[index].value = '0';
-                                  } else if (e.target.value === 'object') {
-                                    newList[index].value = '{}';
-                                  } else {
-                                    newList[index].value = '';
-                                  }
-                                  setFieldMappingsList(newList);
-                                }}
-                                className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all cursor-pointer"
-                              >
-                                <option value="text">Text / CSS Selector</option>
-                                <option value="number">Number</option>
-                                <option value="boolean">Boolean (true/false)</option>
-                                <option value="object">JSON Object/Array</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                                {detectedType === 'boolean' ? 'Boolean Value' : 
-                                 detectedType === 'number' ? 'Number Value' :
-                                 detectedType === 'object' ? 'JSON Value' :
-                                 'Value / CSS Selector'}
-                              </label>
-                              {detectedType === 'boolean' ? (
-                                <select
-                                  value={mapping.value}
-                                  onChange={(e) => {
-                                    const newList = [...fieldMappingsList];
-                                    newList[index].value = e.target.value;
-                                    setFieldMappingsList(newList);
-                                  }}
-                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all cursor-pointer"
-                                >
-                                  <option value="true">true</option>
-                                  <option value="false">false</option>
-                                </select>
-                              ) : detectedType === 'number' ? (
-                                <input
-                                  type="number"
-                                  value={mapping.value}
-                                  onChange={(e) => {
-                                    const newList = [...fieldMappingsList];
-                                    newList[index].value = e.target.value;
-                                    setFieldMappingsList(newList);
-                                  }}
-                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all"
-                                  placeholder="e.g., 600000"
-                                />
-                              ) : detectedType === 'object' ? (
-                                <textarea
-                                  value={mapping.value}
-                                  onChange={(e) => {
-                                    const newList = [...fieldMappingsList];
-                                    newList[index].value = e.target.value;
-                                    setFieldMappingsList(newList);
-                                  }}
-                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all font-mono h-20 resize-y"
-                                  placeholder='{"key": "value"} or [...]'
-                                />
-                              ) : (
-                                <input
-                                  type="text"
-                                  value={mapping.value}
-                                  onChange={(e) => {
-                                    const newList = [...fieldMappingsList];
-                                    newList[index].value = e.target.value;
-                                    setFieldMappingsList(newList);
-                                  }}
-                                  className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all font-mono"
-                                  placeholder='e.g., input[name="name"], #email, or any text'
-                                />
-                              )}
-                            </div>
-                            <div className="pt-6">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const newList = fieldMappingsList.filter((_, i) => i !== index);
-                                  setFieldMappingsList(newList);
-                                }}
-                                className="rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-all"
-                                title="Remove this field mapping"
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          </div>
-                          {mapping.key && mapping.value && (
-                            <div className="mt-3 flex items-center gap-2 text-xs">
-                              <span className="text-slate-400">Preview:</span>
-                              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-950/50 border border-slate-800/50">
-                                <span className="font-semibold text-indigo-300">{mapping.key}</span>
-                                <span className="text-slate-600">→</span>
-                                {detectedType === 'object' ? (
-                                  <span className="text-emerald-300 font-mono text-[10px]">
-                                    {(() => {
-                                      try {
-                                        const parsed = JSON.parse(mapping.value);
-                                        if (typeof parsed === 'object' && parsed !== null) {
-                                          const keys = Object.keys(parsed);
-                                          return keys.length > 0 
-                                            ? `{${keys.length} ${keys.length === 1 ? 'key' : 'keys'}}`
-                                            : '{}';
-                                        }
-                                      } catch {}
-                                      return 'JSON';
-                                    })()}
-                                  </span>
-                                ) : detectedType === 'boolean' ? (
-                                  <span className={`font-semibold ${mapping.value === 'true' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                    {mapping.value}
-                                  </span>
-                                ) : detectedType === 'number' ? (
-                                  <span className="text-blue-300 font-mono">
-                                    {mapping.value}
-                                  </span>
-                                ) : (
-                                  <span className="text-emerald-300 font-mono text-[10px] max-w-[200px] truncate" title={mapping.value}>
-                                    {mapping.value.length > 30 ? mapping.value.substring(0, 30) + '...' : mapping.value}
-                                  </span>
-                                )}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Email</label>
+                    <input
+                      type="email"
+                      value={testData.email}
+                      onChange={(e) => setTestData({ ...testData, email: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+                      placeholder="qa@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Phone</label>
+                    <input
+                      type="text"
+                      value={testData.phone}
+                      onChange={(e) => setTestData({ ...testData, phone: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+                      placeholder="555-123-4567"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Subject</label>
+                    <input
+                      type="text"
+                      value={testData.subject}
+                      onChange={(e) => setTestData({ ...testData, subject: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+                      placeholder="Test Inquiry"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Company</label>
+                    <input
+                      type="text"
+                      value={testData.company}
+                      onChange={(e) => setTestData({ ...testData, company: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all"
+                      placeholder="TEQSmartSubmit"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Default Message</label>
+                    <textarea
+                      value={testData.message}
+                      onChange={(e) => setTestData({ ...testData, message: e.target.value })}
+                      className="w-full rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-800 transition-all min-h-[96px] resize-y"
+                      placeholder="This is an automated test submission."
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-800/50 bg-slate-950/40">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedSettings((current) => !current)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-slate-300">Advanced Settings</p>
+                    <p className="text-xs text-slate-400">
+                      Technical automation options like selectors, CAPTCHA mode, and timing.
+                    </p>
+                  </div>
+                  <span className="text-slate-300">{showAdvancedSettings ? "▾" : "▸"}</span>
+                </button>
+                {showAdvancedSettings && (
+                  <div className="border-t border-slate-800/50 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-semibold text-slate-300">
+                        Advanced Field Mappings
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setFieldMappingsList([...fieldMappingsList, { key: "", value: "", type: 'text' }])}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-600/50 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20 transition-all"
+                      >
+                        <span>➕</span>
+                        Add Setting
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-3">
+                      Most users can leave this alone. Only change these if you need custom selectors or engine behavior.
+                    </p>
+
+                    {fieldMappingsList.length === 0 ? (
+                      <div className="rounded-lg border-2 border-dashed border-slate-700/50 bg-slate-800/30 p-6 text-center">
+                        <p className="text-sm text-slate-400 mb-3">No advanced settings added</p>
+                        <button
+                          type="button"
+                          onClick={() => setFieldMappingsList([{ key: "", value: "", type: 'text' }])}
+                          className="inline-flex items-center gap-2 rounded-lg bg-indigo-500/10 border border-indigo-600/50 px-4 py-2 text-sm font-medium text-indigo-300 hover:bg-indigo-500/20 transition-all"
+                        >
+                          <span>➕</span>
+                          Add Advanced Setting
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {fieldMappingsList.map((mapping, index) => {
+                          const detectedType = mapping.type || (() => {
+                            const val = mapping.value.trim();
+                            if (val === 'true' || val === 'false') return 'boolean';
+                            if (!isNaN(Number(val)) && val !== '') return 'number';
+                            if (val.startsWith('{') || val.startsWith('[')) return 'object';
+                            return 'text';
+                          })();
+
+                          return (
+                            <div key={index} className="rounded-lg border border-slate-700/50 bg-slate-800/50 p-4">
+                              <div className="grid grid-cols-[1.2fr_1fr_0.8fr_auto] gap-3 items-start">
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                                    Setting Name
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={mapping.key}
+                                    onChange={(e) => {
+                                      const newList = [...fieldMappingsList];
+                                      newList[index].key = e.target.value;
+                                      setFieldMappingsList(newList);
+                                    }}
+                                    className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all"
+                                    placeholder="e.g., submit_selector, headless, captcha"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                                    Value Type
+                                  </label>
+                                  <select
+                                    value={detectedType}
+                                    onChange={(e) => {
+                                      const newList = [...fieldMappingsList];
+                                      newList[index].type = e.target.value as any;
+                                      if (e.target.value === 'boolean') {
+                                        newList[index].value = 'true';
+                                      } else if (e.target.value === 'number') {
+                                        newList[index].value = '0';
+                                      } else if (e.target.value === 'object') {
+                                        newList[index].value = '{}';
+                                      } else {
+                                        newList[index].value = '';
+                                      }
+                                      setFieldMappingsList(newList);
+                                    }}
+                                    className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-xs text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all cursor-pointer"
+                                  >
+                                    <option value="text">Text / CSS Selector</option>
+                                    <option value="number">Number</option>
+                                    <option value="boolean">Boolean</option>
+                                    <option value="object">JSON Object/Array</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                                    {detectedType === 'boolean' ? 'Boolean Value' :
+                                     detectedType === 'number' ? 'Number Value' :
+                                     detectedType === 'object' ? 'JSON Value' :
+                                     'Value / Selector'}
+                                  </label>
+                                  {detectedType === 'boolean' ? (
+                                    <select
+                                      value={mapping.value}
+                                      onChange={(e) => {
+                                        const newList = [...fieldMappingsList];
+                                        newList[index].value = e.target.value;
+                                        setFieldMappingsList(newList);
+                                      }}
+                                      className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all cursor-pointer"
+                                    >
+                                      <option value="true">true</option>
+                                      <option value="false">false</option>
+                                    </select>
+                                  ) : detectedType === 'number' ? (
+                                    <input
+                                      type="number"
+                                      value={mapping.value}
+                                      onChange={(e) => {
+                                        const newList = [...fieldMappingsList];
+                                        newList[index].value = e.target.value;
+                                        setFieldMappingsList(newList);
+                                      }}
+                                      className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all"
+                                      placeholder="e.g., 30000"
+                                    />
+                                  ) : detectedType === 'object' ? (
+                                    <textarea
+                                      value={mapping.value}
+                                      onChange={(e) => {
+                                        const newList = [...fieldMappingsList];
+                                        newList[index].value = e.target.value;
+                                        setFieldMappingsList(newList);
+                                      }}
+                                      className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all font-mono h-20 resize-y"
+                                      placeholder='{"key": "value"} or [...]'
+                                    />
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={mapping.value}
+                                      onChange={(e) => {
+                                        const newList = [...fieldMappingsList];
+                                        newList[index].value = e.target.value;
+                                        setFieldMappingsList(newList);
+                                      }}
+                                      className="w-full rounded-lg border border-slate-700/50 bg-slate-900/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-slate-900 transition-all font-mono"
+                                      placeholder='e.g., button[type="submit"]'
+                                    />
+                                  )}
+                                </div>
+                                <div className="pt-6">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const newList = fieldMappingsList.filter((_, i) => i !== index);
+                                      setFieldMappingsList(newList);
+                                    }}
+                                    className="rounded-lg border border-rose-600/50 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/20 transition-all"
+                                    title="Remove this advanced setting"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                          )}
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="mt-4 rounded-lg border border-slate-800/50 bg-gradient-to-br from-indigo-950/30 to-slate-950/50 p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-lg">💡</span>
+                        <p className="text-xs font-semibold text-slate-300">Examples</p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        <div className="flex items-start gap-2">
+                          <span className="text-indigo-400 mt-0.5">•</span>
+                          <div>
+                            <code className="text-indigo-300 font-mono">submit_selector</code>
+                            <span className="text-slate-500 ml-2">Custom submit button selector</span>
+                          </div>
                         </div>
-                      );
-                    })}
+                        <div className="flex items-start gap-2">
+                          <span className="text-indigo-400 mt-0.5">•</span>
+                          <div>
+                            <code className="text-indigo-300 font-mono">captcha</code>
+                            <span className="text-slate-500 ml-2">Enable or disable CAPTCHA handling</span>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="text-indigo-400 mt-0.5">•</span>
+                          <div>
+                            <code className="text-indigo-300 font-mono">wait_until</code>
+                            <span className="text-slate-500 ml-2">Load strategy such as `load`</span>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="text-indigo-400 mt-0.5">•</span>
+                          <div>
+                            <code className="text-indigo-300 font-mono">post_submit_wait_ms</code>
+                            <span className="text-slate-500 ml-2">Wait time after submit</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
-                
-                <div className="mt-4 rounded-lg border border-slate-800/50 bg-gradient-to-br from-indigo-950/30 to-slate-950/50 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-lg">💡</span>
-                    <p className="text-xs font-semibold text-slate-300">Common CSS Selectors:</p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                    <div className="flex items-start gap-2">
-                      <span className="text-indigo-400 mt-0.5">•</span>
-                      <div>
-                        <code className="text-indigo-300 font-mono">input[name="name"]</code>
-                        <span className="text-slate-500 ml-2">By name attribute</span>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-indigo-400 mt-0.5">•</span>
-                      <div>
-                        <code className="text-indigo-300 font-mono">#email</code>
-                        <span className="text-slate-500 ml-2">By ID</span>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-indigo-400 mt-0.5">•</span>
-                      <div>
-                        <code className="text-indigo-300 font-mono">input[type="email"]</code>
-                        <span className="text-slate-500 ml-2">By type</span>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <span className="text-indigo-400 mt-0.5">•</span>
-                      <div>
-                        <code className="text-indigo-300 font-mono">textarea</code>
-                        <span className="text-slate-500 ml-2">By tag name</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
               <div className="flex gap-3 justify-end pt-4 border-t border-slate-800/50">
                 <button
@@ -693,7 +818,9 @@ export default function TemplatesPage() {
                   onClick={() => {
                     setShowModal(false);
                     setEditingTemplate(null);
+                    setTestData(DEFAULT_TEST_DATA);
                     setFieldMappingsList([]);
+                    setShowAdvancedSettings(false);
                   }}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-700/50 transition-all"
                 >

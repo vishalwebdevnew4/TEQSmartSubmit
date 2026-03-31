@@ -3419,6 +3419,44 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
     form_submission_detected = False
     form_submission_data = None
     form_method = "POST"  # Default, will be updated
+
+    def get_submission_data_score(submission_data):
+        """Score captured submission payloads so real filled submissions beat empty retries."""
+        try:
+            if not submission_data:
+                return 0
+
+            data_preview = submission_data.get("data_preview", "")
+            if not data_preview:
+                return 0
+
+            score = 0
+            if isinstance(data_preview, str) and data_preview.startswith('{'):
+                import json
+                data_obj = json.loads(data_preview)
+                for key, value in data_obj.items():
+                    key_lower = str(key).lower()
+                    if any(excluded in key_lower for excluded in ['captcha', 'token', '_token']):
+                        continue
+                    if str(value).strip():
+                        score += 1
+                return score
+
+            if isinstance(data_preview, str) and '=' in data_preview:
+                for param in data_preview.split('&'):
+                    if '=' not in param:
+                        continue
+                    key, value = param.split('=', 1)
+                    key_lower = key.lower()
+                    if any(excluded in key_lower for excluded in ['captcha', 'token', '_token']):
+                        continue
+                    if value not in ['', 'null']:
+                        score += 1
+                return score
+
+            return 0
+        except:
+            return 0
     
     def track_request(request):
         nonlocal form_submission_data, form_submission_detected
@@ -3480,12 +3518,15 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         should_capture = url_matches_form or (is_form_endpoint and has_form_fields) or (is_form_domain and has_form_fields)
                         
                         if should_capture:
-                            nonlocal form_submission_data
-                            form_submission_data = {
+                            candidate_submission_data = {
                                 "url": request.url,
                                 "data_preview": post_data[:500] if len(post_data) > 500 else post_data,
                                 "data_length": len(post_data)
                             }
+                            existing_score = get_submission_data_score(form_submission_data)
+                            candidate_score = get_submission_data_score(candidate_submission_data)
+                            if form_submission_data is None or candidate_score >= existing_score:
+                                form_submission_data = candidate_submission_data
                             ultra_safe_log_print(f"   📦 Form data detected in POST to {request.url[:80]}:")
                             ultra_safe_log_print(f"      {post_data[:300]}...")
             except:
@@ -5331,14 +5372,41 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                 # Check for submission failures (400, 500, error messages)
                 submission_failed = False
                 failure_reason = None
+                successful_form_response_seen = False
+
+                try:
+                    from urllib.parse import urlparse
+                    form_domain = urlparse(form_action_url).netloc if form_action_url else ""
+                    current_domain = urlparse(page.url).netloc if page.url else ""
+                    for resp in post_responses:
+                        resp_domain = urlparse(resp.get('url', '')).netloc
+                        if ((form_domain and resp_domain == form_domain) or (current_domain and resp_domain == current_domain)) and resp.get('status') in [200, 201, 204, 302, 303]:
+                            successful_form_response_seen = True
+                            break
+                except:
+                    pass
+
+                success_get_detected = False
+                try:
+                    for req in get_requests:
+                        req_url = req.get('url', '').lower()
+                        if 'success=' in req_url or 'thank' in req_url:
+                            success_get_detected = True
+                            break
+                except:
+                    pass
+
+                has_meaningful_form_data = get_submission_data_score(form_submission_data) > 0
+                verified_success_signal = has_meaningful_form_data and (successful_form_response_seen or success_get_detected)
                 
                 # Check POST responses for error status codes
-                for resp in post_responses:
-                    if resp.get('status', 0) >= 400:
-                        submission_failed = True
-                        failure_reason = f"POST response status {resp.get('status')}"
-                        ultra_safe_log_print(f"   ❌ Form submission failed: {failure_reason}")
-                        break
+                if not verified_success_signal:
+                    for resp in post_responses:
+                        if resp.get('status', 0) >= 400:
+                            submission_failed = True
+                            failure_reason = f"POST response status {resp.get('status')}"
+                            ultra_safe_log_print(f"   ❌ Form submission failed: {failure_reason}")
+                            break
                 
                 # Check AJAX submission responses
                 try:
@@ -5391,7 +5459,11 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                     failure_reason = "All form fields are empty in submission data"
                                     ultra_safe_log_print(f"   ❌ Form submission failed: {failure_reason}")
                 
-                if form_submission_data and not submission_failed:
+                if verified_success_signal and not submission_failed:
+                    result["submission_success"] = True
+                    ultra_safe_log_print("   ✅ Form submission confirmed with verified form data and success response!")
+                    break
+                elif form_submission_data and not submission_failed:
                     result["submission_success"] = True
                     ultra_safe_log_print("   ✅ Form submission confirmed with verified form data!")
                     break
