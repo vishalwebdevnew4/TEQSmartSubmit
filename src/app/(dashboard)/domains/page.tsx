@@ -34,6 +34,7 @@ export default function DomainsPage() {
   const [formData, setFormData] = useState({
     url: "",
     category: "",
+    customMessage: "",
     isActive: true,
   });
   const [csvContent, setCsvContent] = useState("");
@@ -123,7 +124,7 @@ export default function DomainsPage() {
   ).sort() as string[];
 
   const handleAdd = () => {
-    setFormData({ url: "", category: "", isActive: true });
+    setFormData({ url: "", category: "", customMessage: "", isActive: true });
     setShowAddModal(true);
   };
 
@@ -154,6 +155,7 @@ export default function DomainsPage() {
     setFormData({
       url: domain.url,
       category: domain.category || "",
+      customMessage: domain.customMessage || "",
       isActive: domain.isActive,
     });
     setShowEditModal(true);
@@ -489,6 +491,7 @@ export default function DomainsPage() {
         body: JSON.stringify({
           url: formData.url,
           category: formData.category || null,
+          customMessage: formData.customMessage.trim() || null,
           isActive: formData.isActive,
         }),
       });
@@ -1431,6 +1434,15 @@ https://example3.com,marketing,Looking for marketing support`;
                   placeholder="interior-design"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Custom Message</label>
+                <textarea
+                  value={formData.customMessage}
+                  onChange={(e) => setFormData({ ...formData, customMessage: e.target.value })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white min-h-[120px] resize-y"
+                  placeholder="Optional custom message to use when submitting this domain's form"
+                />
+              </div>
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -1487,6 +1499,15 @@ https://example3.com,marketing,Looking for marketing support`;
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Custom Message</label>
+                <textarea
+                  value={formData.customMessage}
+                  onChange={(e) => setFormData({ ...formData, customMessage: e.target.value })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white min-h-[120px] resize-y"
+                  placeholder="Optional custom message to use when submitting this domain's form"
                 />
               </div>
               <div className="flex items-center gap-2">

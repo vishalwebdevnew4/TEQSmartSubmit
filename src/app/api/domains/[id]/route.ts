@@ -43,7 +43,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     }
 
     const body = await req.json();
-    const { url, category, isActive } = body;
+    const { url, category, customMessage, isActive } = body;
 
     const updateData: any = {};
     if (url !== undefined) {
@@ -55,6 +55,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       }
     }
     if (category !== undefined) updateData.category = category || null;
+    if (customMessage !== undefined) updateData.customMessage = customMessage || null;
     if (isActive !== undefined) updateData.isActive = isActive;
 
     const domain = await prisma.domain.update({
@@ -107,4 +108,3 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     );
   }
 }
-
