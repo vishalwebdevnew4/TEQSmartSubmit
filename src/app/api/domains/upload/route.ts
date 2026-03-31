@@ -5,7 +5,7 @@ import { detectContactPage } from "@/lib/contact-page-detector";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { urls, categories, category, isActive } = body;
+    const { urls, categories, category, messages, isActive } = body;
 
     if (!Array.isArray(urls) || urls.length === 0) {
       return NextResponse.json({ detail: "URLs array is required." }, { status: 400 });
@@ -48,12 +48,16 @@ export async function POST(req: NextRequest) {
 
       // Get category for this URL (from array if provided, otherwise use default)
       const urlCategory = categoryArray && categoryArray[i] ? categoryArray[i] : defaultCategory;
+      
+      // Get custom message for this URL (from array if provided)
+      const customMessage = messages && Array.isArray(messages) && messages[i] ? String(messages[i]).trim() : null;
 
       try {
         const domain = await prisma.domain.create({
           data: {
             url: url.trim(),
             category: urlCategory || null,
+            customMessage: customMessage,
             isActive: isActive !== undefined ? isActive : true,
             contactCheckStatus: "pending",
           },

@@ -1270,14 +1270,15 @@ class UltimateLocalCaptchaSolver:
                 safe_log_print("   ⚠️  Could not submit audio answer after 5 attempts")
                 return None
             
-            # Step 4: Wait and check for token (optimized - check more frequently, shorter total wait)
+            # Step 4: Wait and check for token (optimized - check more frequently, longer total wait)
             safe_log_print("   ⏳ Waiting for CAPTCHA token after audio challenge...")
             
             # Wait a moment for the answer to be processed
             await safe_async_sleep(2)
             
-            # Check more frequently (every 1 second) but for shorter total time (20 seconds max)
-            max_checks = 20
+            # Check more frequently (every 1 second) but for longer total time (60 seconds max)
+            # Google sometimes takes longer to validate audio answers
+            max_checks = 60
             check_interval = 1  # Check every 1 second
             for check_attempt in range(max_checks):
                 await safe_async_sleep(check_interval)
@@ -1312,6 +1313,12 @@ class UltimateLocalCaptchaSolver:
                     safe_log_print(f"   ⏳ Token not ready yet ({check_attempt + 1}/{max_checks} seconds)...")
             
             safe_log_print(f"   ⚠️  Token not received after audio challenge submission (waited {max_checks} seconds)")
+            
+            # Check if there are more challenges (image puzzles after audio)
+            challenge_still_present = await self._check_for_challenge_iframe()
+            if challenge_still_present:
+                safe_log_print("   ℹ️  Challenge iframe still present - reCAPTCHA may be asking for image puzzles as well")
+            
             # Final check with a bit more wait
             await safe_async_sleep(2)
             token = await self._get_recaptcha_token()

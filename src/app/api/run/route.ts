@@ -24,6 +24,16 @@ export async function POST(req: NextRequest) {
     const domainIdValue = normalizeId(domainId);
     const templateIdValue = normalizeId(templateId);
     const adminIdValue = normalizeId(adminId);
+    const sanitizeMessage = (value: unknown) => {
+      if (typeof value !== "string") return "";
+      return value.trim();
+    };
+    const isUsableMessage = (value: unknown) => {
+      const sanitized = sanitizeMessage(value);
+      if (!sanitized) return false;
+      const lowered = sanitized.toLowerCase();
+      return !["true", "false", "null", "undefined"].includes(lowered);
+    };
 
     if (!url || typeof url !== "string") {
       return NextResponse.json(
@@ -76,6 +86,30 @@ export async function POST(req: NextRequest) {
     // Browser runs in background (headless=false with virtual display)
     const reuseBrowser = template.reuse_browser ?? template.reuseBrowser ?? false;
     
+    // Fetch custom message from domain if domainId is provided
+    let customMessage = null;
+    if (domainIdValue) {
+      try {
+        const domain = await prisma.domain.findUnique({
+          where: { id: domainIdValue },
+          select: { customMessage: true }
+        });
+        if (isUsableMessage(domain?.customMessage)) {
+          customMessage = sanitizeMessage(domain?.customMessage);
+        }
+      } catch (e) {
+        console.log(`Could not fetch domain custom message: ${e}`);
+      }
+    }
+
+    const baseTestData =
+      template.test_data && typeof template.test_data === "object" ? template.test_data : {};
+    const configuredDefaultMessage = (baseTestData as Record<string, unknown>).message;
+    const defaultMessage = isUsableMessage(configuredDefaultMessage)
+      ? sanitizeMessage(configuredDefaultMessage)
+      : "This is an automated test submission.";
+    const resolvedMessage = customMessage || defaultMessage;
+    
     const enhancedTemplate = {
       ...template,
       use_local_captcha_solver: template.use_local_captcha_solver ?? true,
@@ -88,13 +122,14 @@ export async function POST(req: NextRequest) {
       use_virtual_display: reuseBrowser ? true : useVirtualDisplay, // Always use virtual display in reuse mode
       reuse_browser: reuseBrowser, // Enable browser reuse (single tab mode)
       use_auto_detect: template.use_auto_detect ?? (!hasFields), // Auto-detect if no fields provided
-      test_data: template.test_data ?? {
-        name: "TEQ QA User",
-        email: "test@example.com",
-        phone: "+1234567890",
-        message: "This is an automated test submission.",
-        subject: "Test Inquiry",
-        company: "Test Company"
+      test_data: {
+        ...(baseTestData as Record<string, unknown>),
+        name: (baseTestData as Record<string, unknown>).name ?? "TEQ QA User",
+        email: (baseTestData as Record<string, unknown>).email ?? "test@example.com",
+        phone: (baseTestData as Record<string, unknown>).phone ?? "+1234567890",
+        message: resolvedMessage,
+        subject: (baseTestData as Record<string, unknown>).subject ?? "Test Inquiry",
+        company: (baseTestData as Record<string, unknown>).company ?? "Test Company",
       }
     };
 
@@ -180,6 +215,7 @@ export async function POST(req: NextRequest) {
           `Python Command: ${pythonCommand}\n` +
           `Target URL: ${url}\n` +
           `Template Path: ${templatePath}\n` +
+          `Message Source: ${customMessage ? "Domain custom message" : "Default template message"}\n` +
           `Working Directory: ${process.cwd()}\n` +
           `Timestamp: ${new Date().toISOString()}\n\n` +
           `Waiting for Python process to start and produce output...`;
@@ -208,16 +244,35 @@ export async function POST(req: NextRequest) {
         
         // Ensure PATH includes common binary locations (especially for ffmpeg/ffprobe)
         const currentPath = process.env.PATH || '';
-        const requiredPaths = ['/usr/bin', '/usr/local/bin', '/bin', '/sbin'];
+        const requiredPaths = [
+          '/home/linuxbrew/.linuxbrew/bin',  // Linuxbrew Python location
+          '/usr/bin', 
+          '/usr/local/bin', 
+          '/bin', 
+          '/sbin'
+        ];
         const pathParts = currentPath.split(':');
         const finalPathParts = [...new Set([...requiredPaths, ...pathParts])]; // Remove duplicates, keep order
         const finalPath = finalPathParts.join(':');
+        
+        // Set up PYTHONPATH to include site-packages for installed packages
+        // This ensures modules like playwright can be found by spawned Python processes
+        const pythonPathDirs = [
+          '/home/linuxbrew/.linuxbrew/lib/python3.14/site-packages',  // Linuxbrew Python site-packages
+          '/home/linuxbrew/.linuxbrew/lib/python3.13/site-packages',
+          '/home/linuxbrew/.linuxbrew/lib/python3.12/site-packages',
+          '/home/linuxbrew/.linuxbrew/lib/python3.11/site-packages',
+          '/home/linuxbrew/.linuxbrew/lib/python3.10/site-packages',
+          process.env.PYTHONPATH || ''
+        ];
+        const finalPythonPath = pythonPathDirs.filter(p => p).join(':');
         
         const python = spawn(finalCommand, finalArgs, {
           cwd: process.cwd(),
           env: { 
             ...process.env,
-            PATH: finalPath, // Ensure PATH includes /usr/bin for ffmpeg/ffprobe
+            PATH: finalPath, // Ensure PATH includes /usr/bin for ffmpeg/ffprobe and Linuxbrew Python
+            PYTHONPATH: finalPythonPath, // Ensure Python can find installed packages
             PYTHONUNBUFFERED: "1", 
             PYTHONIOENCODING: "utf-8",
             // Force immediate output
@@ -557,5 +612,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
-

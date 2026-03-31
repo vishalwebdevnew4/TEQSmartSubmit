@@ -6,6 +6,7 @@ interface Domain {
   id: number;
   url: string;
   category: string | null;
+  customMessage: string | null;
   isActive: boolean;
   contactPageUrl: string | null;
   contactCheckStatus: string | null;
@@ -124,6 +125,28 @@ export default function DomainsPage() {
   const handleAdd = () => {
     setFormData({ url: "", category: "", isActive: true });
     setShowAddModal(true);
+  };
+
+  const handleDownloadSampleCSV = async () => {
+    try {
+      const response = await fetch("/api/domains/sample-csv");
+      if (!response.ok) {
+        throw new Error("Failed to download sample CSV");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "domains_sample.csv";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Failed to download sample CSV:", error);
+      alert("❌ Failed to download sample CSV");
+    }
   };
 
   const handleEdit = (domain: Domain) => {
@@ -487,26 +510,44 @@ export default function DomainsPage() {
     }
   };
 
+  const readFileAsText = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => resolve((event.target?.result as string) || "");
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsText(file);
+    });
+
+  const loadCsvFile = async (file: File) => {
+    const fileName = file.name.toLowerCase();
+    if (!fileName.endsWith(".csv") && !fileName.endsWith(".txt")) {
+      alert("Please select a CSV or TXT file");
+      return;
+    }
+
+    setCsvFile(file);
+
+    try {
+      const content = await readFileAsText(file);
+      setCsvContent(content);
+    } catch (error) {
+      console.error("Failed to read CSV file:", error);
+      setCsvContent("");
+      alert("Failed to read the selected file");
+    }
+  };
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    setCsvFile(file);
-    
-    // Read file content
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      setCsvContent(content);
-    };
-    reader.readAsText(file);
+    await loadCsvFile(file);
   };
 
   const handleDownloadSample = () => {
-    const sampleCSV = `url,category
-https://example1.com,interior-design
-https://example2.com,web-design
-https://example3.com,marketing`;
+    const sampleCSV = `url,category,message
+https://example1.com,interior-design,I am interested in your interior design services
+https://example2.com,web-design,Can you help with web design?
+https://example3.com,marketing,Looking for marketing support`;
     
     const blob = new Blob([sampleCSV], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
@@ -523,10 +564,15 @@ https://example3.com,marketing`;
     let content = csvContent.trim();
     
     if (uploadMode === "file" && csvFile) {
-      // File content is already loaded in csvContent
       if (!content) {
-        alert("Please select a CSV file");
-        return;
+        try {
+          content = (await readFileAsText(csvFile)).trim();
+          setCsvContent(content);
+        } catch (error) {
+          console.error("Failed to read CSV file during upload:", error);
+          alert("Please select a valid CSV file");
+          return;
+        }
       }
     } else {
       if (!content) {
@@ -543,7 +589,7 @@ https://example3.com,marketing`;
         return;
       }
 
-      const domains: Array<{ url: string; category: string | null }> = [];
+      const domains: Array<{ url: string; category: string | null; message: string | null }> = [];
       let hasHeaders = false;
       
       // Check if first line looks like headers
@@ -565,11 +611,12 @@ https://example3.com,marketing`;
         if (parts[0]) {
           const url = parts[0];
           const category = parts[1] || null;
+          const message = parts[2] || null;
           
           // Validate URL format
           try {
             new URL(url);
-            domains.push({ url, category });
+            domains.push({ url, category, message });
           } catch {
             // Skip invalid URLs
             console.warn(`Invalid URL skipped: ${url}`);
@@ -585,6 +632,7 @@ https://example3.com,marketing`;
       // Group by category for batch upload
       const urls = domains.map(d => d.url);
       const categories = domains.map(d => d.category);
+      const messages = domains.map(d => d.message);
 
       const response = await fetch("/api/domains/upload", {
         method: "POST",
@@ -592,6 +640,7 @@ https://example3.com,marketing`;
         body: JSON.stringify({
           urls,
           categories,
+          messages,
           isActive: true,
         }),
       });
@@ -954,6 +1003,14 @@ https://example3.com,marketing`;
               <span>📤</span>
               Upload CSV
             </button>
+            <button
+              onClick={handleDownloadSampleCSV}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/50 hover:border-slate-600 transition-all"
+              title="Download a sample CSV template to use for bulk importing domains"
+            >
+              <span>📥</span>
+              Sample CSV
+            </button>
           </div>
         </div>
 
@@ -1083,7 +1140,8 @@ https://example3.com,marketing`;
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm shadow-lg">
+      <div className="overflow-visible rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm shadow-lg">
+        <div className="overflow-x-auto overflow-y-visible rounded-xl">
         <table className="min-w-full border-collapse text-left text-sm">
           <thead className="bg-slate-800/30 border-b border-slate-700/50">
             <tr>
@@ -1098,6 +1156,7 @@ https://example3.com,marketing`;
               <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Domain URL</th>
               <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Status</th>
               <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Category</th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Message</th>
               <th className="px-6 py-4 text-left text-xs font-semibold text-slate-300 uppercase tracking-wider">Contact Page</th>
               <th className="px-6 py-4 text-right text-xs font-semibold text-slate-300 uppercase tracking-wider">Actions</th>
             </tr>
@@ -1105,7 +1164,7 @@ https://example3.com,marketing`;
           <tbody className="divide-y divide-slate-800/50">
             {domains.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-400">
+                <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-400">
                   {filteredDomains.length === 0 && allDomains.length === 0
                     ? "No domains found yet. Seed the database or add a domain to get started."
                     : filteredDomains.length === 0
@@ -1164,6 +1223,24 @@ https://example3.com,marketing`;
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-sm text-slate-300">{domain.category ?? <span className="text-slate-500">—</span>}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {domain.customMessage ? (
+                        <div className="group relative inline-flex">
+                          <span
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-indigo-500/20 bg-indigo-500/10 text-indigo-300 cursor-help"
+                            title={domain.customMessage}
+                            aria-label="View custom message"
+                          >
+                            💬
+                          </span>
+                          <div className="pointer-events-none absolute left-1/2 top-full z-[120] mt-2 hidden w-72 -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs leading-relaxed text-slate-200 shadow-2xl group-hover:block">
+                            {domain.customMessage}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 text-sm">—</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       {domain.contactCheckStatus === "pending" ? (
@@ -1251,6 +1328,7 @@ https://example3.com,marketing`;
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Pagination Controls */}
@@ -1456,7 +1534,7 @@ https://example3.com,marketing`;
             {/* Download Sample Button */}
             <div className="mb-4 flex items-center justify-between">
               <p className="text-sm text-slate-400">
-                Upload a CSV file or paste content. Format: <code className="text-xs bg-slate-800 px-1 rounded">url,category</code>
+                Upload a CSV file or paste content. Format: <code className="text-xs bg-slate-800 px-1 rounded">url,category,message</code>
               </p>
               <button
                 onClick={handleDownloadSample}
@@ -1496,19 +1574,47 @@ https://example3.com,marketing`;
               </button>
             </div>
 
-            {/* File Upload Input */}
+            {/* File Upload Input - Drag and Drop */}
             {uploadMode === "file" && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-slate-300 mb-2">Select CSV File</label>
-                <input
-                  type="file"
-                  accept=".csv,.txt"
-                  onChange={handleFileSelect}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-4 file:rounded-lg file:border-0 file:bg-indigo-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-indigo-400"
-                />
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.add('border-indigo-500', 'bg-indigo-500/10');
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-500/10');
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) {
+                      void loadCsvFile(file);
+                    }
+                  }}
+                  className="w-full rounded-lg border-2 border-dashed border-slate-700 bg-slate-800/50 px-6 py-12 text-center transition-colors hover:border-indigo-500 hover:bg-indigo-500/5 cursor-pointer"
+                >
+                  <svg className="mx-auto h-12 w-12 text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <p className="text-sm font-medium text-slate-300">Drag and drop your CSV file here</p>
+                  <p className="text-xs text-slate-500 mt-1">or</p>
+                  <label className="text-sm text-indigo-400 cursor-pointer hover:underline">
+                    click to browse
+                    <input
+                      type="file"
+                      accept=".csv,.txt"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
                 {csvFile && (
                   <p className="mt-2 text-xs text-slate-400">
-                    Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(2)} KB)
+                    ✓ Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(2)} KB)
                   </p>
                 )}
               </div>
@@ -1526,7 +1632,7 @@ https://example3.com,marketing`;
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono text-sm h-64 resize-y"
                 placeholder={uploadMode === "file" 
                   ? "Select a CSV file to preview content..."
-                  : "url,category\nhttps://example1.com,interior-design\nhttps://example2.com,web-design\nhttps://example3.com,marketing"}
+                  : "url,category,message\nhttps://example1.com,interior-design,I am interested in your services\nhttps://example2.com,web-design,Can you help with our project?\nhttps://example3.com,marketing,Looking for marketing solutions"}
               />
               {uploadMode === "paste" && (
                 <p className="mt-2 text-xs text-slate-500">

@@ -20,6 +20,7 @@ model Domain {
   id                 Int             @id @default(autoincrement())
   url                String          @unique
   category           String?
+  customMessage      String?         // Custom message to use for this domain's form submissions
   isActive           Boolean         @default(true)
   contactPageUrl     String?
   contactCheckStatus String? // "pending", "found", "not_found", "error", "no_form"

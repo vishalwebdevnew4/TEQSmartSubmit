@@ -490,7 +490,8 @@ class UltimateSafetyWrapper:
                 return result
             except Exception as e:
                 if attempt == max_retries:
-                    ultra_safe_log_print(f"⚠️  Sync operation failed after {max_retries + 1} attempts: {type(e).__name__}")
+                    error_msg = f"{type(e).__name__}: {str(e)}"
+                    ultra_safe_log_print(f"⚠️  Sync operation failed after {max_retries + 1} attempts: {error_msg}")
                     return default_return
                 time.sleep(0.1 * (attempt + 1))
         return default_return
@@ -1597,6 +1598,11 @@ class UltimatePlaywrightManager:
             
             # Try to import Playwright
             ultra_safe_log_print("📍 [start()] About to import Playwright...")
+            ultra_safe_log_print(f"📍 Python executable: {sys.executable}")
+            ultra_safe_log_print(f"📍 Python version: {sys.version}")
+            ultra_safe_log_print(f"📍 Python path entries: {len(sys.path)}")
+            for i, path_entry in enumerate(sys.path[:3]):  # Show first 3 paths
+                ultra_safe_log_print(f"    [{i}] {path_entry}")
             sys.stderr.flush()
             
             playwright_import = UltimateSafetyWrapper.execute_sync(
@@ -1940,6 +1946,34 @@ async def ultra_safe_template_load(template_path: Path) -> Dict[str, Any]:
     
     return template
 
+
+DEFAULT_TEST_DATA = {
+    "name": "Test User",
+    "email": "test@example.com",
+    "phone": "+1234567890",
+    "message": "This is an automated test submission.",
+    "subject": "Test Inquiry",
+    "company": "Test Company",
+}
+
+
+def resolve_test_data(template: Dict[str, Any]) -> Dict[str, str]:
+    raw_test_data = template.get("test_data")
+    template_test_data = raw_test_data if isinstance(raw_test_data, dict) else {}
+    resolved: Dict[str, str] = {}
+
+    for key, fallback in DEFAULT_TEST_DATA.items():
+        value = template_test_data.get(key)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if key == "message" and normalized.lower() in {"true", "false", "null", "undefined"}:
+                normalized = ""
+            resolved[key] = normalized or fallback
+        else:
+            resolved[key] = fallback
+
+    return resolved
+
 async def handle_banners_and_popups(page) -> int:
     """ULTRA-RESILIENT banner/popup handler - closes cookie banners, newsletter popups, welcome modals, etc."""
     banners_closed = 0
@@ -2193,7 +2227,7 @@ async def extract_wpforms_fields(page, form_load_timestamp: Optional[float] = No
                 if (wpformsForm.dataset.formid) {
                     result.form_id = wpformsForm.dataset.formid;
                 } else if (wpformsForm.id) {
-                    const formIdMatch = wpformsForm.id.match(/wpforms-form-(\d+)/);
+                    const formIdMatch = wpformsForm.id.match(/wpforms-form-(\\d+)/);
                     if (formIdMatch) {
                         result.form_id = formIdMatch[1];
                     }
@@ -2423,6 +2457,8 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
         return result
     
     try:
+        resolved_test_data = resolve_test_data(template)
+        playwright_fields_filled = 0
         # First, identify the contact form (not newsletter form)
         # Contact form typically has: name, email, phone, comment/message fields
         # Newsletter form typically only has: email field
@@ -2491,7 +2527,7 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
         
         # Comprehensive field detection and filling
         fill_result = await page.evaluate("""
-            () => {
+            (testData) => {
                 try {
                     let filled = 0;
                     let selects_filled = 0;
@@ -2536,13 +2572,13 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                                 const currentName = (input.name || input.id || '').toLowerCase();
                                 let valueToFill = 'Test Value';
                                 if (input.type === 'email' || currentName.includes('email') || placeholder.includes('email') || placeholder.includes('e-mailadres')) {
-                                    valueToFill = 'test@example.com';
+                                    valueToFill = testData.email;
                                 } else if (currentName.includes('name') || placeholder.includes('naam') || placeholder.includes('name')) {
-                                    valueToFill = 'Test User';
+                                    valueToFill = testData.name;
                                 } else if (currentName.includes('phone') || currentName.includes('telefoon') || placeholder.includes('phone') || placeholder.includes('nummer') || input.type === 'tel') {
-                                    valueToFill = '+1234567890';
+                                    valueToFill = testData.phone;
                                 } else if (currentName.includes('message') || currentName.includes('comment') || currentName.includes('bericht') || placeholder.includes('message') || placeholder.includes('bericht') || input.tagName === 'TEXTAREA') {
-                                    valueToFill = 'This is an automated test submission.';
+                                    valueToFill = testData.message;
                                 }
                                 
                                 // For React/Next.js controlled components, use native setter
@@ -2609,7 +2645,7 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                     return { filled: 0, selects_filled: 0 };
                 }
             }
-        """)
+        """, resolved_test_data)
         
         result["fields_filled"] = fill_result.get("filled", 0) + fill_result.get("selects_filled", 0)
         
@@ -2625,7 +2661,9 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                 await asyncio.sleep(0.5)
             
             # Try to find contact form fields specifically (name, email, phone, comment)
-            contact_form_fields = await page.query_selector_all('input[name="name"], input[name="email"], input[name="phone"], textarea[name="comment"]')
+            contact_form_fields = await page.query_selector_all(
+                'input[name="name"], input[name="email"], input[name="phone"], textarea[name="comment"], textarea[name="message"], textarea[id="message"], textarea'
+            )
             
             if len(contact_form_fields) >= 3:  # Found contact form (has at least name, email, comment)
                 ultra_safe_log_print("   ✅ Found contact form fields (name, email, phone, comment)")
@@ -2640,17 +2678,21 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                             name = await input_field.evaluate("(el) => (el.name || '').toLowerCase()")
                             
                             if name == 'name':
-                                await input_field.fill('Test User')
+                                await input_field.fill(resolved_test_data['name'])
                                 ultra_safe_log_print("   ✅ Filled name field")
+                                playwright_fields_filled += 1
                             elif name == 'email':
-                                await input_field.fill('test@example.com')
+                                await input_field.fill(resolved_test_data['email'])
                                 ultra_safe_log_print("   ✅ Filled email field")
+                                playwright_fields_filled += 1
                             elif name == 'phone':
-                                await input_field.fill('+1234567890')
+                                await input_field.fill(resolved_test_data['phone'])
                                 ultra_safe_log_print("   ✅ Filled phone field")
-                            elif name == 'comment':
-                                await input_field.fill('This is an automated test submission.')
-                                ultra_safe_log_print("   ✅ Filled comment field")
+                                playwright_fields_filled += 1
+                            elif name == 'comment' or name == 'message':
+                                await input_field.fill(resolved_test_data['message'])
+                                ultra_safe_log_print("   ✅ Filled message field")
+                                playwright_fields_filled += 1
                             
                             await asyncio.sleep(0.2)
                     except:
@@ -2672,15 +2714,15 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                         input_type = await input_field.evaluate("(el) => el.type || ''")
                         tag_name = await input_field.evaluate("(el) => el.tagName.toLowerCase()")
                         
-                        value_to_fill = 'test@example.com'
+                        value_to_fill = resolved_test_data['email']
                         if input_type == 'email' or 'email' in name or 'email' in placeholder or 'e-mailadres' in placeholder:
-                            value_to_fill = 'test@example.com'
+                            value_to_fill = resolved_test_data['email']
                         elif 'name' in name or 'naam' in placeholder or 'name' in placeholder:
-                            value_to_fill = 'Test User'
+                            value_to_fill = resolved_test_data['name']
                         elif 'phone' in name or 'telefoon' in name or 'phone' in placeholder or 'nummer' in placeholder or input_type == 'tel':
-                            value_to_fill = '+1234567890'
+                            value_to_fill = resolved_test_data['phone']
                         elif 'message' in name or 'comment' in name or 'bericht' in name or 'message' in placeholder or 'bericht' in placeholder or tag_name == 'textarea':
-                            value_to_fill = 'This is an automated test submission.'
+                            value_to_fill = resolved_test_data['message']
                         else:
                             value_to_fill = 'Test Value'
                         
@@ -2688,10 +2730,14 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                         await input_field.fill(value_to_fill)
                         await asyncio.sleep(0.2)
                         ultra_safe_log_print(f"   ✅ Filled field using Playwright fill(): {name or 'unnamed'}")
+                        playwright_fields_filled += 1
                 except:
                     continue
         except:
             pass
+
+        if playwright_fields_filled > 0:
+            result["fields_filled"] += playwright_fields_filled
         
         # Log all form fields and their values before submission
         try:
@@ -3138,13 +3184,13 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
                         
                         # Determine what value to use
                         if 'email' in field_name or 'email' in placeholder or field_type == 'email':
-                            value = 'test@example.com'
+                            value = resolved_test_data['email']
                         elif 'name' in field_name or 'name' in placeholder:
-                            value = 'Test User'
+                            value = resolved_test_data['name']
                         elif 'phone' in field_name or 'phone' in placeholder or field_type == 'tel':
-                            value = '+1234567890'
+                            value = resolved_test_data['phone']
                         elif 'message' in field_name or 'message' in placeholder:
-                            value = 'This is an automated test submission.'
+                            value = resolved_test_data['message']
                         else:
                             value = 'Test Value'
                         
@@ -3180,8 +3226,8 @@ async def ultra_simple_form_fill(page, template: Dict[str, Any]) -> Dict[str, An
         except Exception as e:
             ultra_safe_log_print(f"   ⚠️  Required fields check failed: {str(e)[:50]}")
         
-    except Exception:
-        pass  # Silent failure - we tried
+    except Exception as e:
+        ultra_safe_log_print(f"   ⚠️  Form filling error: {str(e)[:200]}")
     
     return result
 
@@ -4806,13 +4852,13 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                             value_to_fill = 'Test Value'
                                             field_name_lower = field_name.lower()
                                             if 'email' in field_name_lower:
-                                                value_to_fill = 'test@example.com'
+                                                value_to_fill = resolved_test_data['email']
                                             elif 'name' in field_name_lower:
-                                                value_to_fill = 'Test User'
+                                                value_to_fill = resolved_test_data['name']
                                             elif 'phone' in field_name_lower or 'telefoon' in field_name_lower:
-                                                value_to_fill = '+1234567890'
+                                                value_to_fill = resolved_test_data['phone']
                                             elif 'message' in field_name_lower or 'comment' in field_name_lower or 'bericht' in field_name_lower:
-                                                value_to_fill = 'This is an automated test submission.'
+                                                value_to_fill = resolved_test_data['message']
                                             
                                             await field.fill(value_to_fill)
                                             await asyncio.sleep(0.3)
@@ -5585,6 +5631,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     ultra_safe_log_print("=" * 80)
     ultra_safe_log_print(f"📋 Loading template from: {template_path}")
     template = await ultra_safe_template_load(template_path)
+    resolved_test_data = resolve_test_data(template)
     
     try:
         if heartbeat_file_path and heartbeat_file_path.exists():
@@ -5597,6 +5644,7 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
     result["steps_completed"].append("template_loaded")
     result["template_used"] = "custom" if template.get("fields") else "default"
     ultra_safe_log_print(f"✅ Template loaded: {result['template_used']} template")
+    ultra_safe_log_print(f"📝 Submission message source: {'custom template/domain message' if resolved_test_data['message'] != DEFAULT_TEST_DATA['message'] else 'default message'}")
     
     # Get headless setting from template (default to False for better CAPTCHA solving)
     headless_mode = template.get("headless", False)
