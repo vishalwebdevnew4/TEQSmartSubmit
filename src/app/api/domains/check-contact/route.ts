@@ -7,10 +7,10 @@ export const maxDuration = 300;
 export const runtime = "nodejs";
 
 // Configuration for load balancing
-const BATCH_SIZE = parseInt(process.env.CONTACT_CHECK_BATCH_SIZE || "10"); // Process 10 domains per batch
-const DELAY_BETWEEN_BATCHES_MS = parseInt(process.env.CONTACT_CHECK_BATCH_DELAY || "2000"); // 2 seconds between batches
-const CONCURRENT_CHECKS = parseInt(process.env.CONTACT_CHECK_CONCURRENT || "3"); // Max 3 concurrent checks per batch
-const DELAY_BETWEEN_CHECKS_MS = parseInt(process.env.CONTACT_CHECK_DELAY || "500"); // 500ms between individual checks
+const BATCH_SIZE = parseInt(process.env.CONTACT_CHECK_BATCH_SIZE || "16");
+const DELAY_BETWEEN_BATCHES_MS = parseInt(process.env.CONTACT_CHECK_BATCH_DELAY || "500");
+const CONCURRENT_CHECKS = parseInt(process.env.CONTACT_CHECK_CONCURRENT || "5");
+const DELAY_BETWEEN_CHECKS_MS = parseInt(process.env.CONTACT_CHECK_DELAY || "100");
 
 // Helper function to sleep/delay
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -297,4 +297,3 @@ async function processContactChecksInBackground(
     console.error("[ContactCheck] Background processing error:", error);
   }
 }
-

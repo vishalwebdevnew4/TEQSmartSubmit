@@ -26,6 +26,8 @@ type ChromiumLaunchOptions = {
   executablePath?: string;
 };
 
+let sharedBrowserPromise: Promise<Browser> | null = null;
+
 function collectExistingPlaywrightInstallRoots(): string[] {
   const roots = [
     process.env.PLAYWRIGHT_BROWSERS_PATH,
@@ -111,6 +113,75 @@ function getChromiumLaunchOptions(): ChromiumLaunchOptions {
   return launchOptions;
 }
 
+async function getSharedBrowser(): Promise<Browser> {
+  if (!sharedBrowserPromise) {
+    sharedBrowserPromise = chromium.launch(getChromiumLaunchOptions()).catch((error) => {
+      sharedBrowserPromise = null;
+      throw error;
+    });
+  }
+
+  try {
+    const browser = await sharedBrowserPromise;
+    browser.on("disconnected", () => {
+      sharedBrowserPromise = null;
+    });
+    return browser;
+  } catch (error) {
+    sharedBrowserPromise = null;
+    throw error;
+  }
+}
+
+async function createDetectorPage(browser?: Browser): Promise<{ browser: Browser; page: Page }> {
+  const activeBrowser = browser || await getSharedBrowser();
+  const page = await activeBrowser.newPage();
+  page.setDefaultTimeout(12000);
+  page.setDefaultNavigationTimeout(12000);
+  return { browser: activeBrowser, page };
+}
+
+async function quickFetchHtml(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) return null;
+    return await response.text();
+  } catch {
+    return null;
+  }
+}
+
+function hasObviousContactForm(html: string): boolean {
+  const lowered = html.toLowerCase();
+  if (!lowered.includes("<form")) return false;
+
+  const hasEmail =
+    /type=["']email["']/i.test(html) ||
+    /name=["'][^"']*email[^"']*["']/i.test(html) ||
+    /id=["'][^"']*email[^"']*["']/i.test(html);
+  const hasMessage =
+    /<textarea[^>]*>/i.test(html) ||
+    /name=["'][^"']*(message|comment|inquiry|enquiry|query|question|subject)[^"']*["']/i.test(html) ||
+    /data-name=["'][^"']*(message|comment|inquiry|enquiry|query|question|subject)[^"']*["']/i.test(html);
+  const hasName =
+    /name=["'][^"']*(name|fullname|your-name|your_name)[^"']*["']/i.test(html) ||
+    /data-name=["'][^"']*(name|fullname|your-name|your_name)[^"']*["']/i.test(html);
+
+  return (hasEmail && hasMessage) || (hasEmail && hasName) || (hasMessage && hasName);
+}
+
 // Helper function to fetch with retry
 async function fetchWithRetry(
   url: string,
@@ -174,6 +245,8 @@ async function fetchWithRetry(
 
 export async function detectContactPage(domainUrl: string): Promise<ContactCheckResult> {
   try {
+    const browser = await getSharedBrowser();
+
     // Normalize URL
     let baseUrl = domainUrl.trim();
     
@@ -554,7 +627,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
     if (hasContactForm7 && !contactUrl) {
       console.log(`[ContactDetector] Contact Form 7 detected, checking homepage for contact form...`);
       try {
-        const hasFormOnHomepage = await checkContactPageHasForm(finalUrl);
+        const hasFormOnHomepage = await checkContactPageHasForm(finalUrl, browser);
         if (hasFormOnHomepage) {
           contactUrl = finalUrl;
           foundViaCommonPath = true;
@@ -600,7 +673,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
       try {
         // Use final URL after redirects for Playwright
         const playwrightUrl = finalUrl;
-        html = await fetchHomepageWithPlaywright(playwrightUrl);
+        html = await fetchHomepageWithPlaywright(playwrightUrl, browser);
         console.log(`[ContactDetector] Playwright rendered HTML (${html.length} chars)`);
         // Try finding contact link again in rendered HTML - use finalOrigin
         contactUrl = findContactPageLink(html, finalOrigin);
@@ -615,7 +688,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
     if (!contactUrl && !isHomepage) {
       console.log(`[ContactDetector] No contact link found on homepage, trying provided URL with Playwright...`);
       try {
-        html = await fetchHomepageWithPlaywright(finalUrl);
+        html = await fetchHomepageWithPlaywright(finalUrl, browser);
         contactUrl = findContactPageLink(html, finalOrigin);
         console.log(`[ContactDetector] Contact URL found in provided URL HTML: ${contactUrl || 'none'}`);
       } catch (playwrightError: any) {
@@ -633,9 +706,9 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
         try {
           const cf7Url = `${finalOrigin}${path}`;
           console.log(`[ContactDetector] Trying Contact Form 7 path: ${cf7Url}`);
-          const isAccessible = await verifyContactPageWithPlaywright(cf7Url);
+          const isAccessible = await verifyContactPageWithPlaywright(cf7Url, browser);
           if (isAccessible) {
-            const hasForm = await checkContactPageHasForm(cf7Url);
+            const hasForm = await checkContactPageHasForm(cf7Url, browser);
             if (hasForm) {
               contactUrl = cf7Url;
               foundViaCommonPath = true;
@@ -654,7 +727,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
     if (!contactUrl && !hasContactForm7) {
       console.log(`[ContactDetector] Checking if contact form exists on homepage...`);
       try {
-        const hasFormOnHomepage = await checkContactPageHasForm(finalUrl);
+        const hasFormOnHomepage = await checkContactPageHasForm(finalUrl, browser);
         if (hasFormOnHomepage) {
           contactUrl = finalUrl;
           foundViaCommonPath = true;
@@ -697,12 +770,12 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
         try {
           // Verify it's a contact page and has a form using Playwright
           console.log(`[ContactDetector] Checking accessibility for: ${testUrl}`);
-          const isAccessible = await verifyContactPageWithPlaywright(testUrl);
+          const isAccessible = await verifyContactPageWithPlaywright(testUrl, browser);
           console.log(`[ContactDetector] Path ${testUrl} accessible: ${isAccessible}`);
           
           if (isAccessible) {
             console.log(`[ContactDetector] Checking for form on: ${testUrl}`);
-            const hasForm = await checkContactPageHasForm(testUrl);
+            const hasForm = await checkContactPageHasForm(testUrl, browser);
             console.log(`[ContactDetector] Path ${testUrl} has form: ${hasForm}`);
             
             if (hasForm) {
@@ -752,7 +825,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
     // Verify contact page link is accessible using Playwright
     // This helps with JavaScript-rendered sites where links might be dynamically loaded
     console.log(`[ContactDetector] Verifying contact page link with Playwright: ${contactUrl}`);
-    const isContactPageAccessible = await verifyContactPageWithPlaywright(contactUrl);
+    const isContactPageAccessible = await verifyContactPageWithPlaywright(contactUrl, browser);
     
     if (!isContactPageAccessible) {
       return {
@@ -765,7 +838,7 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
     }
 
     // Check if contact page has a contact form (not search/newsletter/etc.)
-    const hasContactForm = await checkContactPageHasForm(contactUrl);
+    const hasContactForm = await checkContactPageHasForm(contactUrl, browser);
 
     if (!hasContactForm) {
       return {
@@ -821,20 +894,20 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
 /**
  * Fetch homepage HTML using Playwright (for JavaScript-rendered sites)
  */
-async function fetchHomepageWithPlaywright(url: string): Promise<string> {
+async function fetchHomepageWithPlaywright(url: string, existingBrowser?: Browser): Promise<string> {
   let browser: Browser | null = null;
+  let page: Page | null = null;
   try {
-    browser = await chromium.launch(getChromiumLaunchOptions());
-    
-    const page = await browser.newPage();
-    page.setDefaultTimeout(45000);
+    const created = await createDetectorPage(existingBrowser);
+    browser = created.browser;
+    page = created.page;
     
     // Navigate to the page
     // Use 'domcontentloaded' which is faster and more reliable
     try {
       await page.goto(url, {
         waitUntil: 'domcontentloaded', // Faster and more reliable
-        timeout: 20000,
+        timeout: 12000,
       });
     } catch (timeoutError: any) {
       // If timeout, check if page still loaded
@@ -846,15 +919,14 @@ async function fetchHomepageWithPlaywright(url: string): Promise<string> {
       }
     }
     
-    // Wait for page to fully load
-    console.log(`[ContactDetector] Waiting for homepage to fully load...`);
-    await sleep(5000); // Wait 5 seconds for initial content
+    // Give JS-rendered menus a short moment to appear
+    await sleep(1200);
     
     // Scroll to trigger lazy loading
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await sleep(3000); // Wait after scroll
+    await sleep(800);
     
     // Get the rendered HTML
     const html = await page.content();
@@ -863,7 +935,14 @@ async function fetchHomepageWithPlaywright(url: string): Promise<string> {
     console.log(`[ContactDetector] Playwright fetch failed: ${error.message}`);
     throw error;
   } finally {
-    if (browser) {
+    if (page) {
+      try {
+        await page.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
+    if (browser && !existingBrowser) {
       try {
         await browser.close();
       } catch {
@@ -877,13 +956,13 @@ async function fetchHomepageWithPlaywright(url: string): Promise<string> {
  * Verify contact page link is accessible using Playwright
  * This helps with JavaScript-rendered sites where links might be dynamically loaded
  */
-async function verifyContactPageWithPlaywright(contactUrl: string): Promise<boolean> {
+async function verifyContactPageWithPlaywright(contactUrl: string, existingBrowser?: Browser): Promise<boolean> {
   let browser: Browser | null = null;
+  let page: Page | null = null;
   try {
-    browser = await chromium.launch(getChromiumLaunchOptions());
-    
-    const page = await browser.newPage();
-    page.setDefaultTimeout(20000); // 20 second timeout
+    const created = await createDetectorPage(existingBrowser);
+    browser = created.browser;
+    page = created.page;
     
     // Navigate to the contact page
     // Use 'domcontentloaded' which is faster and more reliable than 'load' or 'networkidle'
@@ -891,7 +970,7 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
     try {
       response = await page.goto(contactUrl, {
         waitUntil: 'domcontentloaded', // Faster and more reliable
-        timeout: 20000,
+        timeout: 12000,
       });
     } catch (timeoutError: any) {
       // If timeout, check if page still loaded (sometimes page loads but network never idles)
@@ -913,20 +992,18 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
       return false;
     }
     
-    // Wait for page to fully load - wait for additional time for dynamic content
-    console.log(`[ContactDetector] Waiting for page to fully load...`);
-    await sleep(5000); // Wait 5 seconds for initial content
+    await sleep(1200);
     
     // Scroll to trigger lazy loading
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await sleep(2000); // Wait after scroll
+    await sleep(800);
     
     // Try to wait for common contact form elements to appear (optional, won't fail if not found)
     try {
       await page.waitForSelector('form, input[type="email"], textarea, [name*="contact"], [name*="email"]', {
-        timeout: 10000,
+        timeout: 2500,
       }).catch(() => {
         // Ignore if selectors not found - page might still be valid
         console.log(`[ContactDetector] Form elements not found, but continuing verification`);
@@ -935,8 +1012,7 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
       // Continue even if form elements aren't found
     }
     
-    // Additional wait for any remaining dynamic content
-    await sleep(3000); // Final wait for any remaining content
+    await sleep(500);
     
     // Get the final URL (in case of redirects)
     const finalUrl = page.url();
@@ -964,7 +1040,14 @@ async function verifyContactPageWithPlaywright(contactUrl: string): Promise<bool
     console.log(`[ContactDetector] Playwright verification failed: ${error.message}`);
     return false;
   } finally {
-    if (browser) {
+    if (page) {
+      try {
+        await page.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
+    if (browser && !existingBrowser) {
       try {
         await browser.close();
       } catch {
@@ -1122,14 +1205,20 @@ function findContactPageLink(html: string, origin: string): string | null {
   return null;
 }
 
-async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
+async function checkContactPageHasForm(contactUrl: string, existingBrowser?: Browser): Promise<boolean> {
   let browser: Browser | null = null;
+  let page: Page | null = null;
   try {
-    // Use Playwright to get fully rendered HTML (handles JavaScript-rendered forms)
-    browser = await chromium.launch(getChromiumLaunchOptions());
-    
-    const page = await browser.newPage();
-    page.setDefaultTimeout(20000); // 20 second timeout
+    // Fast path: if static HTML already clearly has a contact form, skip Playwright entirely.
+    const quickHtml = await quickFetchHtml(contactUrl);
+    if (quickHtml && hasObviousContactForm(quickHtml)) {
+      console.log(`[ContactDetector] Form detected via fast HTML check for ${contactUrl}`);
+      return true;
+    }
+
+    const created = await createDetectorPage(existingBrowser);
+    browser = created.browser;
+    page = created.page;
     
     // Navigate to the contact page
     // Use 'domcontentloaded' which is faster and more reliable
@@ -1137,7 +1226,7 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
     try {
       response = await page.goto(contactUrl, {
         waitUntil: 'domcontentloaded', // Faster and more reliable
-        timeout: 20000,
+        timeout: 12000,
       });
     } catch (timeoutError: any) {
       // If timeout, check if page still loaded (sometimes page loads but network never idles)
@@ -1159,20 +1248,18 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
       return false;
     }
     
-    // Wait for page to fully load - wait for additional time for dynamic content
-    console.log(`[ContactDetector] Waiting for contact page to fully load...`);
-    await sleep(5000); // Wait 5 seconds for initial content
+    await sleep(1200);
     
     // Scroll to trigger lazy loading
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await sleep(2000); // Wait after scroll
+    await sleep(800);
     
     // Try to wait for form elements to appear (optional, won't fail if not found)
     try {
       await page.waitForSelector('form, input[type="email"], textarea, [name*="contact"], [name*="email"]', {
-        timeout: 10000,
+        timeout: 2500,
       }).catch(() => {
         // Ignore if selectors not found - page might still be valid
         console.log(`[ContactDetector] Form elements not found immediately, but continuing check`);
@@ -1181,8 +1268,7 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
       // Continue even if form elements aren't found immediately
     }
     
-    // Additional wait for any remaining dynamic content
-    await sleep(3000); // Final wait for any remaining content
+    await sleep(500);
     
     // Use Playwright to evaluate form fields directly (more reliable than regex)
     const formInfo = await page.evaluate(() => {
@@ -1382,7 +1468,14 @@ async function checkContactPageHasForm(contactUrl: string): Promise<boolean> {
     console.log(`[ContactDetector] Playwright form check failed: ${error.message}`);
     return false;
   } finally {
-    if (browser) {
+    if (page) {
+      try {
+        await page.close();
+      } catch {
+        // Ignore close errors
+      }
+    }
+    if (browser && !existingBrowser) {
       try {
         await browser.close();
       } catch {
