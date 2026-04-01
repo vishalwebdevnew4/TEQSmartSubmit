@@ -19,6 +19,45 @@ interface Domain {
   }>;
 }
 
+interface DuplicateGroup {
+  key: string;
+  canonical: Domain;
+  duplicates: Domain[];
+}
+
+const normalizeDomainUrl = (value: string) => {
+  const raw = value.trim();
+  if (!raw) return "";
+
+  try {
+    const parsed = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return `${host}${pathname === "/" ? "" : pathname.toLowerCase()}`;
+  } catch {
+    return raw
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .replace(/[?#].*$/, "")
+      .replace(/\/+$/, "");
+  }
+};
+
+const getDomainSortValue = (domain: Domain) => {
+  const timestamp = new Date(domain.createdAt).getTime();
+  return Number.isNaN(timestamp) ? Number.MAX_SAFE_INTEGER : timestamp;
+};
+
+const escapeCsvValue = (value: string | number | boolean | null | undefined) => {
+  if (value === null || value === undefined) return "";
+  const stringValue = String(value);
+  if (/[",\n]/.test(stringValue)) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+  return stringValue;
+};
+
 export default function DomainsPage() {
   const [allDomains, setAllDomains] = useState<Domain[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -142,6 +181,38 @@ export default function DomainsPage() {
     new Set(allDomains.map((d) => d.category).filter((c) => c !== null))
   ).sort() as string[];
 
+  const duplicateGroups: DuplicateGroup[] = (() => {
+    const grouped = new Map<string, Domain[]>();
+
+    for (const domain of filteredDomains) {
+      const normalizedUrl = normalizeDomainUrl(domain.url);
+      if (!normalizedUrl) continue;
+
+      const existing = grouped.get(normalizedUrl) ?? [];
+      existing.push(domain);
+      grouped.set(normalizedUrl, existing);
+    }
+
+    return Array.from(grouped.entries())
+      .filter(([, group]) => group.length > 1)
+      .map(([key, group]) => {
+        const sorted = [...group].sort((a, b) => {
+          const createdDelta = getDomainSortValue(a) - getDomainSortValue(b);
+          return createdDelta !== 0 ? createdDelta : a.id - b.id;
+        });
+
+        return {
+          key,
+          canonical: sorted[0],
+          duplicates: sorted.slice(1),
+        };
+      })
+      .sort((a, b) => a.key.localeCompare(b.key));
+  })();
+
+  const duplicateGroupCount = duplicateGroups.length;
+  const duplicateDomainCount = duplicateGroups.reduce((total, group) => total + group.duplicates.length, 0);
+
   const handleAdd = () => {
     setFormData({ url: "", category: "", customMessage: "", isActive: true });
     setShowAddModal(true);
@@ -167,6 +238,52 @@ export default function DomainsPage() {
       console.error("Failed to download sample CSV:", error);
       alert("❌ Failed to download sample CSV");
     }
+  };
+
+  const handleDownloadAllDomains = () => {
+    if (allDomains.length === 0) {
+      alert("No domains available to export.");
+      return;
+    }
+
+    const headers = [
+      "url",
+      "category",
+      "customMessage",
+      "isActive",
+      "contactPageUrl",
+      "contactCheckStatus",
+      "contactCheckMessage",
+      "templates",
+      "createdAt",
+    ];
+
+    const rows = allDomains.map((domain) =>
+      [
+        domain.url,
+        domain.category,
+        domain.customMessage,
+        domain.isActive,
+        domain.contactPageUrl,
+        domain.contactCheckStatus,
+        domain.contactCheckMessage,
+        domain.templates.map((template) => template.name).join("; "),
+        domain.createdAt ? new Date(domain.createdAt).toISOString() : "",
+      ]
+        .map((value) => escapeCsvValue(value))
+        .join(",")
+    );
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `domains-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
   };
 
   const handleEdit = (domain: Domain) => {
@@ -895,6 +1012,52 @@ https://example3.com,marketing,Looking for marketing support`;
     }
   };
 
+  const handleRemoveDuplicates = async () => {
+    if (duplicateDomainCount === 0) {
+      alert("No duplicate domains found in the current list.");
+      return;
+    }
+
+    const duplicateIds = duplicateGroups.flatMap((group) => group.duplicates.map((domain) => domain.id));
+    const preview = duplicateGroups
+      .slice(0, 5)
+      .map((group) => `• Keep ${group.canonical.url} and remove ${group.duplicates.length} duplicate(s)`)
+      .join("\n");
+
+    const confirmed = confirm(
+      `Remove ${duplicateDomainCount} duplicate domain(s) across ${duplicateGroupCount} duplicate group(s)?\n\n` +
+        "The oldest domain record will be kept in each group.\n\n" +
+        preview +
+        (duplicateGroups.length > 5 ? `\n• ...and ${duplicateGroups.length - 5} more group(s)` : "")
+    );
+
+    if (!confirmed) return;
+
+    setProcessing(true);
+    try {
+      const response = await fetch("/api/domains", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: duplicateIds }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setSelectedIds((prev) => prev.filter((id) => !duplicateIds.includes(id)));
+        alert(`Successfully removed ${result.count} duplicate domain(s).`);
+        await fetchDomains();
+      } else {
+        const error = await response.json();
+        alert(error.detail || "Failed to remove duplicate domains");
+      }
+    } catch (error) {
+      console.error("Failed to remove duplicate domains:", error);
+      alert("Failed to remove duplicate domains");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -1035,7 +1198,7 @@ https://example3.com,marketing,Looking for marketing support`;
       </div>
 
       {/* Organized Button Groups */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {/* Add/Import Section */}
         <div className="rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-sm p-4 shadow-lg">
           <div className="flex items-center gap-2 mb-3">
@@ -1064,6 +1227,15 @@ https://example3.com,marketing,Looking for marketing support`;
             >
               <span>📥</span>
               Sample CSV
+            </button>
+            <button
+              onClick={handleDownloadAllDomains}
+              disabled={allDomains.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-800/50 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700/50 hover:border-slate-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Download all domains and their saved data as CSV"
+            >
+              <span>📦</span>
+              Download All
             </button>
           </div>
         </div>
@@ -1164,6 +1336,42 @@ https://example3.com,marketing,Looking for marketing support`;
                   Recheck Failed ({filteredDomains.filter(d => d.contactCheckStatus === "error" || d.contactCheckStatus === "not_found").length})
                 </>
               )}
+            </button>
+          </div>
+        </div>
+
+        {/* Duplicate Check Section */}
+        <div className="rounded-xl border border-amber-800/40 bg-gradient-to-br from-amber-900/15 to-slate-900/40 backdrop-blur-sm p-4 shadow-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">🧹</span>
+            <h3 className="text-sm font-semibold text-amber-200 uppercase tracking-wide">Duplicate Check</h3>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-300"></span>
+              Groups: {duplicateGroupCount}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-700/60 bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>
+              Extra domains: {duplicateDomainCount}
+            </span>
+          </div>
+          <p className="mb-3 text-xs text-slate-400">
+            Checks the current filtered list and keeps the oldest record for each duplicate URL.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleRemoveDuplicates}
+              disabled={processing || duplicateDomainCount === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                duplicateDomainCount > 0
+                  ? `Remove ${duplicateDomainCount} duplicate domain(s) from the current filtered list`
+                  : "No duplicate domains found in the current filtered list"
+              }
+            >
+              <span>🗑️</span>
+              Remove Duplicates {duplicateDomainCount > 0 ? `(${duplicateDomainCount})` : ""}
             </button>
           </div>
         </div>
