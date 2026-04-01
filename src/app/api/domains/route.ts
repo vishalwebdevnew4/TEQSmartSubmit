@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+const DOMAIN_CHECK_TIMEOUT_MS = parseInt(process.env.CONTACT_CHECK_TIMEOUT_MS || "45000");
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -131,7 +133,12 @@ export async function POST(req: NextRequest) {
     (async () => {
       try {
         const { detectContactPage } = await import("@/lib/contact-page-detector");
-        const checkResult = await detectContactPage(domain.url);
+        const checkResult = await Promise.race([
+          detectContactPage(domain.url),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Contact check timed out after ${DOMAIN_CHECK_TIMEOUT_MS}ms`)), DOMAIN_CHECK_TIMEOUT_MS)
+          ),
+        ]);
         
         await prisma.domain.update({
           where: { id: domain.id },
@@ -255,4 +262,3 @@ export async function DELETE(req: NextRequest) {
     );
   }
 }
-

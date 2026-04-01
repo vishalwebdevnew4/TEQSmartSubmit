@@ -11,6 +11,7 @@ const BATCH_SIZE = parseInt(process.env.CONTACT_CHECK_BATCH_SIZE || "16");
 const DELAY_BETWEEN_BATCHES_MS = parseInt(process.env.CONTACT_CHECK_BATCH_DELAY || "500");
 const CONCURRENT_CHECKS = parseInt(process.env.CONTACT_CHECK_CONCURRENT || "5");
 const DELAY_BETWEEN_CHECKS_MS = parseInt(process.env.CONTACT_CHECK_DELAY || "100");
+const DOMAIN_CHECK_TIMEOUT_MS = parseInt(process.env.CONTACT_CHECK_TIMEOUT_MS || "45000");
 
 // Helper function to sleep/delay
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -18,7 +19,12 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Helper function to process a single domain check
 async function processDomainCheck(domain: { id?: number; url: string }) {
   try {
-    const checkResult = await detectContactPage(domain.url);
+    const checkResult = await Promise.race([
+      detectContactPage(domain.url),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Contact check timed out after ${DOMAIN_CHECK_TIMEOUT_MS}ms`)), DOMAIN_CHECK_TIMEOUT_MS)
+      ),
+    ]);
 
     // Update domain in database if we have an ID
     if (domain.id) {

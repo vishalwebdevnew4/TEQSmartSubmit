@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { detectContactPage } from "@/lib/contact-page-detector";
 
+const DOMAIN_CHECK_TIMEOUT_MS = parseInt(process.env.CONTACT_CHECK_TIMEOUT_MS || "45000");
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -69,7 +71,12 @@ export async function POST(req: NextRequest) {
         // Add a small delay to avoid rate limiting (stagger the requests)
         const delay = i * 500; // 500ms delay between each domain check
         setTimeout(() => {
-          detectContactPage(domain.url)
+          Promise.race([
+            detectContactPage(domain.url),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Contact check timed out after ${DOMAIN_CHECK_TIMEOUT_MS}ms`)), DOMAIN_CHECK_TIMEOUT_MS)
+            ),
+          ])
           .then(async (checkResult) => {
             try {
               await prisma.domain.update({
@@ -140,4 +147,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

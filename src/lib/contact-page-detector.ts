@@ -741,24 +741,16 @@ export async function detectContactPage(domainUrl: string): Promise<ContactCheck
     if (!contactUrl) {
       console.log(`[ContactDetector] No contact link found, trying common contact page paths...`);
       const commonContactPaths = [
-        '/p/contact-us.html', // Try this first as it's a common pattern
-        '/contact-us/', // WordPress style with trailing slash
-        '/contact-us.html',
-        '/contact/', // WordPress style with trailing slash
         '/contact',
+        '/contact/',
         '/contact-us',
+        '/contact-us/',
+        '/p/contact-us.html',
         '/contact.html',
         '/contact.php',
         '/contactus',
         '/get-in-touch',
         '/reach-us',
-        '/contact-page',
-        '/contact_page',
-        '/support',
-        '/support/contact',
-        '/help',
-        '/help-center',
-        '/contact-support',
       ];
       
       // Try each common path to see if it exists and has a form
