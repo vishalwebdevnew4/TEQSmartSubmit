@@ -3,14 +3,25 @@ import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { Prisma } from "@prisma/client";
 
+import { markBatchItemRunning, refreshBatchRunCounts, syncBatchRunItemFromSubmissionLog } from "@/lib/automation-batches";
 import { prisma } from "@/lib/prisma";
+import { clearRunningSubmission, getSubmissionStopReason, registerRunningSubmission, stopRunningSubmission } from "@/lib/running-submissions";
 
 export const runtime = "nodejs";
 
+const isPrismaUnknownFieldError = (error: unknown, fieldName: string) => {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "PrismaClientValidationError" &&
+    error.message.includes(`Unknown field \`${fieldName}\``)
+  );
+};
+
 export async function POST(req: NextRequest) {
   try {
-    const { url, template, domainId, templateId, adminId, isTest } = await req.json();
+    const { url, template, domainId, templateId, adminId, isTest, batchRunId, batchRunItemId } = await req.json();
 
     const normalizeId = (value: unknown) => {
       if (typeof value === "number" && Number.isInteger(value)) return value;
@@ -24,6 +35,8 @@ export async function POST(req: NextRequest) {
     const domainIdValue = normalizeId(domainId);
     const templateIdValue = normalizeId(templateId);
     const adminIdValue = normalizeId(adminId);
+    const batchRunIdValue = normalizeId(batchRunId);
+    const batchRunItemIdValue = normalizeId(batchRunItemId);
     const sanitizeMessage = (value: unknown) => {
       if (typeof value !== "string") return "";
       return value.trim();
@@ -156,16 +169,63 @@ export async function POST(req: NextRequest) {
     console.log(`[AUTOMATION] Using script path: ${scriptPath}`);
     console.log(`[AUTOMATION] Script exists: ${fs.existsSync(scriptPath)}`);
 
-    const submission = await prisma.submissionLog.create({
-      data: {
-        url,
-        status: "running",
-        message: "Automation started",
-        domainId: domainIdValue,
-        templateId: templateIdValue,
-        adminId: adminIdValue,
-      },
-    });
+    const submissionData: Prisma.SubmissionLogUncheckedCreateInput = {
+      url,
+      status: "running",
+      message: "Automation started",
+      domainId: domainIdValue ?? undefined,
+      templateId: templateIdValue ?? undefined,
+      adminId: adminIdValue ?? undefined,
+    };
+
+    if (batchRunIdValue) {
+      submissionData.batchRunId = batchRunIdValue;
+    }
+
+    if (batchRunItemIdValue) {
+      submissionData.batchRunItemId = batchRunItemIdValue;
+    }
+
+    let submission;
+    try {
+      submission = await prisma.submissionLog.create({
+        data: submissionData,
+      });
+    } catch (error) {
+      if (
+        isPrismaUnknownFieldError(error, "batchRunId") ||
+        isPrismaUnknownFieldError(error, "batchRunItemId")
+      ) {
+        submission = await prisma.submissionLog.create({
+          data: {
+            url,
+            status: "running",
+            message: "Automation started",
+            domainId: domainIdValue,
+            templateId: templateIdValue,
+            adminId: adminIdValue,
+          },
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    if (batchRunItemIdValue) {
+      await markBatchItemRunning(batchRunItemIdValue);
+    } else if (batchRunIdValue) {
+      await prisma.automationBatchRun.update({
+        where: { id: batchRunIdValue },
+        data: {
+          status: "running",
+          startedAt: new Date(),
+          pausedAt: null,
+          cancelledAt: null,
+          currentDomainId: domainIdValue,
+          finishedAt: null,
+        },
+      }).catch(() => undefined);
+    }
 
         // Use 'python' on Windows, 'python3' on Linux/Mac
         const pythonCommand = os.platform() === "win32" ? "python" : "python3";
@@ -188,6 +248,14 @@ export async function POST(req: NextRequest) {
     // Return immediately with submission ID - let automation run in background
     // This prevents the API from timing out while automation is running
     (async () => {
+      const syncBatchState = async () => {
+        if (batchRunItemIdValue) {
+          await syncBatchRunItemFromSubmissionLog(submission.id).catch(() => undefined);
+        } else if (batchRunIdValue) {
+          await refreshBatchRunCounts(batchRunIdValue).catch(() => undefined);
+        }
+      };
+
       try {
         // Verify script exists
         const fs = require('fs');
@@ -205,6 +273,7 @@ export async function POST(req: NextRequest) {
               finishedAt: new Date(),
             },
           });
+          await syncBatchState();
           return; // Exit early
         }
 
@@ -284,6 +353,7 @@ export async function POST(req: NextRequest) {
 
         python.stdout.setEncoding("utf8");
         python.stderr.setEncoding("utf8");
+        registerRunningSubmission(submission.id, python, tempDir);
         
         // Set streams to flowing mode for immediate output
         python.stdout.resume();
@@ -347,6 +417,7 @@ export async function POST(req: NextRequest) {
               finishedAt: new Date(),
             },
           });
+          await syncBatchState();
         });
 
         // Add timeout (5 minutes for automation to complete)
@@ -399,6 +470,7 @@ export async function POST(req: NextRequest) {
                   finishedAt: new Date(),
                 },
               });
+              await syncBatchState();
             } else if (duration < 5000 && (stdout.trim().length > 0 || stderr.trim().length > 0)) {
               // Got some output but still too fast - log what we got
               const partialMsg = `⚠️  Process completed very quickly (${duration}ms) but got some output:\n\n` +
@@ -418,6 +490,24 @@ export async function POST(req: NextRequest) {
         });
 
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+
+    const stopReason = getSubmissionStopReason(submission.id);
+    if (stopReason) {
+      await prisma.submissionLog.update({
+        where: { id: submission.id },
+        data: {
+          status: stopReason === "pause" ? "paused" : "cancelled",
+          message:
+            stopReason === "pause"
+              ? "Automation run paused by user."
+              : "Automation run cancelled by user.",
+          finishedAt: new Date(),
+        },
+      }).catch(() => undefined);
+      await syncBatchState();
+      clearRunningSubmission(submission.id);
+      return;
+    }
 
     // Try to extract JSON from stdout (might be mixed with logs)
     let parsed: any = null;
@@ -508,6 +598,7 @@ export async function POST(req: NextRequest) {
           finishedAt: new Date(),
         },
       });
+      await syncBatchState();
       
       // Status already updated in database - no need to return here
     }
@@ -525,6 +616,7 @@ export async function POST(req: NextRequest) {
           finishedAt: new Date(),
         },
       });
+      await syncBatchState();
       
       // Error status already updated in database - no need to return here
     }
@@ -560,6 +652,7 @@ export async function POST(req: NextRequest) {
           finishedAt: new Date(),
         },
       });
+      await syncBatchState();
       // Status already updated in database - no need to return here
       }
     } catch (parseError) {
@@ -579,6 +672,7 @@ export async function POST(req: NextRequest) {
           finishedAt: new Date(),
         },
       });
+      await syncBatchState();
       // Status already updated in database - no need to return here
     }
       } catch (processError) {
@@ -592,7 +686,10 @@ export async function POST(req: NextRequest) {
             finishedAt: new Date(),
           },
         }).catch(() => undefined);
+        await syncBatchState();
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+      } finally {
+        clearRunningSubmission(submission.id);
       }
     })(); // End of async IIFE - runs in background
 
@@ -601,10 +698,65 @@ export async function POST(req: NextRequest) {
       { 
         status: "running", 
         message: "Automation started", 
-        submissionId: submission.id 
+        submissionId: submission.id,
+        batchRunId: batchRunIdValue,
+        batchRunItemId: batchRunItemIdValue,
       },
       { status: 202 } // 202 Accepted - request accepted but not yet completed
     );
+  } catch (error) {
+    return NextResponse.json(
+      { status: "error", message: (error as Error).message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { submissionId, action } = await req.json();
+
+    const normalizeId = (value: unknown) => {
+      if (typeof value === "number" && Number.isInteger(value)) return value;
+      if (typeof value === "string" && value.trim().length > 0) {
+        const parsed = Number(value);
+        if (!Number.isNaN(parsed) && Number.isInteger(parsed)) return parsed;
+      }
+      return null;
+    };
+
+    const submissionIdValue = normalizeId(submissionId);
+    const stopAction = action === "pause" ? "pause" : "cancel";
+
+    if (!submissionIdValue) {
+      return NextResponse.json(
+        { status: "error", message: "Field 'submissionId' is required." },
+        { status: 400 }
+      );
+    }
+
+    const stopped = stopRunningSubmission(submissionIdValue, stopAction);
+
+    if (!stopped) {
+      await prisma.submissionLog.update({
+        where: { id: submissionIdValue },
+        data: {
+          status: stopAction === "pause" ? "paused" : "cancelled",
+          message:
+            stopAction === "pause"
+              ? "Automation run paused by user."
+              : "Automation run cancelled by user.",
+          finishedAt: new Date(),
+        },
+      }).catch(() => undefined);
+    }
+
+    return NextResponse.json({
+      status: "success",
+      message: stopAction === "pause" ? "Automation paused." : "Automation cancelled.",
+      submissionId: submissionIdValue,
+      stopped,
+    });
   } catch (error) {
     return NextResponse.json(
       { status: "error", message: (error as Error).message },

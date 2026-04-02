@@ -25,6 +25,34 @@ type AutomationControlsProps = {
 
 type RunStatus = "idle" | "running" | "success" | "error";
 
+type StartRunOptions = {
+  isTest?: boolean;
+  restartMode?: boolean;
+  resumeStoredState?: boolean;
+};
+
+type PersistedAutomationState = {
+  status: "idle" | "running" | "paused" | "cancelled" | "completed" | "interrupted";
+  isTest: boolean;
+  runAllDomains: boolean;
+  batchSize: number;
+  delaySeconds: number;
+  retryLimit: number;
+  startedAt: string | null;
+  lastUpdatedAt: string;
+  totalDomains: number;
+  processedDomains: number;
+  currentBatch: number;
+  totalBatches: number;
+  currentDomainId: number | null;
+  currentDomainUrl: string | null;
+  pendingDomainIds: number[];
+  completedDomainIds: number[];
+  failedDomainIds: number[];
+  skippedDomainIds: number[];
+  message: string | null;
+};
+
 export function AutomationControls({ domain, allDomains = [] }: AutomationControlsProps) {
   const [status, setStatus] = useState<RunStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -40,13 +68,135 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
   const [elapsedTime, setElapsedTime] = useState<string>("");
   const [averageTimePerDomain, setAverageTimePerDomain] = useState(0); // in seconds (static calculation)
   const [recheckingContacts, setRecheckingContacts] = useState(false);
+  const [persistedRunState, setPersistedRunState] = useState<PersistedAutomationState | null>(null);
 
   // Refs for polling - must be at top level, not inside useEffect
   const isPageVisible = useRef(true);
   const lastActivityTime = useRef(Date.now());
+  const stopActionRef = useRef<"pause" | "cancel" | null>(null);
+  const currentSubmissionIdRef = useRef<number | null>(null);
 
   const delaySeconds = 5;
   const retryLimit = 2;
+
+  const savePersistedRunState = async (nextState: PersistedAutomationState | null) => {
+    setPersistedRunState(nextState);
+    try {
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: "automation_run_state",
+          value: nextState ? JSON.stringify(nextState) : "",
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to persist automation state:", error);
+    }
+  };
+
+  const loadPersistedRunState = async () => {
+    try {
+      const response = await fetch("/api/settings?key=automation_run_state");
+      if (!response.ok) {
+        setPersistedRunState(null);
+        return null;
+      }
+
+      const data = await response.json();
+      const rawValue = typeof data?.value === "string" ? data.value : "";
+      if (!rawValue) {
+        setPersistedRunState(null);
+        return null;
+      }
+
+      const parsed = JSON.parse(rawValue) as PersistedAutomationState;
+      setPersistedRunState(parsed);
+      return parsed;
+    } catch (error) {
+      console.error("Failed to load automation state:", error);
+      setPersistedRunState(null);
+      return null;
+    }
+  };
+
+  const waitFor = async (ms: number) => {
+    const intervalMs = 250;
+    let remaining = ms;
+
+    while (remaining > 0) {
+      if (stopActionRef.current) {
+        const stopError = new Error(
+          stopActionRef.current === "pause" ? "Automation paused." : "Automation cancelled."
+        );
+        stopError.name = stopActionRef.current === "pause" ? "PauseRequested" : "CancelRequested";
+        throw stopError;
+      }
+
+      const chunk = Math.min(intervalMs, remaining);
+      await new Promise((resolve) => setTimeout(resolve, chunk));
+      remaining -= chunk;
+    }
+  };
+
+  const matchesRelevantDomain = (log: any) => {
+    const relevantDomains = runAllDomains && allDomains.length > 0
+      ? allDomains.map((d) => d.url)
+      : (domain ? [domain.url] : []);
+
+    const logUrl = log?.domain?.url || log?.url || "";
+
+    return relevantDomains.some((domainUrl) =>
+      logUrl.includes(domainUrl) ||
+      domainUrl.includes(logUrl) ||
+      logUrl === domainUrl
+    );
+  };
+
+  const stopActiveAutomation = async (action: "pause" | "cancel") => {
+    stopActionRef.current = action;
+
+    if (abortController) {
+      abortController.abort();
+    }
+
+    const submissionIds = new Set<number>();
+
+    if (currentSubmissionIdRef.current) {
+      submissionIds.add(currentSubmissionIdRef.current);
+    }
+
+    try {
+      const response = await fetch("/api/logs?status=running&limit=100");
+      if (response.ok) {
+        const data = await response.json();
+        const relevantLogs = (data.logs || []).filter((log: any) => matchesRelevantDomain(log));
+        for (const log of relevantLogs) {
+          if (typeof log.id === "number") {
+            submissionIds.add(log.id);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load running submissions before stop:", error);
+    }
+
+    await Promise.all(
+      Array.from(submissionIds).map(async (submissionId) => {
+        try {
+          await fetch("/api/run", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ submissionId, action }),
+          });
+        } catch (error) {
+          console.error(`Failed to ${action} submission ${submissionId}:`, error);
+        }
+      })
+    );
+
+    currentSubmissionIdRef.current = null;
+  };
 
   // Simple elapsed time counter (only when running)
   useEffect(() => {
@@ -74,6 +224,7 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
   useEffect(() => {
     const checkRunningSubmissions = async () => {
       try {
+        const storedState = await loadPersistedRunState();
         // First, check if we have saved progress and running logs
         const response = await fetch("/api/logs?status=running&limit=100");
         if (response.ok) {
@@ -161,6 +312,20 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
                   }
                 }
               }
+            } else if (storedState?.status === "running") {
+              const interruptedState: PersistedAutomationState = {
+                ...storedState,
+                status: "interrupted",
+                message: storedState.message || "Run was interrupted. Resume from stored state.",
+                lastUpdatedAt: new Date().toISOString(),
+              };
+              setIsRunning(false);
+              setStatus("idle");
+              setMessage(interruptedState.message);
+              setStartTime(storedState.startedAt ? new Date(storedState.startedAt) : null);
+              setCurrentBatch(storedState.currentBatch || 0);
+              setTotalBatches(storedState.totalBatches || 0);
+              await savePersistedRunState(interruptedState);
             }
           } else if (isRunning && status === "running") {
             // No running submissions found, but we think we're running
@@ -181,6 +346,17 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
                   }
                 }
               }
+            } else if (storedState?.status === "running") {
+              const interruptedState: PersistedAutomationState = {
+                ...storedState,
+                status: "interrupted",
+                message: storedState.message || "Run was interrupted. Resume from stored state.",
+                lastUpdatedAt: new Date().toISOString(),
+              };
+              setIsRunning(false);
+              setStatus("idle");
+              setMessage(interruptedState.message);
+              await savePersistedRunState(interruptedState);
             }
           }
         }
@@ -249,7 +425,10 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
     : (domain && domain.templates.length > 0 && domain.isActive && domain.contactPageUrl && domain.contactCheckStatus === "found");
   const canRun = Boolean(domainsToRun.length > 0 && hasRunnableDomains && !isRunning);
 
-  const handleStartRun = async (isTest = false) => {
+  const handleStartRun = async (options: StartRunOptions = {}) => {
+    const { isTest = false, restartMode = false, resumeStoredState = false } = options;
+    let initialRunMessage: string | null = null;
+
     if (domainsToRun.length === 0) {
       alert("No domains available to run.");
       return;
@@ -260,17 +439,78 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
       return;
     }
 
-    setStatus("running");
-    setMessage(null);
-    setIsRunning(true);
-    setIsPaused(false);
-    
     // Filter to only domains with contact page URL, templates, and forms found
-    const domainsToProcess = domainsToRun.filter(d => 
+    let domainsToProcess = domainsToRun.filter(d => 
       d.contactPageUrl && 
       d.templates.length > 0 && 
       d.contactCheckStatus === "found"
     );
+
+    let resumedState: PersistedAutomationState | null = null;
+    if (resumeStoredState) {
+      resumedState = persistedRunState ?? await loadPersistedRunState();
+      if (!resumedState || resumedState.pendingDomainIds.length === 0) {
+        alert("No stored run state found to resume.");
+        return;
+      }
+
+      const pendingIdSet = new Set(resumedState.pendingDomainIds);
+      domainsToProcess = domainsToProcess.filter((domainItem) => pendingIdSet.has(domainItem.id));
+
+      if (domainsToProcess.length === 0) {
+        alert("Stored run exists, but no pending domains are currently available to resume.");
+        return;
+      }
+
+      initialRunMessage = `Resuming stored run with ${domainsToProcess.length} remaining domain(s).`;
+    }
+
+    if (restartMode) {
+      try {
+        const response = await fetch("/api/logs?limit=1000");
+        if (response.ok) {
+          const data = await response.json();
+          const relevantLogs = (data.logs || []).filter((log: any) => matchesRelevantDomain(log));
+          const terminalStatuses = new Set(["success", "failed", "submitted", "completed", "cancelled", "paused"]);
+          const completedByDomain = new Set<string>();
+
+          for (const log of relevantLogs) {
+            const domainUrl = log?.domain?.url || "";
+            if (!domainUrl || completedByDomain.has(domainUrl)) continue;
+            if (terminalStatuses.has(String(log.status || "").toLowerCase())) {
+              completedByDomain.add(domainUrl);
+            }
+          }
+
+          const remainingDomains = domainsToProcess.filter((domainItem) => !completedByDomain.has(domainItem.url));
+          const skippedCount = domainsToProcess.length - remainingDomains.length;
+
+          if (remainingDomains.length === 0) {
+            setStatus("success");
+            setMessage(
+              skippedCount > 0
+                ? `Restart skipped all ${skippedCount} domain(s) because they already have completed logs.`
+                : "No remaining domains found to restart."
+            );
+            setIsRunning(false);
+            setIsPaused(false);
+            return;
+          }
+
+          domainsToProcess = remainingDomains;
+          initialRunMessage = `Restarting ${remainingDomains.length} remaining domain(s). Skipping ${skippedCount} already completed domain(s).`;
+        }
+      } catch (error) {
+        console.error("Failed to load logs for restart mode:", error);
+      }
+    }
+
+    setStatus("running");
+    setMessage(initialRunMessage);
+    setIsRunning(true);
+    setIsPaused(false);
+    stopActionRef.current = null;
+    currentSubmissionIdRef.current = null;
     
     // Initialize batch tracking
     const actualBatchesCount = Math.ceil(domainsToProcess.length / batchSize);
@@ -283,11 +523,31 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
     setStartTime(runStartTime);
     setElapsedTime("0s");
 
+    const persistedStateBase: PersistedAutomationState = {
+      status: "running",
+      isTest,
+      runAllDomains,
+      batchSize,
+      delaySeconds,
+      retryLimit,
+      startedAt: resumedState?.startedAt || runStartTime.toISOString(),
+      lastUpdatedAt: new Date().toISOString(),
+      totalDomains: resumedState?.totalDomains || domainsToProcess.length,
+      processedDomains: resumedState?.processedDomains || 0,
+      currentBatch: 0,
+      totalBatches: actualBatchesCount,
+      currentDomainId: null,
+      currentDomainUrl: null,
+      pendingDomainIds: domainsToProcess.map((d) => d.id),
+      completedDomainIds: resumedState?.completedDomainIds || [],
+      failedDomainIds: resumedState?.failedDomainIds || [],
+      skippedDomainIds: resumedState?.skippedDomainIds || [],
+      message: initialRunMessage,
+    };
+    await savePersistedRunState(persistedStateBase);
+
     const controller = new AbortController();
     setAbortController(controller);
-    
-    // Track if this was paused
-    let wasPaused = false;
     
     // Set timeout to 6 minutes per domain (slightly longer than API timeout of 5 minutes)
     const timeoutPerDomain = 6 * 60 * 1000;
@@ -313,6 +573,14 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
         
         setCurrentBatch(batchIndex + 1);
         setMessage(`Processing batch ${batchIndex + 1}/${actualBatchesCount} (${batchDomains.length} domains)...`);
+        await savePersistedRunState({
+          ...(persistedRunState ?? persistedStateBase),
+          status: "running",
+          currentBatch: batchIndex + 1,
+          totalBatches: actualBatchesCount,
+          lastUpdatedAt: new Date().toISOString(),
+          message: `Processing batch ${batchIndex + 1}/${actualBatchesCount} (${batchDomains.length} domains)...`,
+        });
         
         console.log(`[AutomationControls] Processing batch ${batchIndex + 1}/${actualBatchesCount}: ${batchDomains.length} domains`);
         
@@ -367,6 +635,17 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
           const batchProgress = `Batch ${batchIndex + 1}/${actualBatchesCount}`;
           const overallProgress = `(${totalProcessed}/${domainsToProcess.length})`;
           setMessage(`${batchProgress} - Running automation for ${currentDomain.contactPageUrl} ${overallProgress}...`);
+          const latestBeforeRun = await loadPersistedRunState();
+          await savePersistedRunState({
+            ...(latestBeforeRun ?? persistedStateBase),
+            status: "running",
+            currentBatch: batchIndex + 1,
+            totalBatches: actualBatchesCount,
+            currentDomainId: currentDomain.id,
+            currentDomainUrl: currentDomain.contactPageUrl || currentDomain.url,
+            lastUpdatedAt: new Date().toISOString(),
+            message: `${batchProgress} - Running automation for ${currentDomain.contactPageUrl} ${overallProgress}...`,
+          });
 
         try {
           // Enhance template for test mode
@@ -410,6 +689,7 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
             // Wait for this automation to complete before starting the next one
             const submissionId = payload.submissionId;
             if (submissionId) {
+              currentSubmissionIdRef.current = submissionId;
               const batchProgress = `Batch ${batchIndex + 1}/${actualBatchesCount}`;
               const overallProgress = `(${totalProcessed}/${domainsToProcess.length})`;
               setMessage(`${batchProgress} - Waiting for ${currentDomain.contactPageUrl} to complete ${overallProgress}...`);
@@ -428,6 +708,14 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
               const pollInterval = 2000; // 2 seconds
               
               while (!completed && (Date.now() - startTime) < maxWaitTime) {
+                if (stopActionRef.current) {
+                  const stopError = new Error(
+                    stopActionRef.current === "pause" ? "Automation paused." : "Automation cancelled."
+                  );
+                  stopError.name = stopActionRef.current === "pause" ? "PauseRequested" : "CancelRequested";
+                  throw stopError;
+                }
+
                 try {
                   const logResponse = await fetch(`/api/logs?limit=100`);
                   if (logResponse.ok) {
@@ -442,6 +730,27 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
                           success: submission.status === "success",
                           message: submission.message || `Run ${submission.status}`
                         });
+                        const latestState = await loadPersistedRunState();
+                        if (latestState) {
+                          const successful = submission.status === "success" || submission.status === "submitted" || submission.status === "completed";
+                          await savePersistedRunState({
+                            ...latestState,
+                            status: "running",
+                            processedDomains: latestState.processedDomains + 1,
+                            currentDomainId: null,
+                            currentDomainUrl: null,
+                            pendingDomainIds: latestState.pendingDomainIds.filter((id) => id !== currentDomain.id),
+                            completedDomainIds: successful
+                              ? Array.from(new Set([...latestState.completedDomainIds, currentDomain.id]))
+                              : latestState.completedDomainIds,
+                            failedDomainIds: successful
+                              ? latestState.failedDomainIds
+                              : Array.from(new Set([...latestState.failedDomainIds, currentDomain.id])),
+                            lastUpdatedAt: new Date().toISOString(),
+                            message: submission.message || `Run ${submission.status}`,
+                          });
+                        }
+                        currentSubmissionIdRef.current = null;
                         break;
                       }
                       // Still running, update message
@@ -458,11 +767,17 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
                   }
                   
                   // Wait before next poll
-                  await new Promise(resolve => setTimeout(resolve, pollInterval));
+                  await waitFor(pollInterval);
                 } catch (pollError) {
+                  if (
+                    pollError instanceof Error &&
+                    (pollError.name === "PauseRequested" || pollError.name === "CancelRequested")
+                  ) {
+                    throw pollError;
+                  }
                   console.error("Error polling for completion:", pollError);
                   // Continue polling
-                  await new Promise(resolve => setTimeout(resolve, pollInterval));
+                  await waitFor(pollInterval);
                 }
               }
               
@@ -472,6 +787,20 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
                   success: false,
                   message: "Automation timed out (waited 10 minutes)"
                 });
+                const latestState = await loadPersistedRunState();
+                if (latestState) {
+                  await savePersistedRunState({
+                    ...latestState,
+                    status: "running",
+                    processedDomains: latestState.processedDomains + 1,
+                    currentDomainId: null,
+                    currentDomainUrl: null,
+                    pendingDomainIds: latestState.pendingDomainIds.filter((id) => id !== currentDomain.id),
+                    failedDomainIds: Array.from(new Set([...latestState.failedDomainIds, currentDomain.id])),
+                    lastUpdatedAt: new Date().toISOString(),
+                    message: "Automation timed out (waited 10 minutes)",
+                  });
+                }
               }
             } else {
               results.push({
@@ -485,24 +814,41 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
           // Add delay between domains to avoid rate limiting (only if not the last domain in batch)
           if (i < batchDomains.length - 1) {
             setMessage(`Batch ${batchIndex + 1}/${actualBatchesCount} - Waiting ${delaySeconds} seconds before next domain...`);
-            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+            await waitFor(delaySeconds * 1000);
           }
         } catch (error) {
           if (error instanceof Error && error.name === "AbortError") {
             throw error; // Re-throw abort to break the loop
+          }
+          if (error instanceof Error && (error.name === "PauseRequested" || error.name === "CancelRequested")) {
+            throw error;
           }
           results.push({
             domain: currentDomain.url,
             success: false,
             message: error instanceof Error ? error.message : "Unknown error"
           });
+          const latestState = await loadPersistedRunState();
+          if (latestState) {
+            await savePersistedRunState({
+              ...latestState,
+              status: "running",
+              processedDomains: latestState.processedDomains + 1,
+              currentDomainId: null,
+              currentDomainUrl: null,
+              pendingDomainIds: latestState.pendingDomainIds.filter((id) => id !== currentDomain.id),
+              failedDomainIds: Array.from(new Set([...latestState.failedDomainIds, currentDomain.id])),
+              lastUpdatedAt: new Date().toISOString(),
+              message: error instanceof Error ? error.message : "Unknown error",
+            });
+          }
         }
         }
         
         // Add delay between batches (except for the last batch)
         if (batchIndex < actualBatchesCount - 1) {
           setMessage(`Batch ${batchIndex + 1}/${actualBatchesCount} completed. Waiting ${delaySeconds * 2} seconds before next batch...`);
-          await new Promise(resolve => setTimeout(resolve, delaySeconds * 2 * 1000));
+          await waitFor(delaySeconds * 2 * 1000);
         }
       }
 
@@ -552,6 +898,19 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
       setTotalBatches(0);
       setStartTime(null);
       setAverageTimePerDomain(0);
+      const latestState = await loadPersistedRunState();
+      await savePersistedRunState({
+        ...(latestState ?? persistedStateBase),
+        status: "completed",
+        currentDomainId: null,
+        currentDomainUrl: null,
+        pendingDomainIds: [],
+        lastUpdatedAt: new Date().toISOString(),
+        message:
+          failureCount === 0
+            ? `Run completed successfully.`
+            : `${successCount} succeeded and ${failureCount} failed.`,
+      });
     } catch (error) {
       clearTimeout(timeoutId);
       
@@ -574,15 +933,44 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
         setElapsedTime(timeTaken);
       }
       
-      // Check if paused by checking isPaused state
-      setIsPaused((prev) => {
-        wasPaused = prev;
-        return prev;
-      });
-      
-      if (error instanceof Error && error.name === "AbortError" && wasPaused) {
+      const requestedStop = stopActionRef.current;
+
+      if (
+        (error instanceof Error && error.name === "PauseRequested") ||
+        (error instanceof Error && error.name === "AbortError" && requestedStop === "pause")
+      ) {
         setStatus("idle");
         setMessage(`Automation run paused. Elapsed time: ${elapsedTime || "0s"}.`);
+        setIsPaused(true);
+        const latestState = await loadPersistedRunState();
+        if (latestState) {
+          await savePersistedRunState({
+            ...latestState,
+            status: "paused",
+            currentDomainId: null,
+            currentDomainUrl: null,
+            lastUpdatedAt: new Date().toISOString(),
+            message: `Automation run paused. Elapsed time: ${elapsedTime || "0s"}.`,
+          });
+        }
+      } else if (
+        (error instanceof Error && error.name === "CancelRequested") ||
+        (error instanceof Error && error.name === "AbortError" && requestedStop === "cancel")
+      ) {
+        setStatus("idle");
+        setMessage(`Automation run cancelled. Elapsed time: ${elapsedTime || "0s"}.`);
+        setIsPaused(false);
+        const latestState = await loadPersistedRunState();
+        if (latestState) {
+          await savePersistedRunState({
+            ...latestState,
+            status: "cancelled",
+            currentDomainId: null,
+            currentDomainUrl: null,
+            lastUpdatedAt: new Date().toISOString(),
+            message: `Automation run cancelled. Elapsed time: ${elapsedTime || "0s"}.`,
+          });
+        }
       } else {
         setStatus("error");
         if (error instanceof Error) {
@@ -594,18 +982,33 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
         } else {
           setMessage(`Unable to start automation run. Elapsed time: ${elapsedTime || "0s"}.`);
         }
+        const latestState = await loadPersistedRunState();
+        if (latestState) {
+          await savePersistedRunState({
+            ...latestState,
+            status: "interrupted",
+            currentDomainId: null,
+            currentDomainUrl: null,
+            lastUpdatedAt: new Date().toISOString(),
+            message:
+              error instanceof Error
+                ? `${error.message}. Elapsed time: ${elapsedTime || "0s"}.`
+                : `Unable to start automation run. Elapsed time: ${elapsedTime || "0s"}.`,
+          });
+        }
       }
       setIsRunning(false);
-      setIsPaused(false);
+      currentSubmissionIdRef.current = null;
       setAbortController(null);
       setCurrentBatch(0);
       setTotalBatches(0);
       setStartTime(null);
       setAverageTimePerDomain(0);
+      stopActionRef.current = null;
     }
   };
 
-  const handlePause = () => {
+  const handlePause = async () => {
     if (isPaused) {
       // Resume - this would require restarting the process, which is complex
       // For now, just show a message that resuming requires restarting
@@ -613,13 +1016,8 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
       return;
     }
     
-    if (abortController && isRunning) {
-      abortController.abort();
-      setIsPaused(true);
-      setStatus("idle");
-      setMessage(`Automation run paused. Elapsed: ${elapsedTime}.`);
-      setIsRunning(false);
-      setAbortController(null);
+    if (isRunning) {
+      await stopActiveAutomation("pause");
     }
   };
 
@@ -628,23 +1026,21 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
       return;
     }
 
-    if (abortController && isRunning) {
-      abortController.abort();
-      setIsPaused(false);
-      setStatus("idle");
-      setMessage("Automation run cancelled.");
-      setIsRunning(false);
-      setIsPaused(false);
-      setAbortController(null);
-      setCurrentBatch(0);
-      setTotalBatches(0);
-      setStartTime(null);
-      setAverageTimePerDomain(0);
+    if (isRunning) {
+      await stopActiveAutomation("cancel");
     }
   };
 
   const handleTestDomain = () => {
-    handleStartRun(true); // Pass true to indicate test mode
+    handleStartRun({ isTest: true });
+  };
+
+  const handleRestartRun = () => {
+    handleStartRun({ restartMode: true });
+  };
+
+  const handleResumeStoredRun = () => {
+    handleStartRun({ resumeStoredState: true, isTest: persistedRunState?.isTest ?? false });
   };
 
   const handleRecheckAllContacts = async () => {
@@ -747,7 +1143,7 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => handleStartRun(false)}
+            onClick={() => handleStartRun()}
             disabled={!canRun || isRunning || recheckingContacts}
             className="rounded-lg bg-indigo-500 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
           >
@@ -783,6 +1179,24 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
                 className="rounded-lg border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
               >
                 Test Domain
+              </button>
+              <button
+                type="button"
+                disabled={!canRun}
+                onClick={handleRestartRun}
+                className="rounded-lg border border-emerald-600 px-4 py-2 text-xs font-medium text-emerald-300 hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+                title="Start a new run and skip domains that already have completed logs"
+              >
+                Restart Run
+              </button>
+              <button
+                type="button"
+                disabled={!persistedRunState || !["paused", "interrupted", "cancelled", "running"].includes(persistedRunState.status) || persistedRunState.pendingDomainIds.length === 0}
+                onClick={handleResumeStoredRun}
+                className="rounded-lg border border-cyan-600 px-4 py-2 text-xs font-medium text-cyan-300 hover:bg-cyan-600/20 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+                title="Resume remaining domains from the last stored run state in the database"
+              >
+                Resume Stored Run
               </button>
               <button
                 type="button"
@@ -838,6 +1252,18 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
           <span>Last run</span>
           <span>{lastRun ? lastRun.toLocaleString() : "Not yet run"}</span>
         </div>
+        {persistedRunState && (
+          <>
+            <div className="flex justify-between">
+              <span>Stored run state</span>
+              <span className="text-cyan-300">{persistedRunState.status}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Stored remaining</span>
+              <span>{persistedRunState.pendingDomainIds.length} domains</span>
+            </div>
+          </>
+        )}
         {message && (
           <div
             className={`rounded-lg border px-3 py-2 text-xs ${
@@ -858,5 +1284,3 @@ export function AutomationControls({ domain, allDomains = [] }: AutomationContro
     </div>
   );
 }
-
-

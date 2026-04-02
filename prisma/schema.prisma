@@ -14,6 +14,7 @@ model Admin {
   isActive     Boolean         @default(true)
   createdAt    DateTime        @default(now())
   submissions  SubmissionLog[]
+  batchRuns    AutomationBatchRun[]
 }
 
 model Domain {
@@ -29,6 +30,8 @@ model Domain {
   templates          Template[]
   submissions        SubmissionLog[]
   contactChecks      ContactCheck[]
+  batchItems         AutomationBatchItem[]
+  currentBatchRuns   AutomationBatchRun[] @relation("CurrentBatchDomain")
 }
 
 model Template {
@@ -41,6 +44,7 @@ model Template {
   domainId      Int?
   domain        Domain?         @relation(fields: [domainId], references: [id], onDelete: SetNull)
   submissions   SubmissionLog[]
+  batchItems    AutomationBatchItem[]
 }
 
 model SubmissionLog {
@@ -56,6 +60,69 @@ model SubmissionLog {
   template   Template? @relation(fields: [templateId], references: [id], onDelete: SetNull)
   adminId    Int?
   admin      Admin?    @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  batchRunId Int?
+  batchRun   AutomationBatchRun?  @relation(fields: [batchRunId], references: [id], onDelete: SetNull)
+  batchRunItemId Int?
+  batchRunItem   AutomationBatchItem? @relation(fields: [batchRunItemId], references: [id], onDelete: SetNull)
+}
+
+model AutomationBatchRun {
+  id               Int                  @id @default(autoincrement())
+  status           String               @default("pending")
+  mode             String               @default("bulk")
+  source           String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  startedAt        DateTime?
+  pausedAt         DateTime?
+  finishedAt       DateTime?
+  cancelledAt      DateTime?
+  batchSize        Int                  @default(10)
+  delaySeconds     Int                  @default(5)
+  retryLimit       Int                  @default(2)
+  totalDomains     Int                  @default(0)
+  processedDomains Int                  @default(0)
+  successCount     Int                  @default(0)
+  failureCount     Int                  @default(0)
+  skippedCount     Int                  @default(0)
+  pendingCount     Int                  @default(0)
+  currentDomainId  Int?
+  lastError        String?
+  notes            String?
+  startedByAdminId Int?
+  startedByAdmin   Admin?               @relation(fields: [startedByAdminId], references: [id], onDelete: SetNull)
+  currentDomain    Domain?              @relation("CurrentBatchDomain", fields: [currentDomainId], references: [id], onDelete: SetNull)
+  items            AutomationBatchItem[]
+  submissions      SubmissionLog[]
+
+  @@index([status, createdAt])
+  @@index([startedByAdminId])
+  @@index([currentDomainId])
+}
+
+model AutomationBatchItem {
+  id                  Int                 @id @default(autoincrement())
+  batchRunId          Int
+  domainId            Int
+  templateId          Int?
+  sequence            Int
+  status              String              @default("pending")
+  attemptCount        Int                 @default(0)
+  startedAt           DateTime?
+  finishedAt          DateTime?
+  skipReason          String?
+  lastError           String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  batchRun            AutomationBatchRun  @relation(fields: [batchRunId], references: [id], onDelete: Cascade)
+  domain              Domain              @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  template            Template?           @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  submissions         SubmissionLog[]
+
+  @@unique([batchRunId, domainId])
+  @@index([batchRunId, sequence])
+  @@index([status, updatedAt])
+  @@index([domainId])
 }
 
 model Setting {

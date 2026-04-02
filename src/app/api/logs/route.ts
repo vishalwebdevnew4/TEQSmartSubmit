@@ -3,6 +3,14 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
+const isPrismaUnknownFieldError = (error: unknown, fieldName: string) => {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "PrismaClientValidationError" &&
+    error.message.includes(`Unknown field \`${fieldName}\``)
+  );
+};
+
 export async function DELETE(req: NextRequest) {
   try {
     // Test database connection first
@@ -47,6 +55,8 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get("status");
     const domainId = searchParams.get("domainId");
     const templateId = searchParams.get("templateId");
+    const batchRunId = searchParams.get("batchRunId");
+    const batchRunItemId = searchParams.get("batchRunItemId");
     const limit = searchParams.get("limit");
     const offset = searchParams.get("offset");
 
@@ -54,6 +64,8 @@ export async function GET(req: NextRequest) {
     if (status) where.status = status;
     if (domainId) where.domainId = parseInt(domainId);
     if (templateId) where.templateId = parseInt(templateId);
+    if (batchRunId) where.batchRunId = parseInt(batchRunId);
+    if (batchRunItemId) where.batchRunItemId = parseInt(batchRunItemId);
 
     const take = limit ? parseInt(limit) : 50;
     const skip = offset ? parseInt(offset) : 0;
@@ -72,29 +84,76 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const baseQuery = {
+      where,
+      orderBy: {
+        createdAt: "desc" as const,
+      },
+      take,
+      skip,
+    };
+
     const [logs, total] = await Promise.all([
-      prisma.submissionLog.findMany({
-        where,
-        include: {
-          domain: {
-            select: {
-              id: true,
-              url: true,
+      (async () => {
+        try {
+          return await prisma.submissionLog.findMany({
+            ...baseQuery,
+            include: {
+              domain: {
+                select: {
+                  id: true,
+                  url: true,
+                },
+              },
+              template: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+              batchRun: {
+                select: {
+                  id: true,
+                  status: true,
+                  mode: true,
+                },
+              },
+              batchRunItem: {
+                select: {
+                  id: true,
+                  sequence: true,
+                  status: true,
+                },
+              },
             },
-          },
-          template: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take,
-        skip,
-      }),
+          });
+        } catch (error) {
+          if (
+            isPrismaUnknownFieldError(error, "batchRun") ||
+            isPrismaUnknownFieldError(error, "batchRunItem")
+          ) {
+            return prisma.submissionLog.findMany({
+              ...baseQuery,
+              include: {
+                domain: {
+                  select: {
+                    id: true,
+                    url: true,
+                  },
+                },
+                template: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            });
+          }
+
+          throw error;
+        }
+      })(),
       prisma.submissionLog.count({ where }),
     ]);
 
@@ -124,4 +183,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-

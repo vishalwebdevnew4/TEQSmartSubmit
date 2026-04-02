@@ -757,7 +757,17 @@ https://example3.com,marketing,Looking for marketing support`;
         return;
       }
 
-      const domains: Array<{ url: string; category: string | null; message: string | null }> = [];
+      const domains: Array<{
+        url: string;
+        category: string | null;
+        message: string | null;
+        isActive: boolean;
+        contactPageUrl: string | null;
+        contactCheckStatus: string | null;
+        contactCheckMessage: string | null;
+        createdAt: string | null;
+        templateNames: string[];
+      }> = [];
       const delimiter = lines[0].includes("\t") ? "\t" : ",";
       const headerValues = parseDelimitedLine(lines[0], delimiter).map((value) => value.toLowerCase());
       const hasHeaders = headerValues.some((value) =>
@@ -778,16 +788,49 @@ https://example3.com,marketing,Looking for marketing support`;
         const messageIndex = hasHeaders
           ? (headerIndex.get("message") ?? headerIndex.get("custommessage") ?? 2)
           : 2;
+        const isActiveIndex = hasHeaders ? headerIndex.get("isactive") : undefined;
+        const contactPageUrlIndex = hasHeaders ? headerIndex.get("contactpageurl") : undefined;
+        const contactCheckStatusIndex = hasHeaders ? headerIndex.get("contactcheckstatus") : undefined;
+        const contactCheckMessageIndex = hasHeaders ? headerIndex.get("contactcheckmessage") : undefined;
+        const templatesIndex = hasHeaders ? headerIndex.get("templates") : undefined;
+        const createdAtIndex = hasHeaders ? headerIndex.get("createdat") : undefined;
         
         if (parts[urlIndex]) {
           const url = parts[urlIndex];
           const category = parts[categoryIndex] || null;
           const message = parts[messageIndex] || null;
+          const isActiveRaw = isActiveIndex !== undefined ? parts[isActiveIndex] : "";
+          const normalizedIsActive = isActiveRaw.trim().toLowerCase();
+          const isActive =
+            normalizedIsActive === ""
+              ? true
+              : !["false", "0", "no", "disabled"].includes(normalizedIsActive);
+          const contactPageUrl = contactPageUrlIndex !== undefined ? (parts[contactPageUrlIndex] || null) : null;
+          const contactCheckStatus = contactCheckStatusIndex !== undefined ? (parts[contactCheckStatusIndex] || null) : null;
+          const contactCheckMessage = contactCheckMessageIndex !== undefined ? (parts[contactCheckMessageIndex] || null) : null;
+          const createdAtRaw = createdAtIndex !== undefined ? parts[createdAtIndex] : "";
+          const createdAt = createdAtRaw && !Number.isNaN(Date.parse(createdAtRaw)) ? new Date(createdAtRaw).toISOString() : null;
+          const templateNames = templatesIndex !== undefined
+            ? (parts[templatesIndex] || "")
+                .split(";")
+                .map((value) => value.trim())
+                .filter(Boolean)
+            : [];
           
           // Validate URL format
           try {
             new URL(url);
-            domains.push({ url, category, message });
+            domains.push({
+              url,
+              category,
+              message,
+              isActive,
+              contactPageUrl,
+              contactCheckStatus,
+              contactCheckMessage,
+              createdAt,
+              templateNames,
+            });
           } catch {
             // Skip invalid URLs
             console.warn(`Invalid URL skipped: ${url}`);
@@ -804,6 +847,12 @@ https://example3.com,marketing,Looking for marketing support`;
       const urls = domains.map(d => d.url);
       const categories = domains.map(d => d.category);
       const messages = domains.map(d => d.message);
+      const isActiveValues = domains.map(d => d.isActive);
+      const contactPageUrls = domains.map(d => d.contactPageUrl);
+      const contactCheckStatuses = domains.map(d => d.contactCheckStatus);
+      const contactCheckMessages = domains.map(d => d.contactCheckMessage);
+      const createdAtValues = domains.map(d => d.createdAt);
+      const templateNames = domains.map(d => d.templateNames);
 
       const response = await fetch("/api/domains/upload", {
         method: "POST",
@@ -812,7 +861,12 @@ https://example3.com,marketing,Looking for marketing support`;
           urls,
           categories,
           messages,
-          isActive: true,
+          isActiveValues,
+          contactPageUrls,
+          contactCheckStatuses,
+          contactCheckMessages,
+          createdAtValues,
+          templateNames,
         }),
       });
 

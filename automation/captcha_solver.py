@@ -205,7 +205,10 @@ class UltimateLocalCaptchaSolver:
                         token = token_in_page
                         safe_log_print("✅ Token found in page after wait!")
                     else:
-                        safe_log_print("⚠️  Token still not in page - may be invalid")
+                        if await self._is_recaptcha_visually_solved():
+                            safe_log_print("✅ reCAPTCHA checkbox is visibly solved even though token field is delayed")
+                        else:
+                            safe_log_print("⚠️  Token still not in page - may be invalid")
             
             result = {
                 "success": token is not None,
@@ -382,6 +385,17 @@ class UltimateLocalCaptchaSolver:
             challenge_iframe = None
             for check_attempt in range(5):
                 await safe_async_sleep(3)
+
+                anchor_state = await self._get_recaptcha_anchor_state()
+                if anchor_state.get("present"):
+                    safe_log_print(
+                        f"   ℹ️  Anchor state after click: {anchor_state.get('state')} ({anchor_state.get('detail', '')[:60]})"
+                    )
+                    if anchor_state.get("state") == "checked":
+                        token = await self._get_recaptcha_token()
+                        if token:
+                            safe_log_print("   ✅ Checkbox became checked and token is available")
+                            return token
                 
                 # Check if checkbox expired while waiting
                 if await self._check_checkbox_expired():
@@ -433,6 +447,17 @@ class UltimateLocalCaptchaSolver:
             # Check for challenge after iframe interaction
             safe_log_print("   2a. Checking for challenge after iframe interaction...")
             await safe_async_sleep(3)
+
+            anchor_state = await self._get_recaptcha_anchor_state()
+            if anchor_state.get("present"):
+                safe_log_print(
+                    f"   ℹ️  Anchor state after iframe interaction: {anchor_state.get('state')} ({anchor_state.get('detail', '')[:60]})"
+                )
+                if anchor_state.get("state") == "checked":
+                    token = await self._get_recaptcha_token()
+                    if token:
+                        safe_log_print("   ✅ Checkbox became checked after iframe interaction")
+                        return token
             
             # Check if checkbox expired
             if await self._check_checkbox_expired():
@@ -574,14 +599,34 @@ class UltimateLocalCaptchaSolver:
                     element = await self.page.query_selector(selector)
                     if element:
                         safe_log_print(f"✅ Found reCAPTCHA element with selector: {selector}")
-                        
-                        # Click the element (with timeout)
-                        try:
-                            await asyncio.wait_for(element.click(), timeout=10.0)
-                            safe_log_print(f"   ✅ Clicked reCAPTCHA checkbox")
-                        except asyncio.TimeoutError:
-                            safe_log_print(f"   ⚠️  Checkbox click timed out, trying JavaScript click...")
-                            await element.evaluate("(el) => el.click()")
+
+                        prefer_force_click = selector.startswith('iframe') or 'recaptcha' in selector
+                        if prefer_force_click:
+                            clicked = False
+                            if selector.startswith('iframe'):
+                                clicked = await self._click_recaptcha_anchor_in_frame(element, selector)
+                            if not clicked:
+                                clicked = await self._force_click_captcha_element(element, selector)
+                            if not clicked:
+                                continue
+                        else:
+                            # Click the element (with timeout)
+                            try:
+                                await asyncio.wait_for(element.click(), timeout=10.0)
+                                safe_log_print(f"   ✅ Clicked reCAPTCHA checkbox")
+                            except asyncio.TimeoutError:
+                                safe_log_print(f"   ⚠️  Checkbox click timed out, trying JavaScript click...")
+                                clicked = await self._force_click_captcha_element(element, selector)
+                                if not clicked:
+                                    continue
+                            except Exception as click_error:
+                                if "outside of the viewport" in str(click_error).lower():
+                                    safe_log_print("   ⚠️  Checkbox outside viewport, forcing coordinate click...")
+                                    clicked = await self._force_click_captcha_element(element, selector)
+                                    if not clicked:
+                                        continue
+                                else:
+                                    raise
                         await safe_async_sleep(3)
                         
                         # Check if we got a token (multiple checks)
@@ -614,6 +659,100 @@ class UltimateLocalCaptchaSolver:
         except Exception as e:
             safe_log_print(f"⚠️  Simple checkbox error: {str(e)[:50]}")
             return None
+
+    async def _force_click_captcha_element(self, element, selector: str) -> bool:
+        """Robustly click a CAPTCHA iframe/container when normal Playwright clicks fail."""
+        try:
+            await self.page.evaluate(
+                """(el) => {
+                    try {
+                        el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+                    } catch (e) {}
+                }""",
+                element,
+            )
+            await safe_async_sleep(0.5)
+
+            try:
+                await element.scroll_into_view_if_needed(timeout=3000)
+            except Exception:
+                pass
+
+            box = await element.bounding_box()
+            if box and box.get('width', 0) > 0 and box.get('height', 0) > 0:
+                target_x = box['x'] + (box['width'] / 2)
+                target_y = box['y'] + (box['height'] / 2)
+                try:
+                    await self.page.mouse.click(target_x, target_y)
+                    safe_log_print(f"   ✅ Clicked CAPTCHA element via coordinates: {selector}")
+                    return True
+                except Exception as e:
+                    safe_log_print(f"   ⚠️  Coordinate click failed: {str(e)[:60]}")
+
+            try:
+                clicked = await element.evaluate(
+                    """(el) => {
+                        try {
+                            const rect = el.getBoundingClientRect();
+                            const x = rect.left + rect.width / 2;
+                            const y = rect.top + rect.height / 2;
+                            const target = document.elementFromPoint(x, y) || el;
+                            target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+                            target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
+                            target.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
+                            return true;
+                        } catch (e) {
+                            try {
+                                el.click();
+                                return true;
+                            } catch (_) {
+                                return false;
+                            }
+                        }
+                    }"""
+                )
+                if clicked:
+                    safe_log_print(f"   ✅ Clicked CAPTCHA element via DOM dispatch: {selector}")
+                return bool(clicked)
+            except Exception:
+                return False
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Force click error for {selector}: {str(e)[:60]}")
+            return False
+
+    async def _click_recaptcha_anchor_in_frame(self, element, selector: str) -> bool:
+        """Use Playwright frame access to click #recaptcha-anchor inside cross-origin iframes."""
+        try:
+            frame = await element.content_frame()
+            if not frame:
+                return False
+
+            anchor = await frame.query_selector('#recaptcha-anchor')
+            if not anchor:
+                return False
+
+            try:
+                await anchor.scroll_into_view_if_needed(timeout=3000)
+            except Exception:
+                pass
+
+            try:
+                await anchor.click(timeout=5000, force=True)
+                safe_log_print(f"   ✅ Clicked reCAPTCHA anchor inside frame: {selector}")
+                return True
+            except Exception:
+                pass
+
+            box = await anchor.bounding_box()
+            if box and box.get('width', 0) > 0 and box.get('height', 0) > 0:
+                await self.page.mouse.click(box['x'] + (box['width'] / 2), box['y'] + (box['height'] / 2))
+                safe_log_print(f"   ✅ Clicked reCAPTCHA anchor via coordinates inside frame: {selector}")
+                return True
+
+            return False
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Frame anchor click error for {selector}: {str(e)[:60]}")
+            return False
     
     async def _attempt_hcaptcha_checkbox(self) -> Optional[str]:
         """Attempt to solve hCaptcha by clicking checkbox."""
@@ -687,25 +826,26 @@ class UltimateLocalCaptchaSolver:
                         except:
                             return None
                         
-                        # Try to click the iframe
+                        clicked = await self._click_recaptcha_anchor_in_frame(iframe, src[:80] or "recaptcha iframe")
+                        if not clicked:
+                            clicked = await self._force_click_captcha_element(iframe, src[:80] or "recaptcha iframe")
+                        if not clicked:
+                            safe_log_print("   ⚠️  Forced iframe click failed")
+                            continue
+                        await safe_async_sleep(3)
+                        
+                        # Validate page is still open after click
                         try:
-                            await iframe.click(timeout=5000)
-                            await safe_async_sleep(3)
-                            
-                            # Validate page is still open after click
-                            try:
-                                if self.page.is_closed():
-                                    safe_log_print("⚠️  Page closed after iframe click")
-                                    return None
-                            except:
+                            if self.page.is_closed():
+                                safe_log_print("⚠️  Page closed after iframe click")
                                 return None
-                            
-                            # Check for token
-                            token = await self._get_recaptcha_token()
-                            if token:
-                                return token
-                        except Exception as click_error:
-                            safe_log_print(f"   ⚠️  Iframe click failed: {str(click_error)[:50]}")
+                        except:
+                            return None
+                        
+                        # Check for token
+                        token = await self._get_recaptcha_token()
+                        if token:
+                            return token
                         
                         # Try to focus and press space/enter
                         try:
@@ -967,7 +1107,77 @@ class UltimateLocalCaptchaSolver:
         except Exception as e:
             safe_log_print(f"⚠️  Auto-solve wait error: {str(e)[:50]}")
             return None
-    
+
+    async def _get_recaptcha_anchor_state(self) -> Dict[str, Any]:
+        """Inspect the anchor iframe state after clicking the checkbox."""
+        try:
+            state = await self.page.evaluate("""
+                () => {
+                    try {
+                        const anchorIframe = document.querySelector(
+                            'iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[src*="google.com/recaptcha"]'
+                        );
+                        if (!anchorIframe) {
+                            return { present: false, state: 'missing', detail: 'anchor iframe not found' };
+                        }
+
+                        const result = { present: true, state: 'unknown', detail: '' };
+
+                        try {
+                            const iframeDoc = anchorIframe.contentDocument || anchorIframe.contentWindow?.document;
+                            if (iframeDoc) {
+                                const anchor = iframeDoc.querySelector('#recaptcha-anchor');
+                                const errorMsg = iframeDoc.querySelector('.rc-anchor-error-msg, .rc-anchor-aria-status');
+                                const spinner = iframeDoc.querySelector('.rc-anchor-spinner, .recaptcha-checkbox-spinner');
+
+                                if (anchor) {
+                                    const ariaChecked = anchor.getAttribute('aria-checked');
+                                    const className = anchor.className || '';
+
+                                    if (ariaChecked === 'true' || className.includes('recaptcha-checkbox-checked')) {
+                                        result.state = 'checked';
+                                        result.detail = 'anchor checkbox checked';
+                                        return result;
+                                    }
+                                    if (className.includes('recaptcha-checkbox-expired')) {
+                                        result.state = 'expired';
+                                        result.detail = 'anchor checkbox expired';
+                                        return result;
+                                    }
+                                    if (spinner || className.includes('recaptcha-checkbox-spinner')) {
+                                        result.state = 'loading';
+                                        result.detail = 'anchor spinner visible';
+                                        return result;
+                                    }
+                                    if (errorMsg && (errorMsg.textContent || '').trim()) {
+                                        result.state = 'error';
+                                        result.detail = (errorMsg.textContent || '').trim().slice(0, 120);
+                                        return result;
+                                    }
+                                    if (ariaChecked === 'false' || className.includes('recaptcha-checkbox-unchecked')) {
+                                        result.state = 'unchecked';
+                                        result.detail = 'anchor checkbox still unchecked';
+                                        return result;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            result.state = 'cross_origin';
+                            result.detail = 'anchor iframe inaccessible';
+                            return result;
+                        }
+
+                        return result;
+                    } catch (e) {
+                        return { present: false, state: 'error', detail: String(e).slice(0, 120) };
+                    }
+                }
+            """)
+            return state or {"present": False, "state": "unknown", "detail": "no state returned"}
+        except Exception as e:
+            safe_log_print(f"   ⚠️  Anchor state check error: {str(e)[:50]}")
+            return {"present": False, "state": "error", "detail": str(e)[:120]}
+
     async def _check_for_challenge_iframe(self):
         """Check for challenge iframe with multiple selectors and wait strategies."""
         try:
@@ -1353,6 +1563,34 @@ class UltimateLocalCaptchaSolver:
                         # Fake token - continue waiting
                         if check_attempt % 5 == 0:  # Log every 5 seconds
                             safe_log_print(f"   ⏳ Token received but appears fake, continuing to wait... ({check_attempt + 1}s)")
+
+                # Some sites visually solve the checkbox before the token is readable from the page.
+                if await self._is_recaptcha_visually_solved():
+                    safe_log_print(f"   ✅ reCAPTCHA checkbox is checked after audio challenge (after {check_attempt + 1} seconds)")
+                    # Give the page one short grace period to surface the token.
+                    await safe_async_sleep(2)
+                    token = await self._get_recaptcha_token()
+                    if token:
+                        is_fake = token.startswith('03AOLTBLR_') and len(token.split('_')) == 3
+                        if not is_fake:
+                            safe_log_print("   ✅ Real token became available after checkbox verification")
+                            return token
+                    safe_log_print("   ℹ️  Proceeding with visually solved reCAPTCHA even though token field is delayed")
+                    return "VISUALLY_SOLVED_RECAPTCHA"
+
+                if await self._is_recaptcha_resolved_without_token():
+                    safe_log_print(
+                        f"   ✅ Challenge iframe closed cleanly after audio answer (after {check_attempt + 1} seconds)"
+                    )
+                    await safe_async_sleep(2)
+                    token = await self._get_recaptcha_token()
+                    if token:
+                        is_fake = token.startswith('03AOLTBLR_') and len(token.split('_')) == 3
+                        if not is_fake:
+                            safe_log_print("   ✅ Real token became available after challenge closed")
+                            return token
+                    safe_log_print("   ℹ️  Proceeding with resolved reCAPTCHA even though token field is not readable")
+                    return "VISUALLY_SOLVED_RECAPTCHA"
                 
                 # Check if checkbox expired during wait (less frequently to save time)
                 if check_attempt > 0 and check_attempt % 5 == 0:  # Check every 5 seconds
@@ -2053,6 +2291,149 @@ class UltimateLocalCaptchaSolver:
         except Exception as e:
             safe_log_print(f"⚠️  Get reCAPTCHA token error: {str(e)[:50]}")
             return None
+
+    async def _is_recaptcha_resolved_without_token(self) -> bool:
+        """Detect solved reCAPTCHA states where the token is not exposed back to the page."""
+        try:
+            return await self.page.evaluate("""
+                () => {
+                    try {
+                        const challengeIframes = Array.from(
+                            document.querySelectorAll(
+                                'iframe[title*="challenge"], iframe[src*="bframe"], iframe[src*="recaptcha/api2/bframe"], iframe[src*="recaptcha/enterprise/bframe"], iframe[name*="c-"]'
+                            )
+                        );
+
+                        const visibleChallengeIframes = challengeIframes.filter((iframe) => {
+                            const style = window.getComputedStyle(iframe);
+                            const rect = iframe.getBoundingClientRect();
+                            return style.display !== 'none' &&
+                                style.visibility !== 'hidden' &&
+                                rect.width > 0 &&
+                                rect.height > 0;
+                        });
+
+                        if (visibleChallengeIframes.length > 0) {
+                            return false;
+                        }
+
+                        const pageText = Array.from(
+                            document.querySelectorAll('body, .rc-anchor-error-msg, .rc-anchor-aria-status, [class*="error"], [id*="error"]')
+                        )
+                            .map((el) => (el.textContent || '').toLowerCase())
+                            .join(' ');
+
+                        if (
+                            pageText.includes('verification challenge expired') ||
+                            pageText.includes('check the checkbox again') ||
+                            pageText.includes('incorrect') ||
+                            pageText.includes('try again') ||
+                            pageText.includes('multiple correct solutions required')
+                        ) {
+                            return false;
+                        }
+
+                        const anchorIframe = document.querySelector(
+                            'iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[src*="google.com/recaptcha"]'
+                        );
+                        if (!anchorIframe) {
+                            return false;
+                        }
+
+                        try {
+                            const iframeDoc = anchorIframe.contentDocument || anchorIframe.contentWindow?.document;
+                            if (iframeDoc) {
+                                const checkbox = iframeDoc.querySelector('#recaptcha-anchor');
+                                if (checkbox) {
+                                    const ariaChecked = checkbox.getAttribute('aria-checked');
+                                    if (ariaChecked === 'true' || checkbox.classList.contains('recaptcha-checkbox-checked')) {
+                                        return true;
+                                    }
+                                    if (
+                                        ariaChecked === 'false' &&
+                                        (checkbox.classList.contains('recaptcha-checkbox-expired') ||
+                                            checkbox.classList.contains('recaptcha-checkbox-unchecked'))
+                                    ) {
+                                        return false;
+                                    }
+                                }
+
+                                const solvedEl = iframeDoc.querySelector('.recaptcha-checkbox-checked, .rc-anchor-checkbox[aria-checked="true"]');
+                                if (solvedEl) {
+                                    return true;
+                                }
+                            }
+                        } catch (e) {
+                            // Cross-origin access can fail. Falling back to the clean challenge-close signal is still useful.
+                        }
+
+                        return true;
+                    } catch (e) {
+                        return false;
+                    }
+                }
+            """)
+        except Exception as e:
+            safe_log_print(f"⚠️  Resolved-without-token check error: {str(e)[:50]}")
+            return False
+
+    async def _is_recaptcha_visually_solved(self) -> bool:
+        """Check whether the reCAPTCHA checkbox is visibly solved even if the token field is delayed."""
+        try:
+            return await self.page.evaluate("""
+                () => {
+                    try {
+                        // Main page fallback
+                        const solvedSelectors = [
+                            '.recaptcha-checkbox-checked',
+                            '.rc-anchor-checkbox[aria-checked="true"]',
+                            '.rc-anchor[aria-checked="true"]'
+                        ];
+                        for (const selector of solvedSelectors) {
+                            const el = document.querySelector(selector);
+                            if (el) {
+                                return true;
+                            }
+                        }
+
+                        // Inspect the anchor iframe when same-origin access is possible.
+                        const anchorIframe = document.querySelector(
+                            'iframe[src*="recaptcha/api2/anchor"], iframe[src*="recaptcha/enterprise/anchor"], iframe[src*="google.com/recaptcha"]'
+                        );
+                        if (anchorIframe) {
+                            try {
+                                const iframeDoc = anchorIframe.contentDocument || anchorIframe.contentWindow?.document;
+                                if (iframeDoc) {
+                                    const checkbox = iframeDoc.querySelector('#recaptcha-anchor');
+                                    if (checkbox) {
+                                        const ariaChecked = checkbox.getAttribute('aria-checked');
+                                        if (ariaChecked === 'true') {
+                                            return true;
+                                        }
+                                        if (checkbox.classList.contains('recaptcha-checkbox-checked')) {
+                                            return true;
+                                        }
+                                    }
+
+                                    const solvedEl = iframeDoc.querySelector('.recaptcha-checkbox-checked, .rc-anchor-checkbox[aria-checked="true"]');
+                                    if (solvedEl) {
+                                        return true;
+                                    }
+                                }
+                            } catch (e) {
+                                // Cross-origin access can fail. Ignore and fall back to DOM-level signals.
+                            }
+                        }
+
+                        return false;
+                    } catch (e) {
+                        return false;
+                    }
+                }
+            """)
+        except Exception as e:
+            safe_log_print(f"⚠️  Visual reCAPTCHA solved check error: {str(e)[:50]}")
+            return False
     
     async def _get_hcaptcha_token(self) -> Optional[str]:
         """Safely get hCaptcha token from page."""

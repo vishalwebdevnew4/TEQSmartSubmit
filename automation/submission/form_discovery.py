@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 import os
 import time
+import inspect
 from pathlib import Path
 
 # Force unbuffered output
@@ -472,11 +473,13 @@ class UltimateSafetyWrapper:
         """Execute async operation with ultimate safety."""
         for attempt in range(max_retries + 1):
             try:
-                result = await operation(*args, **kwargs)
+                result = operation(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
                 return result
             except Exception as e:
                 if attempt == max_retries:
-                    ultra_safe_log_print(f"⚠️  Operation failed after {max_retries + 1} attempts: {type(e).__name__}")
+                    ultra_safe_log_print(f"⚠️  Operation failed after {max_retries + 1} attempts: {type(e).__name__}: {str(e)[:120]}")
                     return default_return
                 await asyncio.sleep(0.1 * (attempt + 1))
         return default_return
@@ -3283,6 +3286,13 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     const formId = (form.id || '').toLowerCase();
                     const formClass = (form.className || '').toLowerCase();
                     const role = form.getAttribute('role') || '';
+                    const fieldNames = Array.from(form.querySelectorAll('input, textarea, select'))
+                        .map((field) => `${field.name || ''} ${field.id || ''} ${field.placeholder || ''}`.toLowerCase())
+                        .join(' ');
+                    const emailFields = form.querySelectorAll('input[type="email"], input[name*="email"], input[id*="email"]').length;
+                    const nameFields = form.querySelectorAll('input[name*="name"], input[id*="name"], input[autocomplete="name"]').length;
+                    const messageFields = form.querySelectorAll('textarea, textarea[name*="message"], textarea[name*="comment"], textarea[id*="message"], textarea[id*="comment"]').length;
+                    const phoneFields = form.querySelectorAll('input[type="tel"], input[name*="phone"], input[id*="phone"], input[name*="mobile"], input[id*="mobile"]').length;
                     
                     // Check if it's a search form
                     const isSearch = (
@@ -3298,29 +3308,39 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                             form.querySelector('input[name="s"]')
                         ))
                     );
+
+                    const newsletterKeywords = [
+                        'newsletter', 'subscribe', 'subscription', 'mailchimp', 'substack',
+                        'sign up', 'signup', 'sign-up', 'join our mailing list', 'mailing list',
+                        'stay updated', 'latest news', 'breaking news', 'daily updates'
+                    ];
+                    const newsletterSignalText = `${formText} ${formId} ${formClass} ${action} ${fieldNames}`;
+                    const hasNewsletterKeyword = newsletterKeywords.some((keyword) => newsletterSignalText.includes(keyword));
+                    const isNewsletter = hasNewsletterKeyword && messageFields === 0 && phoneFields === 0 && emailFields >= 1 && nameFields <= 1;
                     
                     // Check if it's a contact form
                     const isContact = (
-                        formText.includes('contact') ||
-                        formId.includes('contact') ||
-                        formClass.includes('contact') ||
-                        action.includes('contact') ||
-                        form.querySelector('input[name*="email"]') ||
-                        form.querySelector('input[name*="name"]') ||
-                        form.querySelector('textarea[name*="message"]') ||
-                        form.querySelector('textarea[name*="comment"]') ||
-                        form.querySelector('input[type="email"]') ||
-                        (method === 'post' && !isSearch)
+                        !isNewsletter && (
+                            formText.includes('contact') ||
+                            formId.includes('contact') ||
+                            formClass.includes('contact') ||
+                            action.includes('contact') ||
+                            (emailFields >= 1 && (nameFields >= 1 || messageFields >= 1 || phoneFields >= 1)) ||
+                            (messageFields >= 1 && (nameFields >= 1 || emailFields >= 1)) ||
+                            (method === 'post' && !isSearch && (messageFields >= 1 || (emailFields >= 1 && nameFields >= 1)))
+                        )
                     );
                     
                     formsData.push({
                         method: method,
                         action: form.action ? new URL(form.action, window.location.href).href : window.location.href,
                         isSearch: isSearch,
+                        isNewsletter: isNewsletter,
                         isContact: isContact,
-                        hasEmail: !!form.querySelector('input[type="email"], input[name*="email"]'),
-                        hasName: !!form.querySelector('input[name*="name"]'),
-                        hasMessage: !!form.querySelector('textarea'),
+                        hasEmail: emailFields > 0,
+                        hasName: nameFields > 0,
+                        hasMessage: messageFields > 0,
+                        hasPhone: phoneFields > 0,
                         isPost: method === 'post',
                         formIndex: formsData.length
                     });
@@ -3343,7 +3363,7 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
             # First, try to find a contact form
             contact_form_index = None
             for i, form_data in enumerate(forms_data):
-                if form_data.get('isContact'):
+                if form_data.get('isContact') and not form_data.get('isNewsletter'):
                     contact_form_index = i
                     contact_form_found = True
                     ultra_safe_log_print(f"   ✅ Contact form detected (form #{i+1})")
@@ -3352,7 +3372,7 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
             # If no contact form found, look for any POST form that's not a search form
             if contact_form_index is None:
                 for i, form_data in enumerate(forms_data):
-                    if form_data.get('isPost') and not form_data.get('isSearch'):
+                    if form_data.get('isPost') and not form_data.get('isSearch') and not form_data.get('isNewsletter') and (form_data.get('hasMessage') or (form_data.get('hasEmail') and form_data.get('hasName'))):
                         contact_form_index = i
                         ultra_safe_log_print(f"   ✅ Found POST form (form #{i+1}) - likely contact form")
                         break
@@ -3360,7 +3380,7 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
             # If still no form found, look for any form with email field
             if contact_form_index is None:
                 for i, form_data in enumerate(forms_data):
-                    if form_data.get('hasEmail') and not form_data.get('isSearch'):
+                    if form_data.get('hasEmail') and not form_data.get('isSearch') and not form_data.get('isNewsletter') and (form_data.get('hasName') or form_data.get('hasMessage') or form_data.get('hasPhone')):
                         contact_form_index = i
                         ultra_safe_log_print(f"   ✅ Found form with email field (form #{i+1}) - likely contact form")
                         break
@@ -3369,6 +3389,9 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
             search_forms_count = sum(1 for f in forms_data if f.get('isSearch'))
             if search_forms_count > 0:
                 ultra_safe_log_print(f"   ⏭️  Skipping {search_forms_count} search form(s)")
+            newsletter_forms_count = sum(1 for f in forms_data if f.get('isNewsletter'))
+            if newsletter_forms_count > 0:
+                ultra_safe_log_print(f"   ⏭️  Skipping {newsletter_forms_count} newsletter/signup form(s)")
             
             if contact_form_index is not None:
                 target_form_data = forms_data[contact_form_index]
@@ -3956,6 +3979,27 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
         ultra_safe_log_print("   📡 AJAX/fetch interception enabled")
     except:
         pass
+
+    async def has_submission_activity_started():
+        """Detect whether a real submission attempt is already in flight."""
+        if post_requests or post_responses or form_submission_detected:
+            return True
+
+        try:
+            ajax_state = await page.evaluate("""
+                () => ({
+                    ajaxDetected: !!window.__formSubmissionDetected,
+                    ajaxSuccess: !!window.__formSubmissionSuccess,
+                    ajaxCount: Array.isArray(window.__ajaxSubmissions) ? window.__ajaxSubmissions.length : 0
+                })
+            """)
+            return bool(
+                ajax_state.get('ajaxDetected')
+                or ajax_state.get('ajaxSuccess')
+                or ajax_state.get('ajaxCount', 0) > 0
+            )
+        except:
+            return False
     
     # Wait a moment for tracking to be set up
     await asyncio.sleep(1)
@@ -4330,9 +4374,9 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                         () => {
                             const recaptchaResponse = document.querySelector('#g-recaptcha-response');
                             if (recaptchaResponse && recaptchaResponse.value) {
-                                const token = recaptchaResponse.value;
-                                // Check if token looks valid (not empty, has reasonable length)
-                                if (token.length > 20 && token.startsWith('03AOLTBLR_')) {
+                                const token = recaptchaResponse.value.trim();
+                                // Modern reCAPTCHA tokens vary by prefix. Accept long non-empty tokens.
+                                if (token.length >= 100 && !/\\s/.test(token)) {
                                     return { valid: true, token_length: token.length };
                                 }
                                 return { valid: false, reason: 'Token format invalid' };
@@ -4675,14 +4719,17 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                     await asyncio.sleep(2)  # Wait for submission to process
                                 except Exception as click_error:
                                     ultra_safe_log_print(f"   ⚠️  Submit button click failed: {str(click_error)[:50]}")
-                                    # Try JavaScript click as fallback
-                                    try:
-                                        await submit_button.evaluate("(btn) => btn.click()")
-                                        ultra_safe_log_print("   ✅ Submit button clicked via JavaScript")
-                                        result["submission_attempted"] = True
-                                        await asyncio.sleep(2)
-                                    except:
-                                        ultra_safe_log_print("   ⚠️  JavaScript click also failed")
+                                    if await has_submission_activity_started():
+                                        ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping fallback click")
+                                    else:
+                                        # Try JavaScript click as fallback
+                                        try:
+                                            await submit_button.evaluate("(btn) => btn.click()")
+                                            ultra_safe_log_print("   ✅ Submit button clicked via JavaScript")
+                                            result["submission_attempted"] = True
+                                            await asyncio.sleep(2)
+                                        except:
+                                            ultra_safe_log_print("   ⚠️  JavaScript click also failed")
                             else:
                                 ultra_safe_log_print("   ⚠️  Submit button not found, trying form.submit()...")
                                 # Fallback to form.submit()
@@ -4958,22 +5005,31 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                                 ultra_safe_log_print("   ✅ Button clicked successfully")
                             except Exception as e:
                                 ultra_safe_log_print(f"   ⚠️  Button click failed: {str(e)[:50]}, trying JavaScript click...")
-                                try:
-                                    # Fallback to JavaScript click
-                                    await submit_btn.evaluate("(btn) => btn.click()")
-                                    await asyncio.sleep(3)
-                                    ultra_safe_log_print("   ✅ JavaScript click executed")
-                                except:
-                                    ultra_safe_log_print("   ⚠️  JavaScript click also failed, trying form.submit()...")
-                                    # Last resort: form.submit()
-                                    await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
-                                    await asyncio.sleep(2)
+                                if await has_submission_activity_started():
+                                    ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping fallback click")
+                                else:
+                                    try:
+                                        # Fallback to JavaScript click
+                                        await submit_btn.evaluate("(btn) => btn.click()")
+                                        await asyncio.sleep(3)
+                                        ultra_safe_log_print("   ✅ JavaScript click executed")
+                                    except:
+                                        if await has_submission_activity_started():
+                                            ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping form.submit() fallback")
+                                        else:
+                                            ultra_safe_log_print("   ⚠️  JavaScript click also failed, trying form.submit()...")
+                                            # Last resort: form.submit()
+                                            await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
+                                            await asyncio.sleep(2)
                         except Exception as e:
                             ultra_safe_log_print(f"   ⚠️  form.submit() failed: {str(e)[:50]}")
                             # Try JavaScript click as fallback
                             try:
-                                await submit_btn.evaluate("(btn) => btn.click()")
-                                await asyncio.sleep(2)
+                                if await has_submission_activity_started():
+                                    ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping fallback JavaScript click")
+                                else:
+                                    await submit_btn.evaluate("(btn) => btn.click()")
+                                    await asyncio.sleep(2)
                             except:
                                 pass
                     else:
@@ -5100,14 +5156,20 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                             
                             if not form_post_detected:
                                 ultra_safe_log_print("   ⚠️  No form POST response detected, trying form.submit()...")
-                                await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
-                                await asyncio.sleep(2)
+                                if await has_submission_activity_started():
+                                    ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping form.submit() retry")
+                                else:
+                                    await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
+                                    await asyncio.sleep(2)
                         except Exception as e:
                             ultra_safe_log_print(f"   ⚠️  Error during submission: {str(e)[:50]}")
                             # Last resort: form.submit()
                             try:
-                                await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
-                                await asyncio.sleep(2)
+                                if await has_submission_activity_started():
+                                    ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping last-resort form.submit()")
+                                else:
+                                    await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
+                                    await asyncio.sleep(2)
                             except:
                                 pass
                     
@@ -5121,13 +5183,16 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
     if not submit_button_found:
         try:
             ultra_safe_log_print("   📤 Trying form.submit()...")
-            post_requests.clear()
-            post_responses.clear()
-            form_submission_detected = False
-            
-            await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
-            result["submission_attempted"] = True
-            result["method_used"] = "form_submit"
+            if await has_submission_activity_started():
+                ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping fallback form.submit()")
+            else:
+                post_requests.clear()
+                post_responses.clear()
+                form_submission_detected = False
+                
+                await page.evaluate("() => { const form = document.querySelector('form'); if (form) form.submit(); }")
+                result["submission_attempted"] = True
+                result["method_used"] = "form_submit"
         except:
             pass
     
@@ -5214,8 +5279,11 @@ async def ultra_simple_form_submit(page) -> Dict[str, Any]:
                     # After 2 seconds, if no form submission found, try form.submit() again
                     ultra_safe_log_print("   🔄 No form submission detected, trying form.submit() again...")
                     try:
-                        await page.evaluate("() => { const form = document.querySelector('form'); if (form) { form.submit(); } }")
-                        await asyncio.sleep(1)
+                        if await has_submission_activity_started():
+                            ultra_safe_log_print("   ℹ️  Submission activity already detected, skipping duplicate form.submit()")
+                        else:
+                            await page.evaluate("() => { const form = document.querySelector('form'); if (form) { form.submit(); } }")
+                            await asyncio.sleep(1)
                     except:
                         pass
             except:
@@ -5947,6 +6015,17 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                             formId.includes('search') ||
                             formClass.includes('search')
                         );
+                        const fieldNames = Array.from(form.querySelectorAll('input, textarea, select'))
+                            .map((field) => `${field.name || ''} ${field.id || ''} ${field.placeholder || ''}`.toLowerCase())
+                            .join(' ');
+                        const newsletterKeywords = [
+                            'newsletter', 'subscribe', 'subscription', 'mailchimp', 'substack',
+                            'sign up', 'signup', 'sign-up', 'join our mailing list', 'mailing list',
+                            'stay updated', 'latest news', 'breaking news', 'daily updates'
+                        ];
+                        const hasNewsletterKeyword = newsletterKeywords.some((keyword) =>
+                            `${formText} ${formId} ${formClass} ${fieldNames}`.includes(keyword)
+                        );
                         
                         // Check if it's a contact form
                         // Contact form should have: name, email, and comment/message fields
@@ -5954,17 +6033,19 @@ async def run_ultra_resilient_submission(url: str, template_path: Path) -> Dict[
                         const hasEmailField = form.querySelector('input[name="email"]');
                         const hasPhoneField = form.querySelector('input[name="phone"]');
                         const hasCommentField = form.querySelector('textarea[name="comment"]') || form.querySelector('textarea[name="message"]');
+                        const hasTextarea = !!form.querySelector('textarea');
+                        const isNewsletter = hasNewsletterKeyword && !hasTextarea && !!hasEmailField && !hasCommentField;
                         
                         // Contact form must have at least name, email, and comment
                         const isContact = (hasNameField && hasEmailField && hasCommentField) || 
-                                        method === 'post' || (
+                                        (!isNewsletter && method === 'post') || (
                             formText.includes('contact') ||
                             formId.includes('contact') ||
                             formClass.includes('contact') ||
                             (hasNameField && hasEmailField)  // At least name and email
                         );
                         
-                        if (isContact && !isSearch) {
+                        if (isContact && !isSearch && !isNewsletter) {
                             return true;
                         }
                     }
